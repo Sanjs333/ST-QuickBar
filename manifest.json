@@ -1,0 +1,12 @@
+{
+    "display_name": "快捷工具栏",
+    "loading_order": 9,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "ssssan_",
+    "version": "1.0",
+    "auto_update": true,
+    "homePage": "https://github.com/Sanjs333/ST-Quick Bar"
+}

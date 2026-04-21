@@ -4889,7 +4889,7 @@ jQuery(async () => {
         }
     `;
   document.head.appendChild(hiddenCSS);
-
+  extension_settings[extensionName] = extension_settings[extensionName] || {};
   const settingsHtml = await $.get(`${extensionFolderPath}/settings.html`);
   $("#extensions_settings2").append(settingsHtml);
 

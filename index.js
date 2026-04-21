@@ -3668,7 +3668,20 @@ function renderFloatingPanelSettings() {
                     </label>
                 </div>
                                 <div style="font-size:10px;opacity:0.5;margin-top:2px;padding-left:22px;line-height:1.5;">
-                    开启：美化CSS可控制悬浮球外观<br>关闭：插件自定义设置优先于美化CSS
+                    开启后悬浮球的边框、阴影、背景色都会隐藏，只显示图片本身
+                </div>
+                <div class="ih-switch-row" style="margin-top:6px;">
+                    <label class="ih-switch-label" style="font-size:12px;">
+                        <i class="fa-solid fa-palette" style="width:16px;text-align:center;opacity:0.6;"></i>
+                        跟随美化
+                    </label>
+                    <label class="ih-toggle">
+                        <input id="ih_fp_follow_theme" type="checkbox" ${fp.followTheme ? "checked" : ""} />
+                        <span class="ih-toggle-slider"></span>
+                    </label>
+                </div>
+                <div style="font-size:10px;opacity:0.5;margin-top:2px;padding-left:22px;line-height:1.5;">
+                    开启：美化CSS可控制悬浮球外观<br>关闭：插件自定义设置（图片等）优先于美化CSS
                 </div>
             </div>
             <div class="ih-hm-group">

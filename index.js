@@ -1,7 +1,8 @@
 import {
   chat,
-  eventSource,
   event_types,
+  eventSource,
+  Generate,
   saveSettingsDebounced,
 } from "../../../../script.js";
 import { extension_settings } from "../../../extensions.js";
@@ -1654,7 +1655,7 @@ function doOpenQRAssistant() {
 
 function doRegenerateReply() {
   if (chat.length === 0) return;
-  executeSlashCommandsWithOptions("/regenerate await=true");
+  Generate("regenerate");
 }
 
 function insertCustomSymbol(symbol) {

@@ -2253,6 +2253,7 @@ const floatingPanelController = {
 
   init() {
     this.destroy();
+    if (!getSettings().enabled) return;
     const fp = getSettings().floatingPanel;
     if (!fp || !fp.enabled) return;
     if (fp.displayMode === "ball") {
@@ -2953,7 +2954,7 @@ const floatingPanelController = {
 
   refresh() {
     const fp = getSettings().floatingPanel;
-    if (!fp || !fp.enabled) {
+    if (!fp || !fp.enabled || !getSettings().enabled) {
       this.destroy();
       return;
     }

@@ -20,15 +20,6 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-up-down-left-right",
     text: null,
   },
-  asterisk: { label: "双星号", icon: null, text: "**" },
-  quotes: { label: "双引号", icon: null, text: '""' },
-  parentheses: { label: "圆括号", icon: null, text: "()" },
-  bookQuotes1: { label: "直角引号「」", icon: null, text: "「」" },
-  bookQuotes2: { label: "直角引号『』", icon: null, text: "『』" },
-  bookQuotes3: { label: "书名号《》", icon: null, text: "《》" },
-  newline: { label: "换行", icon: "fa-solid fa-turn-down", text: null },
-  user: { label: "用户标记 {{user}}", icon: "fa-solid fa-user", text: null },
-  char: { label: "角色标记 {{char}}", icon: "fa-solid fa-robot", text: null },
   scrollToTop: {
     label: "跳转聊天顶部",
     icon: "fa-solid fa-angles-up",
@@ -79,9 +70,19 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-forward",
     text: null,
   },
+  generateSwipe: {
+    label: "生成备选回复",
+    icon: "fa-shuffle",
+    text: null,
+  },
   regenerateReply: {
     label: "重新生成",
     icon: "fa-solid fa-rotate",
+    text: null,
+  },
+  chatUndo: {
+    label: "撤回删除",
+    icon: "fa-solid fa-trash-arrow-up",
     text: null,
   },
   hideManager: {
@@ -104,6 +105,15 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-rocket",
     text: null,
   },
+  asterisk: { label: "双星号", icon: null, text: "**" },
+  quotes: { label: "双引号", icon: null, text: '""' },
+  parentheses: { label: "圆括号", icon: null, text: "()" },
+  bookQuotes1: { label: "直角引号「」", icon: null, text: "「」" },
+  bookQuotes2: { label: "直角引号『』", icon: null, text: "『』" },
+  bookQuotes3: { label: "书名号《》", icon: null, text: "《》" },
+  newline: { label: "换行", icon: "fa-solid fa-turn-down", text: null },
+  user: { label: "用户标记 {{user}}", icon: "fa-solid fa-user", text: null },
+  char: { label: "角色标记 {{char}}", icon: "fa-solid fa-robot", text: null },
 };
 
 const ALL_BUTTON_KEYS = Object.keys(BUTTON_DEFS);
@@ -148,7 +158,10 @@ const defaultSettings = {
     ballImageExpanded: "",
     ballShape: "circle",
     transparentBall: false,
+    buttonSize: 12,
     followTheme: true,
+    ballProfiles: [],
+    currentProfileIndex: -1,
     collapsed: true,
     autoHide: false,
   },
@@ -162,6 +175,8 @@ const defaultSettings = {
       k === "deleteLastSwipe" ||
       k === "continueReply" ||
       k === "regenerateReply" ||
+      k === "generateSwipe" ||
+      k === "chatUndo" ||
       k === "prevAiMsg" ||
       k === "nextAiMsg" ||
       k === "pagingMode" ||
@@ -203,6 +218,8 @@ const shortcutFunctionMap = {
   deleteLastSwipe: doDeleteLastSwipe,
   continueReply: doContinueReply,
   regenerateReply: doRegenerateReply,
+  generateSwipe: doGenerateSwipe,
+  chatUndo: () => chatUndoManager.undo(),
   hideManager: openHideManagerPanel,
   jumpToFloor: doJumpToFloor,
   findReplace: () => findReplaceController.toggle(),
@@ -224,6 +241,7 @@ function scrollChatToElement(element, behavior = "smooth", center = false) {
 const messageNavigation = {
   _currentAiIndex: -1,
   _lastNavTime: 0,
+  _pendingJump: null,
 
   _getAiMessages() {
     return $("#chat .mes[is_user='false']");
@@ -266,6 +284,21 @@ const messageNavigation = {
     if (messages.length === 0) return;
     const chatEl = document.getElementById("chat");
     if (!chatEl) return;
+    if (this._pendingJump === "bottom") {
+      this._pendingJump = null;
+      const targetIdx = messages.length > 1 ? messages.length - 2 : 0;
+      scrollChatToElement(messages[targetIdx]);
+      this._currentAiIndex = targetIdx;
+      this._lastNavTime = Date.now();
+      return;
+    }
+    if (this._pendingJump === "top") {
+      this._pendingJump = null;
+      scrollChatToElement(messages[0]);
+      this._currentAiIndex = 0;
+      this._lastNavTime = Date.now();
+      return;
+    }
     let currentIdx = this._getStartIndex();
     const chatRect = chatEl.getBoundingClientRect();
     if (currentIdx >= 0) {
@@ -287,6 +320,22 @@ const messageNavigation = {
     if (messages.length === 0) return;
     const chatEl = document.getElementById("chat");
     if (!chatEl) return;
+    if (this._pendingJump === "top") {
+      this._pendingJump = null;
+      const targetIdx = messages.length > 1 ? 1 : 0;
+      scrollChatToElement(messages[targetIdx]);
+      this._currentAiIndex = targetIdx;
+      this._lastNavTime = Date.now();
+      return;
+    }
+    if (this._pendingJump === "bottom") {
+      this._pendingJump = null;
+      const targetIdx = messages.length > 1 ? messages.length - 2 : 0;
+      scrollChatToElement(messages[targetIdx]);
+      this._currentAiIndex = targetIdx;
+      this._lastNavTime = Date.now();
+      return;
+    }
     let currentIdx = this._getStartIndex();
     const chatRect = chatEl.getBoundingClientRect();
     if (currentIdx >= 0) {
@@ -1141,6 +1190,74 @@ const historyManager = {
   },
 };
 
+const chatUndoManager = {
+  _snapshot: null,
+  _autoClearTimer: null,
+  AUTO_CLEAR_MS: 5 * 60 * 1000,
+
+  save() {
+    try {
+      this._snapshot = JSON.parse(JSON.stringify(chat));
+    } catch (e) {
+      console.warn("快捷工具栏: 保存聊天快照失败", e);
+      this._snapshot = null;
+      return;
+    }
+    clearTimeout(this._autoClearTimer);
+    const self = this;
+    this._autoClearTimer = setTimeout(function () {
+      self._snapshot = null;
+      self.updateButton();
+    }, this.AUTO_CLEAR_MS);
+    this.updateButton();
+  },
+
+  async undo() {
+    if (!this._snapshot) {
+      toastr.warning("没有可撤回的操作", "", { timeOut: 1500 });
+      return;
+    }
+    const snapshot = this._snapshot;
+    this._snapshot = null;
+    clearTimeout(this._autoClearTimer);
+    this.updateButton();
+
+    chat.length = 0;
+    snapshot.forEach(function (msg) {
+      chat.push(msg);
+    });
+
+    try {
+      await executeSlashCommandsWithOptions("/forcesave");
+      await executeSlashCommandsWithOptions("/chat-reload");
+      toastr.success("已撤回", "", { timeOut: 1500 });
+    } catch (e) {
+      console.error("快捷工具栏: 撤回失败", e);
+      toastr.error("撤回失败，请尝试手动恢复", "", { timeOut: 2500 });
+    }
+  },
+
+  clear() {
+    this._snapshot = null;
+    clearTimeout(this._autoClearTimer);
+    this.updateButton();
+  },
+
+  hasSnapshot() {
+    return this._snapshot !== null;
+  },
+
+  updateButton() {
+    const has = this.hasSnapshot();
+    const selector =
+      "#input_chat_undo_btn, " +
+      ".ih-folder-dropdown-portal [data-button-key='chatUndo'], " +
+      ".ih-floating-panel [data-button-key='chatUndo']";
+    $(selector).toggleClass("input-helper-btn-disabled", !has);
+    $(selector).toggleClass("input-helper-btn-active", has);
+  },
+};
+
 const shiftMode = {
   active: false,
   anchorPos: 0,
@@ -1391,6 +1508,8 @@ function getButtonIdFromKey(key) {
     deleteLastSwipe: "input_delete_last_swipe_btn",
     continueReply: "input_continue_reply_btn",
     regenerateReply: "input_regenerate_reply_btn",
+    generateSwipe: "input_generate_swipe_btn",
+    chatUndo: "input_chat_undo_btn",
     hideManager: "input_hide_manager_btn",
     jumpToFloor: "input_jump_to_floor_btn",
     findReplace: "input_find_replace_btn",
@@ -1515,17 +1634,26 @@ function insertCharTag() {
 function doScrollToTop() {
   const chatEl = document.getElementById("chat");
   if (chatEl) chatEl.scrollTo({ top: 0, behavior: "smooth" });
+  messageNavigation._currentAiIndex = -1;
+  messageNavigation._lastNavTime = Date.now();
+  messageNavigation._pendingJump = "top";
 }
 
 function doScrollToLastAi() {
   const messages = $("#chat .mes[is_user='false']:visible");
   if (messages.length === 0) return;
   scrollChatToElement(messages.last()[0]);
+  messageNavigation._currentAiIndex = messages.length - 1;
+  messageNavigation._lastNavTime = Date.now();
 }
 
 function doScrollToBottom() {
   const chatEl = document.getElementById("chat");
   if (chatEl) chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: "smooth" });
+  const aiMessages = $("#chat .mes[is_user='false']:visible");
+  messageNavigation._currentAiIndex = aiMessages.length;
+  messageNavigation._lastNavTime = Date.now();
+  messageNavigation._pendingJump = "bottom";
 }
 
 function doPrevAiMsg() {
@@ -1545,8 +1673,9 @@ function doDeleteLastMsg() {
     const sender = lastMsg.is_user ? "你" : lastMsg.name || "AI";
     if (!confirm(`确定要删除最后一条消息吗？\n发送者: ${sender}`)) return;
   }
+  chatUndoManager.save();
   executeSlashCommandsWithOptions("/del 1");
-  toastr.info("已删除最后一条消息", "", { timeOut: 1500 });
+  toastr.info("已删除最后一条消息（可点撤回按钮还原）", "", { timeOut: 1500 });
 }
 
 function doDeleteLastSwipe() {
@@ -1564,8 +1693,9 @@ function doDeleteLastSwipe() {
     )
       return;
   }
+  chatUndoManager.save();
   executeSlashCommandsWithOptions("/delswipe");
-  toastr.info("已删除当前备选回复", "", { timeOut: 1500 });
+  toastr.info("已删除当前备选回复（可点撤回按钮还原）", "", { timeOut: 1500 });
 }
 
 function doContinueReply() {
@@ -1656,6 +1786,18 @@ function doOpenQRAssistant() {
 function doRegenerateReply() {
   if (chat.length === 0) return;
   Generate("regenerate");
+}
+
+function doGenerateSwipe() {
+  if (chat.length === 0) return;
+  const lastMsg = chat[chat.length - 1];
+  if (lastMsg.is_user) {
+    toastr.warning("最后一条消息是用户消息，无法生成备选", "", {
+      timeOut: 1500,
+    });
+    return;
+  }
+  executeSlashCommandsWithOptions("/swipe direction=right await=true");
 }
 
 function insertCustomSymbol(symbol) {
@@ -1930,20 +2072,29 @@ function openBeautyPromptPanel() {
 
 8. **悬浮球样式约束**
    如果你要给 \`.ih-floating-ball\` 写样式：
-   - ✅ 允许：background、background-color、border、border-color、
-     box-shadow、opacity、backdrop-filter、filter、color、outline
+   - ✅ 允许：background、background-color、background-image、background-size、
+     background-position、background-repeat、border、border-color、
+     box-shadow、opacity、backdrop-filter、filter、color、outline、transition
    - ❌ 禁止：position、z-index、width、height、top、left、right、
      bottom、transform、border-radius
    悬浮球的 width/height 由大小滑块设置，border-radius 由形状选项控制，
    position/top/left 由拖拽位置决定。
 
+   如果用户需要用 CSS 实现纯图片球，需要注意：
+   - 不要在插件设置里填图片URL（否则 <img> 会和 background-image 重复显示）
+   - 不要勾选透明背景（CSS 自己处理）
+   - 必须同时关闭 background、border、box-shadow、backdrop-filter、outline 全家桶，
+     否则会看到一圈"透明背景板"或光晕
+   - background-size 用 contain 保持图片原比例不裁切，用 cover 会裁切两侧
+   - 需要隐藏默认省略号图标：\`.ih-floating-ball > i { display: none !important; }\`
+
    注意：用户可以在插件设置里关闭「跟随美化」开关。
    关闭后，插件会用更高优先级的 CSS 类覆盖你写的悬浮球样式，
    这是正常行为，不需要处理。
 
-   如果悬浮球设置了自定义图片，球内部会有一个 <img> 元素。
+   如果悬浮球设置了自定义图片（走插件内置方式），球内部会有一个 <img> 元素，
    CSS 背景色/背景图会被图片遮住。美化有图片的球时，
-   建议用 border、box-shadow、outline 等不会被遮挡的属性。
+   建议用 border、box-shadow、outline 等不会被遮挡的属性做外框装饰。
 
 9. **悬浮面板样式约束**
    如果你要给 \`.ih-floating-panel\` 写样式：
@@ -2287,7 +2438,8 @@ const floatingPanelController = {
     const imgRadius = isSquare ? "8px" : "50%";
     let innerHtml;
     if (fp.ballImage) {
-      innerHtml = `<img src="${fp.ballImage}" draggable="false" ondragstart="return false;" style="width:100%;height:100%;object-fit:cover;border-radius:${imgRadius};pointer-events:none;-webkit-user-drag:none;user-drag:none;" />`;
+      const imgSizePercent = isSquare ? 100 : 71;
+      innerHtml = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:${ballRadius};"><img src="${fp.ballImage}" draggable="false" ondragstart="return false;" style="width:${imgSizePercent}%;height:${imgSizePercent}%;object-fit:contain;pointer-events:none;-webkit-user-drag:none;user-drag:none;" /></div>`;
     } else {
       innerHtml = `<i class="fa-solid fa-ellipsis" style="font-size:${Math.max(14, size / 3)}px;"></i>`;
     }
@@ -3609,6 +3761,84 @@ function renderSettingsPanel() {
   } catch (e) {}
 }
 
+function getBallProfileData() {
+  const fp = getSettings().floatingPanel;
+  return {
+    ballImage: fp.ballImage || "",
+    ballImageExpanded: fp.ballImageExpanded || "",
+    ballSize: fp.ballSize || 48,
+    ballShape: fp.ballShape || "circle",
+    transparentBall: fp.transparentBall || false,
+    followTheme: fp.followTheme !== false,
+  };
+}
+
+function applyBallProfileData(data) {
+  const fp = getSettings().floatingPanel;
+  fp.ballImage = data.ballImage || "";
+  fp.ballImageExpanded = data.ballImageExpanded || "";
+  fp.ballSize = data.ballSize || 48;
+  fp.ballShape = data.ballShape || "circle";
+  fp.transparentBall = data.transparentBall || false;
+  fp.followTheme = data.followTheme !== false;
+}
+
+function createBallProfile(name) {
+  const fp = getSettings().floatingPanel;
+  if (!fp.ballProfiles) fp.ballProfiles = [];
+  const data = getBallProfileData();
+  data.name = name;
+  fp.ballProfiles.push(data);
+  fp.currentProfileIndex = fp.ballProfiles.length - 1;
+  saveSettingsDebounced();
+  renderFloatingPanelSettings();
+  floatingPanelController.refresh();
+  toastr.success(`已创建方案"${name}"`, "", { timeOut: 1500 });
+}
+
+function saveBallProfile(index) {
+  const fp = getSettings().floatingPanel;
+  if (!fp.ballProfiles || !fp.ballProfiles[index]) return;
+  const name = fp.ballProfiles[index].name;
+  const data = getBallProfileData();
+  data.name = name;
+  fp.ballProfiles[index] = data;
+  saveSettingsDebounced();
+  toastr.success(`已保存方案"${name}"`, "", { timeOut: 1500 });
+}
+
+function loadBallProfile(index) {
+  const fp = getSettings().floatingPanel;
+  if (!fp.ballProfiles || !fp.ballProfiles[index]) return;
+  const data = fp.ballProfiles[index];
+  applyBallProfileData(data);
+  saveSettingsDebounced();
+  renderFloatingPanelSettings();
+  floatingPanelController.refresh();
+  toastr.info(`已切换到方案"${data.name}"`, "", { timeOut: 1500 });
+}
+
+function renameBallProfile(index, newName) {
+  const fp = getSettings().floatingPanel;
+  if (!fp.ballProfiles || !fp.ballProfiles[index]) return;
+  fp.ballProfiles[index].name = newName;
+  saveSettingsDebounced();
+  renderFloatingPanelSettings();
+  toastr.success(`已重命名为"${newName}"`, "", { timeOut: 1500 });
+}
+
+function deleteBallProfile(index) {
+  const fp = getSettings().floatingPanel;
+  if (!fp.ballProfiles || !fp.ballProfiles[index]) return;
+  const name = fp.ballProfiles[index].name;
+  fp.ballProfiles.splice(index, 1);
+  fp.currentProfileIndex = -1;
+  saveSettingsDebounced();
+  renderFloatingPanelSettings();
+  floatingPanelController.refresh();
+  toastr.info(`已删除方案"${name}"`, "", { timeOut: 1500 });
+}
+
 function renderFloatingPanelSettings() {
   const container = $("#ih_floating_panel_settings");
   if (!container.length) return;
@@ -3637,6 +3867,19 @@ function renderFloatingPanelSettings() {
                         <option value="ball" ${fp.displayMode === "ball" ? "selected" : ""}>悬浮球（点击展开）</option>
                         <option value="fixed" ${fp.displayMode === "fixed" ? "selected" : ""}>固定面板（常驻显示）</option>
                     </select>
+                </div>
+            </div>
+            <div class="ih-hm-group" id="ih_fp_ball_profile_group" style="display:${fp.displayMode === "ball" ? "block" : "none"};">
+                <div class="ih-hm-group-label">图片方案</div>
+                <div class="ih-hm-row" style="gap:4px;flex-wrap:wrap;">
+                    <select id="ih_fp_profile_select" style="flex:1;min-width:100px;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
+                        <option value="-1" ${(fp.currentProfileIndex ?? -1) === -1 ? "selected" : ""}>自定义</option>
+                        ${(fp.ballProfiles || []).map((p, i) => `<option value="${i}" ${fp.currentProfileIndex === i ? "selected" : ""}>${p.name}</option>`).join("")}
+                    </select>
+                    <button class="ih-hm-btn" id="ih_fp_profile_new" title="新建方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-plus"></i></button>
+                    <button class="ih-hm-btn" id="ih_fp_profile_save" title="保存到当前方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-floppy-disk"></i></button>
+                    <button class="ih-hm-btn" id="ih_fp_profile_rename" title="重命名" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-pen"></i></button>
+                    <button class="ih-hm-btn" id="ih_fp_profile_delete" title="删除方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-trash"></i></button>
                 </div>
             </div>
             <div class="ih-hm-group" id="ih_fp_ball_settings" style="display:${fp.displayMode === "ball" ? "block" : "none"};">
@@ -3764,7 +4007,9 @@ function renderFloatingPanelSettings() {
   container.on("change", "#ih_fp_display_mode", function () {
     getSettings().floatingPanel.displayMode = $(this).val();
     saveSettingsDebounced();
-    $("#ih_fp_ball_settings").toggle($(this).val() === "ball");
+    const isBall = $(this).val() === "ball";
+    $("#ih_fp_ball_settings").toggle(isBall);
+    $("#ih_fp_ball_profile_group").toggle(isBall);
     floatingPanelController.refresh();
   });
   container.on("input", "#ih_fp_ball_size", function () {
@@ -3795,6 +4040,52 @@ function renderFloatingPanelSettings() {
     getSettings().floatingPanel.ballShape = $(this).val();
     saveSettingsDebounced();
     floatingPanelController.refresh();
+  });
+  container.on("change", "#ih_fp_profile_select", function () {
+    const idx = parseInt($(this).val());
+    getSettings().floatingPanel.currentProfileIndex = idx;
+    if (idx >= 0) {
+      loadBallProfile(idx);
+    }
+    saveSettingsDebounced();
+  });
+  container.on("click", "#ih_fp_profile_new", function () {
+    const name = prompt("输入方案名称：");
+    if (!name || !name.trim()) return;
+    createBallProfile(name.trim());
+  });
+  container.on("click", "#ih_fp_profile_save", function () {
+    const idx = getSettings().floatingPanel.currentProfileIndex;
+    if (idx < 0) {
+      toastr.warning("请先选择或新建一个方案", "", { timeOut: 1500 });
+      return;
+    }
+    saveBallProfile(idx);
+  });
+  container.on("click", "#ih_fp_profile_rename", function () {
+    const idx = getSettings().floatingPanel.currentProfileIndex;
+    if (idx < 0) {
+      toastr.warning("请先选择一个方案", "", { timeOut: 1500 });
+      return;
+    }
+    const current = getSettings().floatingPanel.ballProfiles[idx];
+    const name = prompt("输入新名称：", current.name);
+    if (!name || !name.trim()) return;
+    renameBallProfile(idx, name.trim());
+  });
+  container.on("click", "#ih_fp_profile_delete", function () {
+    const idx = getSettings().floatingPanel.currentProfileIndex;
+    if (idx < 0) {
+      toastr.warning("请先选择一个方案", "", { timeOut: 1500 });
+      return;
+    }
+    if (
+      !confirm(
+        `确定删除方案"${getSettings().floatingPanel.ballProfiles[idx].name}"吗？`,
+      )
+    )
+      return;
+    deleteBallProfile(idx);
   });
   container.on("input", "#ih_fp_ball_image", function () {
     getSettings().floatingPanel.ballImage = $(this).val().trim();
@@ -4713,6 +5004,9 @@ async function loadSettings() {
   if (s.floatingPanel.followTheme === undefined)
     s.floatingPanel.followTheme = true;
   if (s.floatingPanel.buttonSize === undefined) s.floatingPanel.buttonSize = 12;
+  if (!s.floatingPanel.ballProfiles) s.floatingPanel.ballProfiles = [];
+  if (s.floatingPanel.currentProfileIndex === undefined)
+    s.floatingPanel.currentProfileIndex = -1;
   if (s.floatingPanel.collapsed === undefined) s.floatingPanel.collapsed = true;
   if (s.floatingPanel.autoHide === undefined) s.floatingPanel.autoHide = false;
   s.folders.forEach((folder) => {
@@ -4861,6 +5155,18 @@ function setupVolumeKeyPaging() {
   );
 }
 
+function setupNavFlagClearOnUserScroll() {
+  const chatEl = document.getElementById("chat");
+  if (!chatEl) return;
+  const clearFlag = () => {
+    if (messageNavigation._pendingJump !== null) {
+      messageNavigation._pendingJump = null;
+    }
+  };
+  chatEl.addEventListener("wheel", clearFlag, { passive: true });
+  chatEl.addEventListener("touchmove", clearFlag, { passive: true });
+}
+
 function setupAutoScrollPauseOnUserScroll() {
   let userScrollTimeout = null;
   const pauseAndScheduleResume = () => {
@@ -4942,11 +5248,23 @@ jQuery(async () => {
     );
     $("#input_helper_toolbar").append(findReplBtn);
   }
+  if (!$("#input_generate_swipe_btn").length) {
+    const generateSwipeBtn = $(
+      '<button id="input_generate_swipe_btn" class="input-helper-btn" title="生成备选回复" data-norefocus="true"><i class="fa-shuffle"></i></button>',
+    );
+    $("#input_helper_toolbar").append(generateSwipeBtn);
+  }
   if (!$("#input_open_qr_assistant_btn").length) {
     const qrAssistantBtn = $(
       '<button id="input_open_qr_assistant_btn" class="input-helper-btn" title="QR助手面板" data-norefocus="true"><i class="fa-solid fa-rocket"></i></button>',
     );
     $("#input_helper_toolbar").append(qrAssistantBtn);
+  }
+  if (!$("#input_chat_undo_btn").length) {
+    const chatUndoBtn = $(
+      '<button id="input_chat_undo_btn" class="input-helper-btn input-helper-btn-disabled" title="撤回删除" data-norefocus="true"><i class="fa-solid fa-trash-arrow-up"></i></button>',
+    );
+    $("#input_helper_toolbar").append(chatUndoBtn);
   }
 
   ALL_BUTTON_KEYS.forEach((key) => {
@@ -5152,6 +5470,7 @@ jQuery(async () => {
   setupGlobalDropdownClose();
   setupVolumeKeyPaging();
   setupAutoScrollPauseOnUserScroll();
+  setupNavFlagClearOnUserScroll();
 
   historyManager.init();
   setupInputTracking();
@@ -5183,6 +5502,7 @@ jQuery(async () => {
   try {
     eventSource.on(event_types.CHAT_CHANGED, function () {
       historyManager.clear();
+      chatUndoManager.clear();
       if (shiftMode.active) shiftMode.deactivate();
       if (autoScrollController.active) autoScrollController.stop();
       if (findReplaceController.active) findReplaceController.close();
@@ -5190,6 +5510,7 @@ jQuery(async () => {
       streamScrollController.arm();
       messageNavigation._currentAiIndex = -1;
       messageNavigation._lastNavTime = 0;
+      messageNavigation._pendingJump = null;
       setupInputTracking();
       floatingPanelController.refresh();
     });

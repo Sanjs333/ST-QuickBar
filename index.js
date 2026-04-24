@@ -72,7 +72,7 @@ const BUTTON_DEFS = {
   },
   generateSwipe: {
     label: "生成备选回复",
-    icon: "fa-shuffle",
+    icon: "fa-solid fa-shuffle",
     text: null,
   },
   regenerateReply: {
@@ -5250,7 +5250,7 @@ jQuery(async () => {
   }
   if (!$("#input_generate_swipe_btn").length) {
     const generateSwipeBtn = $(
-      '<button id="input_generate_swipe_btn" class="input-helper-btn" title="生成备选回复" data-norefocus="true"><i class="fa-shuffle"></i></button>',
+      '<button id="input_generate_swipe_btn" class="input-helper-btn" title="生成备选回复" data-norefocus="true"><i class="fa-solid fa-shuffle"></i></button>',
     );
     $("#input_helper_toolbar").append(generateSwipeBtn);
   }

@@ -120,6 +120,8 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-trash-can",
     text: null,
   },
+  copyText: { label: "复制", icon: "fa-solid fa-copy", text: null },
+  pasteText: { label: "粘贴", icon: "fa-solid fa-paste", text: null },
   asterisk: { label: "双星号", icon: null, text: "**" },
   quotes: { label: "双引号", icon: null, text: '""' },
   parentheses: { label: "圆括号", icon: null, text: "()" },
@@ -145,6 +147,8 @@ const INPUT_BUTTON_KEYS = new Set([
   "newline",
   "user",
   "char",
+  "copyText",
+  "pasteText",
 ]);
 
 function isInputButton(key) {
@@ -292,7 +296,9 @@ const defaultSettings = {
       k === "openQRAssistant" ||
       k === "switchPanelProfile" ||
       k === "bottomNavMode" ||
-      k === "enterDeleteMode"
+      k === "enterDeleteMode" ||
+      k === "copyText" ||
+      k === "pasteText"
         ? false
         : true,
     ]),
@@ -336,6 +342,8 @@ const shortcutFunctionMap = {
   switchPanelProfile: () => switchToNextPanelProfile(),
   bottomNavMode: () => bottomNavController.toggle(),
   enterDeleteMode: () => doEnterDeleteMode(),
+  copyText: () => doCopy(),
+  pasteText: () => doPaste(),
 };
 
 function findActiveScrollContainer() {
@@ -1713,7 +1721,11 @@ const historyManager = {
     if (this.isPerformingUndoRedo) return;
     clearTimeout(this.inputDebounceTimer);
     this.inputDebounceTimer = setTimeout(() => {
-      this.pushState(getMessageInput());
+      try {
+        this.pushState(getMessageInput());
+      } catch (e) {
+        console.warn("快捷工具栏: 保存输入状态失败", e);
+      }
     }, 800);
   },
 
@@ -1722,7 +1734,11 @@ const historyManager = {
     if (h.isPerformingUndoRedo) return;
     clearTimeout(h.inputDebounceTimer);
     h.inputDebounceTimer = setTimeout(() => {
-      this.pushState($(el));
+      try {
+        this.pushState($(el));
+      } catch (e) {
+        console.warn("快捷工具栏: 保存外部输入状态失败", e);
+      }
     }, 800);
   },
 
@@ -2205,6 +2221,8 @@ function getButtonIdFromKey(key) {
     switchPanelProfile: "input_switch_panel_profile_btn",
     bottomNavMode: "input_bottom_nav_mode_btn",
     enterDeleteMode: "input_enter_delete_mode_btn",
+    copyText: "input_copy_text_btn",
+    pasteText: "input_paste_text_btn",
   };
   return map[key] || "";
 }
@@ -2457,6 +2475,81 @@ function insertUserTag() {
 }
 function insertCharTag() {
   insertTag("{{char}}");
+}
+
+async function doCopy() {
+  const target = getInsertionTarget();
+  if (!target) return;
+
+  let selectedText = "";
+  if (target.isContentEditable) {
+    const cmView = getCodeMirrorView(target);
+    if (cmView) {
+      const { from, to } = cmView.state.selection.main;
+      selectedText = cmView.state.sliceDoc(from, to);
+    } else {
+      const doc = target.ownerDocument || document;
+      const win = doc.defaultView || window;
+      const sel = win.getSelection();
+      selectedText = sel ? sel.toString() : "";
+    }
+  } else {
+    const start = target.selectionStart || 0;
+    const end = target.selectionEnd || 0;
+    if (start !== end) {
+      selectedText = (target.value || "").substring(start, end);
+    }
+  }
+
+  if (!selectedText) {
+    toastr.info("没有选中文本", "", { timeOut: 1200 });
+    return;
+  }
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(selectedText);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = selectedText;
+      ta.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0;";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    toastr.success("已复制", "", { timeOut: 1000 });
+  } catch (e) {
+    toastr.error("复制失败", "", { timeOut: 1500 });
+  }
+}
+
+async function doPaste() {
+  const target = getInsertionTarget();
+  if (!target) return;
+
+  let clipText = "";
+  try {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      clipText = await navigator.clipboard.readText();
+    } else {
+      toastr.warning("当前浏览器不支持剪贴板读取", "", { timeOut: 2000 });
+      return;
+    }
+  } catch (e) {
+    toastr.warning("无法读取剪贴板，请检查浏览器权限或使用 HTTPS", "", {
+      timeOut: 2500,
+    });
+    return;
+  }
+
+  if (!clipText) {
+    toastr.info("剪贴板为空", "", { timeOut: 1200 });
+    return;
+  }
+
+  insertTag(clipText);
+  toastr.success("已粘贴", "", { timeOut: 1000 });
 }
 
 function doScrollToTop() {
@@ -3325,6 +3418,7 @@ const floatingPanelController = {
   },
 
   destroy() {
+    this._removeOutsideClose();
     this._removeAutoHide();
     this._removeDialogDetection();
     this._removeKeyboardAdaptation();
@@ -3461,6 +3555,16 @@ const floatingPanelController = {
     panel[0].addEventListener("mousedown", (e) => e.preventDefault(), false);
     this._panelEl = panel;
     if (fp.displayMode === "ball") {
+      const closeBtn = $(
+        `<button class="input-helper-btn ih-fp-btn ih-fp-close-btn" title="收起面板"><i class="fa-solid fa-xmark"></i></button>`,
+      );
+      closeBtn.on("click touchend", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (this._expanded) this.toggleExpand();
+      });
+      this._applyButtonSize(closeBtn[0], fp.buttonSize || 12);
+      panel.append(closeBtn);
       panel.hide();
     }
     syncDialogTheme(panel[0]);
@@ -3515,6 +3619,8 @@ const floatingPanelController = {
             this._expanded = false;
             if (this._panelEl) this._panelEl.stop(true).hide();
             this._updateBallImage();
+            this._removeOutsideClose();
+            if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
           }
         }
         e2.preventDefault();
@@ -3648,6 +3754,8 @@ const floatingPanelController = {
       });
       this._panelEl.stop(true).fadeIn(150);
       this._adjustForKeyboard();
+      if (this._ballEl) this._ballEl.addClass("ih-ball-expanded");
+      this._setupOutsideClose();
       this._panelEl
         .find(".ih-fp-btn")
         .toggleClass("input-helper-btn-active", false);
@@ -3659,6 +3767,8 @@ const floatingPanelController = {
         .toggleClass("input-helper-btn-active", autoScrollController.active);
     } else {
       this._panelEl.stop(true).fadeOut(100);
+      this._removeOutsideClose();
+      if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
     }
     this._updateBallImage();
   },
@@ -3688,6 +3798,42 @@ const floatingPanelController = {
       img.attr("src", this._expanded ? expandedImg : fp.ballImage);
     } else {
       img.attr("src", fp.ballImage);
+    }
+  },
+
+  _outsideCloseHandler: null,
+
+  _setupOutsideClose() {
+    this._removeOutsideClose();
+    const self = this;
+    setTimeout(() => {
+      if (!self._expanded) return;
+      self._outsideCloseHandler = function (e) {
+        if (!self._expanded) return;
+        if (
+          self._panelEl &&
+          self._panelEl[0] &&
+          self._panelEl[0].contains(e.target)
+        )
+          return;
+        if (
+          self._ballEl &&
+          self._ballEl[0] &&
+          self._ballEl[0].contains(e.target)
+        )
+          return;
+        self.toggleExpand();
+      };
+      document.addEventListener("click", self._outsideCloseHandler, true);
+      document.addEventListener("touchend", self._outsideCloseHandler, true);
+    }, 250);
+  },
+
+  _removeOutsideClose() {
+    if (this._outsideCloseHandler) {
+      document.removeEventListener("click", this._outsideCloseHandler, true);
+      document.removeEventListener("touchend", this._outsideCloseHandler, true);
+      this._outsideCloseHandler = null;
     }
   },
 
@@ -3904,6 +4050,8 @@ const floatingPanelController = {
       this._expanded = false;
       if (this._panelEl) this._panelEl.stop(true).hide();
       this._updateBallImage();
+      this._removeOutsideClose();
+      if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
     }
     const target = this._ballEl || this._panelEl;
     if (target) {
@@ -3980,6 +4128,8 @@ const floatingPanelController = {
       this._panelEl.stop(true).hide();
       this._expanded = false;
       this._updateBallImage();
+      this._removeOutsideClose();
+      if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
     }
   },
 
@@ -6916,6 +7066,18 @@ jQuery(async () => {
       '<button id="input_enter_delete_mode_btn" class="input-helper-btn" title="进入删除模式" data-norefocus="true"><i class="fa-solid fa-trash-can"></i></button>',
     );
     $("#input_helper_toolbar").append(enterDelBtn);
+  }
+  if (!$("#input_copy_text_btn").length) {
+    const copyBtn = $(
+      '<button id="input_copy_text_btn" class="input-helper-btn" title="复制" data-norefocus="true"><i class="fa-solid fa-copy"></i></button>',
+    );
+    $("#input_helper_toolbar").append(copyBtn);
+  }
+  if (!$("#input_paste_text_btn").length) {
+    const pasteBtn = $(
+      '<button id="input_paste_text_btn" class="input-helper-btn" title="粘贴" data-norefocus="true"><i class="fa-solid fa-paste"></i></button>',
+    );
+    $("#input_helper_toolbar").append(pasteBtn);
   }
   if (!$("#input_chat_undo_btn").length) {
     const chatUndoBtn = $(

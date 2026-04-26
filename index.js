@@ -2502,7 +2502,6 @@ async function doCopy() {
   }
 
   if (!selectedText) {
-    toastr.info("没有选中文本", "", { timeOut: 1200 });
     return;
   }
 
@@ -2518,7 +2517,6 @@ async function doCopy() {
       document.execCommand("copy");
       document.body.removeChild(ta);
     }
-    toastr.success("已复制", "", { timeOut: 1000 });
   } catch (e) {
     toastr.error("复制失败", "", { timeOut: 1500 });
   }
@@ -2549,7 +2547,6 @@ async function doPaste() {
   }
 
   insertTag(clipText);
-  toastr.success("已粘贴", "", { timeOut: 1000 });
 }
 
 function doScrollToTop() {
@@ -3822,6 +3819,7 @@ const floatingPanelController = {
           self._ballEl[0].contains(e.target)
         )
           return;
+        if (isEditableElement(e.target)) return;
         self.toggleExpand();
       };
       document.addEventListener("click", self._outsideCloseHandler, true);

@@ -1685,10 +1685,6 @@
   transform: scale(0.95);
 }
 
-.ih-floating-ball.ih-ball-expanded {
-  z-index: 10006 !important;
-}
-
 .ih-fp-close-btn {
   opacity: 0.4 !important;
   padding: 2px 6px !important;

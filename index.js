@@ -1780,22 +1780,12 @@ const historyManager = {
     }
     this._undoBtnEl.toggleClass("input-helper-btn-disabled", undoDisabled);
     this._redoBtnEl.toggleClass("input-helper-btn-disabled", redoDisabled);
-    $(".ih-folder-dropdown-portal [data-button-key='undo']").toggleClass(
-      "input-helper-btn-disabled",
-      undoDisabled,
-    );
-    $(".ih-folder-dropdown-portal [data-button-key='redo']").toggleClass(
-      "input-helper-btn-disabled",
-      redoDisabled,
-    );
-    $(".ih-floating-panel [data-button-key='undo']").toggleClass(
-      "input-helper-btn-disabled",
-      undoDisabled,
-    );
-    $(".ih-floating-panel [data-button-key='redo']").toggleClass(
-      "input-helper-btn-disabled",
-      redoDisabled,
-    );
+    $(
+      ".ih-folder-dropdown-portal [data-button-key='undo'], .ih-floating-panel [data-button-key='undo']",
+    ).toggleClass("input-helper-btn-disabled", undoDisabled);
+    $(
+      ".ih-folder-dropdown-portal [data-button-key='redo'], .ih-floating-panel [data-button-key='redo']",
+    ).toggleClass("input-helper-btn-disabled", redoDisabled);
   },
 
   clear() {
@@ -1967,13 +1957,9 @@ const shiftMode = {
       target.addEventListener("mouseup", this._handler);
       target.addEventListener("touchend", this._handler);
     }
-    $("#input_shift_btn").addClass("input-helper-btn-active");
-    $(".ih-folder-dropdown-portal [data-button-key='shift']").addClass(
-      "input-helper-btn-active",
-    );
-    $(".ih-floating-panel [data-button-key='shift']").addClass(
-      "input-helper-btn-active",
-    );
+    $(
+      "#input_shift_btn, .ih-folder-dropdown-portal [data-button-key='shift'], .ih-floating-panel [data-button-key='shift']",
+    ).addClass("input-helper-btn-active");
   },
 
   deactivate() {
@@ -1989,13 +1975,9 @@ const shiftMode = {
     this._cmView = null;
     this._anchorNode = null;
     this._anchorOffset = 0;
-    $("#input_shift_btn").removeClass("input-helper-btn-active");
-    $(".ih-folder-dropdown-portal [data-button-key='shift']").removeClass(
-      "input-helper-btn-active",
-    );
-    $(".ih-floating-panel [data-button-key='shift']").removeClass(
-      "input-helper-btn-active",
-    );
+    $(
+      "#input_shift_btn, .ih-folder-dropdown-portal [data-button-key='shift'], .ih-floating-panel [data-button-key='shift']",
+    ).removeClass("input-helper-btn-active");
   },
 };
 
@@ -3552,16 +3534,6 @@ const floatingPanelController = {
     panel[0].addEventListener("mousedown", (e) => e.preventDefault(), false);
     this._panelEl = panel;
     if (fp.displayMode === "ball") {
-      const closeBtn = $(
-        `<button class="input-helper-btn ih-fp-btn ih-fp-close-btn" title="收起面板"><i class="fa-solid fa-xmark"></i></button>`,
-      );
-      closeBtn.on("click touchend", (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        if (this._expanded) this.toggleExpand();
-      });
-      this._applyButtonSize(closeBtn[0], fp.buttonSize || 12);
-      panel.append(closeBtn);
       panel.hide();
     }
     syncDialogTheme(panel[0]);
@@ -3820,6 +3792,8 @@ const floatingPanelController = {
         )
           return;
         if (isEditableElement(e.target)) return;
+        const toolbar = document.getElementById("input_helper_toolbar");
+        if (toolbar && toolbar.contains(e.target)) return;
         self.toggleExpand();
       };
       document.addEventListener("click", self._outsideCloseHandler, true);
@@ -4097,7 +4071,8 @@ const floatingPanelController = {
     const vh = window.innerHeight;
     const targets = [];
     if (this._ballEl && this._ballEl.length) targets.push(this._ballEl);
-    if (this._panelEl && this._panelEl.length) targets.push(this._panelEl);
+    if (this._panelEl && this._panelEl.length && !this._ballEl)
+      targets.push(this._panelEl);
     let saved = false;
     targets.forEach((t) => {
       const el = t[0];
@@ -4123,11 +4098,7 @@ const floatingPanelController = {
       }
     });
     if (this._expanded && this._ballEl && this._panelEl) {
-      this._panelEl.stop(true).hide();
-      this._expanded = false;
-      this._updateBallImage();
-      this._removeOutsideClose();
-      if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
+      this._repositionPanel();
     }
   },
 
@@ -4140,6 +4111,69 @@ const floatingPanelController = {
     }
     this._vvResizeHandler = null;
     this._savedTopBeforeKeyboard = null;
+  },
+
+  _repositionPanel() {
+    if (!this._panelEl || !this._ballEl || !this._expanded) return;
+    if (!this._panelEl.is(":visible")) return;
+
+    const fp = getSettings().floatingPanel;
+    const ballRect = this._ballEl[0].getBoundingClientRect();
+    const panelWidth = this._panelEl.outerWidth();
+    const panelHeight = this._panelEl.outerHeight();
+
+    let minTop = 4;
+    const topBarEl =
+      document.getElementById("top-bar") ||
+      document.getElementById("top-settings-holder");
+    if (topBarEl) {
+      const rect = topBarEl.getBoundingClientRect();
+      if (rect.bottom > 0) minTop = rect.bottom + 10;
+    }
+
+    const vv = window.visualViewport;
+    const viewportTop = vv ? vv.offsetTop : 0;
+    const viewportBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+    const effectiveMinTop = Math.max(minTop, viewportTop + 4);
+    const effectiveMaxBottom = viewportBottom - 4;
+    const availableHeight = effectiveMaxBottom - effectiveMinTop;
+
+    let panelLeft, panelTop;
+    if (fp.orientation === "vertical") {
+      panelLeft = ballRect.left - panelWidth - 8;
+      if (panelLeft < 4) panelLeft = ballRect.right + 8;
+      panelTop = ballRect.top;
+      if (panelTop + panelHeight > effectiveMaxBottom) {
+        panelTop = ballRect.bottom - panelHeight;
+      }
+    } else {
+      panelLeft = ballRect.left + ballRect.width / 2 - panelWidth / 2;
+      panelTop = ballRect.bottom + 8;
+      if (panelTop + panelHeight > effectiveMaxBottom) {
+        panelTop = ballRect.top - panelHeight - 8;
+      }
+    }
+
+    panelLeft = Math.max(
+      4,
+      Math.min(window.innerWidth - panelWidth - 4, panelLeft),
+    );
+
+    if (panelHeight >= availableHeight) {
+      panelTop = effectiveMinTop;
+      this._panelEl.css("max-height", availableHeight + "px");
+    } else {
+      panelTop = Math.max(
+        effectiveMinTop,
+        Math.min(effectiveMaxBottom - panelHeight, panelTop),
+      );
+    }
+
+    this._panelEl.css({
+      left: panelLeft + "px",
+      top: panelTop + "px",
+      right: "auto",
+    });
   },
 
   _adjustForKeyboard() {
@@ -4195,6 +4229,10 @@ const floatingPanelController = {
           "overflow-x": "",
         });
       }
+    }
+
+    if (this._expanded && this._ballEl && this._panelEl) {
+      this._repositionPanel();
     }
   },
 

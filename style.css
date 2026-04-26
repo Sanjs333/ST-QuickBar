@@ -1685,15 +1685,6 @@
   transform: scale(0.95);
 }
 
-.ih-fp-close-btn {
-  opacity: 0.4 !important;
-  padding: 2px 6px !important;
-  border-style: dashed !important;
-}
-.ih-fp-close-btn:hover {
-  opacity: 0.8 !important;
-}
-
 .ih-floating-ball.ih-ball-custom {
   background-color: var(--SmartThemeBlurTintColor) !important;
   border: 2px solid

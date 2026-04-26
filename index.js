@@ -105,6 +105,21 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-rocket",
     text: null,
   },
+  switchPanelProfile: {
+    label: "切换面板方案",
+    icon: "fa-solid fa-layer-group",
+    text: null,
+  },
+  bottomNavMode: {
+    label: "底部跳转模式",
+    icon: "fa-solid fa-angle-double-down",
+    text: null,
+  },
+  enterDeleteMode: {
+    label: "进入删除模式",
+    icon: "fa-solid fa-trash-can",
+    text: null,
+  },
   asterisk: { label: "双星号", icon: null, text: "**" },
   quotes: { label: "双引号", icon: null, text: '""' },
   parentheses: { label: "圆括号", icon: null, text: "()" },
@@ -138,6 +153,95 @@ function isInputButton(key) {
   return false;
 }
 
+let _lastFocusedEditable = null;
+let _savedRange = null;
+let _lastFocusedForScroll = null;
+function isEditableElement(el) {
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName;
+  if (tag === "TEXTAREA") return true;
+  if (tag === "INPUT") {
+    const type = (el.type || "text").toLowerCase();
+    return [
+      "text",
+      "search",
+      "url",
+      "email",
+      "tel",
+      "password",
+      "number",
+    ].includes(type);
+  }
+  if (el.isContentEditable) return true;
+  return false;
+}
+
+function shouldIgnoreFocusedElement(el) {
+  if (!el) return true;
+  try {
+    const $el = $(el);
+    if (
+      $el.closest(
+        ".ih-dialog-overlay, .input-helper-settings, #input_helper_toolbar, " +
+          ".ih-find-bar, .ih-folder-dropdown-portal, .ih-floating-panel, " +
+          ".shortcut-input, #extensions_settings, #extensions_settings2",
+      ).length
+    )
+      return true;
+  } catch (e) {}
+  return false;
+}
+
+function getInsertionTarget() {
+  const editingTextarea = $("#chat .mes textarea:visible").first();
+  if (editingTextarea.length) return editingTextarea[0];
+
+  if (_lastFocusedEditable) {
+    try {
+      const ownerDoc = _lastFocusedEditable.ownerDocument;
+      if (ownerDoc && ownerDoc.contains(_lastFocusedEditable)) {
+        return _lastFocusedEditable;
+      }
+    } catch (e) {}
+    _lastFocusedEditable = null;
+  }
+  return getMessageInput()[0];
+}
+
+function getCodeMirrorView(el) {
+  if (!el) return null;
+  let node = el;
+  while (node) {
+    try {
+      if (
+        node.classList &&
+        node.classList.contains("cm-content") &&
+        node.cmView
+      ) {
+        const rootView = node.cmView.rootView;
+        return rootView && rootView.view ? rootView.view : null;
+      }
+      if (node.classList && node.classList.contains("cm-editor")) {
+        const content = node.querySelector(".cm-content");
+        if (content && content.cmView) {
+          const rootView = content.cmView.rootView;
+          return rootView && rootView.view ? rootView.view : null;
+        }
+        return null;
+      }
+    } catch (e) {
+      return null;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function isExternalTarget(el) {
+  if (!el) return false;
+  return el !== getMessageInput()[0];
+}
+
 const defaultSettings = {
   enabled: true,
   confirmDangerousActions: false,
@@ -162,6 +266,8 @@ const defaultSettings = {
     followTheme: true,
     ballProfiles: [],
     currentProfileIndex: -1,
+    panelProfiles: [],
+    currentPanelProfileIndex: -1,
     collapsed: true,
     autoHide: false,
   },
@@ -183,7 +289,10 @@ const defaultSettings = {
       k === "autoScroll" ||
       k === "jumpToFloor" ||
       k === "findReplace" ||
-      k === "openQRAssistant"
+      k === "openQRAssistant" ||
+      k === "switchPanelProfile" ||
+      k === "bottomNavMode" ||
+      k === "enterDeleteMode"
         ? false
         : true,
     ]),
@@ -224,18 +333,100 @@ const shortcutFunctionMap = {
   jumpToFloor: doJumpToFloor,
   findReplace: () => findReplaceController.toggle(),
   openQRAssistant: doOpenQRAssistant,
+  switchPanelProfile: () => switchToNextPanelProfile(),
+  bottomNavMode: () => bottomNavController.toggle(),
+  enterDeleteMode: () => doEnterDeleteMode(),
 };
+
+function findActiveScrollContainer() {
+  const openDialogs = document.querySelectorAll("dialog[open]");
+  if (openDialogs.length > 0) {
+    const dialog = openDialogs[openDialogs.length - 1];
+    let start = document.activeElement;
+    if (!start || !dialog.contains(start)) start = dialog;
+    let el = start;
+    while (el) {
+      if (el.scrollHeight > el.clientHeight + 2) {
+        if (el.tagName === "TEXTAREA") return el;
+        const ov = getComputedStyle(el).overflowY;
+        if (ov === "auto" || ov === "scroll") return el;
+        if (el.tagName === "DIALOG") return el;
+      }
+      if (el === dialog) break;
+      el = el.parentElement;
+    }
+    let best = dialog;
+    let bestHeight = 0;
+    dialog.querySelectorAll("*").forEach((c) => {
+      if (c.scrollHeight > c.clientHeight + 10) {
+        const ov = getComputedStyle(c).overflowY;
+        if ((ov === "auto" || ov === "scroll") && c.scrollHeight > bestHeight) {
+          best = c;
+          bestHeight = c.scrollHeight;
+        }
+      }
+    });
+    return best;
+  }
+
+  var searchStart = document.activeElement;
+
+  if (!isEditableElement(searchStart)) {
+    if (
+      _lastFocusedForScroll &&
+      _lastFocusedForScroll.ownerDocument &&
+      _lastFocusedForScroll.ownerDocument.contains(_lastFocusedForScroll)
+    ) {
+      searchStart = _lastFocusedForScroll;
+    } else if (
+      _lastFocusedEditable &&
+      _lastFocusedEditable.ownerDocument &&
+      _lastFocusedEditable.ownerDocument.contains(_lastFocusedEditable)
+    ) {
+      searchStart = _lastFocusedEditable;
+    } else {
+      searchStart = null;
+    }
+  }
+
+  if (
+    searchStart &&
+    searchStart !== document.body &&
+    searchStart.id !== "send_textarea"
+  ) {
+    if (
+      searchStart.tagName === "TEXTAREA" &&
+      searchStart.scrollHeight > searchStart.clientHeight + 2
+    ) {
+      return searchStart;
+    }
+    var el = searchStart.parentElement;
+    while (el && el !== document.body) {
+      if (el.id === "chat") break;
+      if (el.scrollHeight > el.clientHeight + 2) {
+        var ov = getComputedStyle(el).overflowY;
+        if (ov === "auto" || ov === "scroll") return el;
+      }
+      el = el.parentElement;
+    }
+  }
+
+  return document.getElementById("chat");
+}
 
 function scrollChatToElement(element, behavior = "smooth", center = false) {
   const chatEl = document.getElementById("chat");
   if (!chatEl || !element) return;
-  const chatRect = chatEl.getBoundingClientRect();
-  const elemRect = element.getBoundingClientRect();
-  let targetTop = chatEl.scrollTop + (elemRect.top - chatRect.top);
-  if (center) {
-    targetTop -= (chatEl.clientHeight - elemRect.height) / 2;
-  }
-  chatEl.scrollTo({ top: Math.max(0, targetTop), behavior });
+  chatEl.scrollTop = chatEl.scrollTop;
+  requestAnimationFrame(() => {
+    const chatRect = chatEl.getBoundingClientRect();
+    const elemRect = element.getBoundingClientRect();
+    let targetTop = chatEl.scrollTop + (elemRect.top - chatRect.top);
+    if (center) {
+      targetTop -= (chatEl.clientHeight - elemRect.height) / 2;
+    }
+    chatEl.scrollTo({ top: Math.max(0, targetTop), behavior });
+  });
 }
 
 const messageNavigation = {
@@ -266,6 +457,35 @@ const messageNavigation = {
     return closestIdx;
   },
 
+  _findCurrentBottomAlignedAiIndex() {
+    const chatEl = document.getElementById("chat");
+    if (!chatEl) return -1;
+    const messages = this._getAiMessages();
+    if (messages.length === 0) return -1;
+    const chatRect = chatEl.getBoundingClientRect();
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    messages.each(function (idx) {
+      const rect = this.getBoundingClientRect();
+      const dist = Math.abs(rect.bottom - chatRect.bottom);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = idx;
+      }
+    });
+    return bestIdx;
+  },
+
+  _scrollToMsgBottom(chatEl, element) {
+    chatEl.scrollTop = chatEl.scrollTop;
+    requestAnimationFrame(() => {
+      const rect = element.getBoundingClientRect();
+      const chatRect = chatEl.getBoundingClientRect();
+      const targetTop = chatEl.scrollTop + (rect.bottom - chatRect.bottom);
+      chatEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+    });
+  },
+
   _getStartIndex() {
     const messages = this._getAiMessages();
     const now = Date.now();
@@ -276,6 +496,9 @@ const messageNavigation = {
     ) {
       return this._currentAiIndex;
     }
+    if (bottomNavController.active) {
+      return this._findCurrentBottomAlignedAiIndex();
+    }
     return this._findCurrentVisibleAiIndex();
   },
 
@@ -284,33 +507,55 @@ const messageNavigation = {
     if (messages.length === 0) return;
     const chatEl = document.getElementById("chat");
     if (!chatEl) return;
+
     if (this._pendingJump === "bottom") {
       this._pendingJump = null;
       const targetIdx = messages.length > 1 ? messages.length - 2 : 0;
-      scrollChatToElement(messages[targetIdx]);
+      if (bottomNavController.active) {
+        this._scrollToMsgBottom(chatEl, messages[targetIdx]);
+      } else {
+        scrollChatToElement(messages[targetIdx]);
+      }
       this._currentAiIndex = targetIdx;
       this._lastNavTime = Date.now();
       return;
     }
     if (this._pendingJump === "top") {
       this._pendingJump = null;
-      scrollChatToElement(messages[0]);
+      if (bottomNavController.active) {
+        this._scrollToMsgBottom(chatEl, messages[0]);
+      } else {
+        scrollChatToElement(messages[0]);
+      }
       this._currentAiIndex = 0;
       this._lastNavTime = Date.now();
       return;
     }
+
     let currentIdx = this._getStartIndex();
     const chatRect = chatEl.getBoundingClientRect();
+
     if (currentIdx >= 0) {
       const msgRect = messages[currentIdx].getBoundingClientRect();
-      if (Math.abs(msgRect.top - chatRect.top) < 5 && currentIdx > 0) {
-        currentIdx--;
-      } else if (msgRect.top >= chatRect.top && currentIdx > 0) {
-        currentIdx--;
+      if (bottomNavController.active) {
+        if (msgRect.bottom <= chatRect.bottom + 5 && currentIdx > 0) {
+          currentIdx--;
+        }
+      } else {
+        if (Math.abs(msgRect.top - chatRect.top) < 5 && currentIdx > 0) {
+          currentIdx--;
+        } else if (msgRect.top >= chatRect.top && currentIdx > 0) {
+          currentIdx--;
+        }
       }
     }
     if (currentIdx < 0) currentIdx = 0;
-    scrollChatToElement(messages[currentIdx]);
+
+    if (bottomNavController.active) {
+      this._scrollToMsgBottom(chatEl, messages[currentIdx]);
+    } else {
+      scrollChatToElement(messages[currentIdx]);
+    }
     this._currentAiIndex = currentIdx;
     this._lastNavTime = Date.now();
   },
@@ -320,10 +565,15 @@ const messageNavigation = {
     if (messages.length === 0) return;
     const chatEl = document.getElementById("chat");
     if (!chatEl) return;
+
     if (this._pendingJump === "top") {
       this._pendingJump = null;
       const targetIdx = messages.length > 1 ? 1 : 0;
-      scrollChatToElement(messages[targetIdx]);
+      if (bottomNavController.active) {
+        this._scrollToMsgBottom(chatEl, messages[targetIdx]);
+      } else {
+        scrollChatToElement(messages[targetIdx]);
+      }
       this._currentAiIndex = targetIdx;
       this._lastNavTime = Date.now();
       return;
@@ -331,26 +581,93 @@ const messageNavigation = {
     if (this._pendingJump === "bottom") {
       this._pendingJump = null;
       const targetIdx = messages.length > 1 ? messages.length - 2 : 0;
-      scrollChatToElement(messages[targetIdx]);
+      if (bottomNavController.active) {
+        this._scrollToMsgBottom(chatEl, messages[targetIdx]);
+      } else {
+        scrollChatToElement(messages[targetIdx]);
+      }
       this._currentAiIndex = targetIdx;
       this._lastNavTime = Date.now();
       return;
     }
+
     let currentIdx = this._getStartIndex();
     const chatRect = chatEl.getBoundingClientRect();
+
     if (currentIdx >= 0) {
       const msgRect = messages[currentIdx].getBoundingClientRect();
-      if (msgRect.top <= chatRect.top + 5 && currentIdx < messages.length - 1) {
-        currentIdx++;
+      if (bottomNavController.active) {
+        if (
+          msgRect.bottom <= chatRect.bottom + 5 &&
+          currentIdx < messages.length - 1
+        ) {
+          currentIdx++;
+        }
+      } else {
+        if (
+          msgRect.top <= chatRect.top + 5 &&
+          currentIdx < messages.length - 1
+        ) {
+          currentIdx++;
+        }
       }
     }
     if (currentIdx < 0) currentIdx = 0;
     if (currentIdx >= messages.length) currentIdx = messages.length - 1;
-    scrollChatToElement(messages[currentIdx]);
+
+    if (bottomNavController.active) {
+      this._scrollToMsgBottom(chatEl, messages[currentIdx]);
+    } else {
+      scrollChatToElement(messages[currentIdx]);
+    }
     this._currentAiIndex = currentIdx;
     this._lastNavTime = Date.now();
   },
 };
+
+const bottomNavController = {
+  active: false,
+  toggle() {
+    this.active = !this.active;
+    const selector =
+      "#input_bottom_nav_mode_btn, " +
+      ".ih-folder-dropdown-portal [data-button-key='bottomNavMode'], " +
+      ".ih-floating-panel [data-button-key='bottomNavMode']";
+    $(selector).toggleClass("input-helper-btn-active", this.active);
+    toastr.info(
+      this.active
+        ? "底部跳转模式已开启：上/下一条AI跳到消息底部"
+        : "底部跳转模式已关闭：恢复跳到消息顶部",
+      "",
+      { timeOut: 1500 },
+    );
+  },
+};
+
+function doEnterDeleteMode() {
+  if (chat.length === 0) {
+    toastr.warning("当前没有聊天消息", "", { timeOut: 1500 });
+    return;
+  }
+  const cancelBtn = document.getElementById("dialogue_del_mes_cancel");
+  const inDelMode = cancelBtn && $(cancelBtn).is(":visible");
+  if (inDelMode) {
+    cancelBtn.click();
+    toastr.info("已退出删除模式", "", { timeOut: 1200 });
+  } else {
+    executeSlashCommandsWithOptions("/del");
+    toastr.info("已进入删除模式，再次点击退出", "", { timeOut: 1500 });
+  }
+  setTimeout(() => {
+    const cb = document.getElementById("dialogue_del_mes_cancel");
+    const isOn = cb && $(cb).is(":visible");
+    const sel =
+      "#input_enter_delete_mode_btn, " +
+      ".ih-folder-dropdown-portal [data-button-key='enterDeleteMode'], " +
+      ".ih-floating-panel [data-button-key='enterDeleteMode']";
+    $(sel).toggleClass("input-helper-btn-active", !!isOn);
+  }, 120);
+}
 
 const pagingController = {
   active: false,
@@ -411,20 +728,20 @@ const pagingController = {
   },
 
   pageUp() {
-    const chatEl = document.getElementById("chat");
-    if (!chatEl) return;
-    const pageHeight = this._getVisibleHeight(chatEl) * 0.93;
-    const newTop = Math.max(0, chatEl.scrollTop - pageHeight);
-    chatEl.scrollTo({ top: newTop, behavior: "smooth" });
+    const scrollEl = findActiveScrollContainer();
+    if (!scrollEl) return;
+    const pageHeight = this._getVisibleHeight(scrollEl) * 0.93;
+    const newTop = Math.max(0, scrollEl.scrollTop - pageHeight);
+    scrollEl.scrollTo({ top: newTop, behavior: "smooth" });
   },
 
   pageDown() {
-    const chatEl = document.getElementById("chat");
-    if (!chatEl) return;
-    const pageHeight = this._getVisibleHeight(chatEl) * 0.93;
-    const maxScroll = chatEl.scrollHeight - chatEl.clientHeight;
-    const newTop = Math.min(maxScroll, chatEl.scrollTop + pageHeight);
-    chatEl.scrollTo({ top: newTop, behavior: "smooth" });
+    const scrollEl = findActiveScrollContainer();
+    if (!scrollEl) return;
+    const pageHeight = this._getVisibleHeight(scrollEl) * 0.93;
+    const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+    const newTop = Math.min(maxScroll, scrollEl.scrollTop + pageHeight);
+    scrollEl.scrollTo({ top: newTop, behavior: "smooth" });
   },
   _tapTouchStart: null,
   _tapTouchMove: null,
@@ -842,6 +1159,7 @@ const findReplaceController = {
   active: false,
   _barEl: null,
   _targetTextarea: null,
+  _cmView: null,
   _matches: [],
   _currentMatchIndex: -1,
   _searchTerm: "",
@@ -851,13 +1169,34 @@ const findReplaceController = {
   },
 
   open() {
+    this._cmView = null;
     const editTextarea = $("#chat .mes textarea:visible").first();
     if (editTextarea.length) {
       this._targetTextarea = editTextarea;
+    } else if (
+      _lastFocusedEditable &&
+      _lastFocusedEditable.ownerDocument &&
+      _lastFocusedEditable.ownerDocument.contains(_lastFocusedEditable)
+    ) {
+      const cmView = getCodeMirrorView(_lastFocusedEditable);
+      if (cmView) {
+        this._cmView = cmView;
+        this._targetTextarea = null;
+      } else if (
+        _lastFocusedEditable.tagName === "TEXTAREA" ||
+        _lastFocusedEditable.tagName === "INPUT"
+      ) {
+        this._targetTextarea = $(_lastFocusedEditable);
+      } else {
+        this._targetTextarea = getMessageInput();
+      }
     } else {
       this._targetTextarea = getMessageInput();
     }
-    if (!this._targetTextarea.length) {
+    if (
+      !this._cmView &&
+      (!this._targetTextarea || !this._targetTextarea.length)
+    ) {
       toastr.warning("没有可搜索的文本区域", "", { timeOut: 1500 });
       return;
     }
@@ -876,6 +1215,7 @@ const findReplaceController = {
     this._currentMatchIndex = -1;
     this._searchTerm = "";
     this._targetTextarea = null;
+    this._cmView = null;
     this._updateActiveUI(false);
   },
 
@@ -895,11 +1235,26 @@ const findReplaceController = {
   },
 
   _checkTarget() {
-    if (
-      !this._targetTextarea ||
-      !this._targetTextarea.length ||
-      !document.contains(this._targetTextarea[0])
-    ) {
+    if (this._cmView) {
+      if (
+        this._cmView.destroyed ||
+        !this._cmView.dom ||
+        !document.contains(this._cmView.dom)
+      ) {
+        this.close();
+        toastr.warning("编辑区域已关闭", "", { timeOut: 1500 });
+        return false;
+      }
+      return true;
+    }
+    if (!this._targetTextarea || !this._targetTextarea.length) {
+      this.close();
+      toastr.warning("编辑区域已关闭", "", { timeOut: 1500 });
+      return false;
+    }
+    const el = this._targetTextarea[0];
+    const doc = el.ownerDocument;
+    if (!doc || !doc.contains(el)) {
       this.close();
       toastr.warning("编辑区域已关闭", "", { timeOut: 1500 });
       return false;
@@ -925,7 +1280,17 @@ const findReplaceController = {
                 </div>
             </div>
         `);
-    $("body").append(bar);
+    const openDialogs = document.querySelectorAll("dialog[open]");
+    if (openDialogs.length > 0) {
+      const dialogHost = openDialogs[openDialogs.length - 1];
+      $(dialogHost).append(bar);
+      const self = this;
+      $(dialogHost).one("close", function () {
+        if (self.active) self.close();
+      });
+    } else {
+      $("body").append(bar);
+    }
     this._barEl = bar;
     syncDialogTheme(bar[0]);
     bar.find(".ih-find-input").on("input", () => this._doSearch());
@@ -955,7 +1320,7 @@ const findReplaceController = {
     });
     bar.on("mousedown", (e) => e.stopPropagation());
     setTimeout(() => bar.find(".ih-find-input").focus(), 50);
-    requestAnimationFrame(() => generateFaIconProtectionCSS());
+    generateFaIconProtectionCSS();
   },
 
   _doSearch() {
@@ -967,7 +1332,9 @@ const findReplaceController = {
       this._updateCount();
       return;
     }
-    const text = this._targetTextarea.val();
+    const text = this._cmView
+      ? this._cmView.state.doc.toString()
+      : this._targetTextarea.val();
     const lowerText = text.toLowerCase();
     const lowerTerm = term.toLowerCase();
     let pos = 0;
@@ -977,7 +1344,7 @@ const findReplaceController = {
     }
     if (this._matches.length > 0) {
       this._currentMatchIndex = 0;
-      this._highlightMatch();
+      this._highlightMatch(false);
     }
     this._updateCount();
   },
@@ -994,18 +1361,24 @@ const findReplaceController = {
     this._updateCount();
   },
 
-  _highlightMatch() {
-    if (
-      this._currentMatchIndex < 0 ||
-      !this._targetTextarea ||
-      !this._targetTextarea.length
-    )
-      return;
-    if (!document.contains(this._targetTextarea[0])) return;
+  _highlightMatch(shouldFocus) {
+    if (shouldFocus === undefined) shouldFocus = true;
+    if (this._currentMatchIndex < 0) return;
     const pos = this._matches[this._currentMatchIndex];
     const len = this._searchTerm.length;
+    if (this._cmView) {
+      this._cmView.dispatch({
+        selection: { anchor: pos, head: pos + len },
+        scrollIntoView: true,
+      });
+      if (shouldFocus) this._cmView.focus();
+      return;
+    }
+    if (!this._targetTextarea || !this._targetTextarea.length) return;
+    const el0 = this._targetTextarea[0];
+    if (!el0.ownerDocument || !el0.ownerDocument.contains(el0)) return;
     const textarea = this._targetTextarea[0];
-    textarea.focus();
+    if (shouldFocus) textarea.focus();
     textarea.setSelectionRange(pos, pos + len);
     const fullText = textarea.value;
     const textBefore = fullText.substring(0, pos);
@@ -1018,6 +1391,17 @@ const findReplaceController = {
     }
     const desiredScroll = linesBefore * lineHeight - textarea.clientHeight / 3;
     textarea.scrollTop = Math.max(0, desiredScroll);
+    var _savedScroll = Math.max(0, desiredScroll);
+    setTimeout(function () {
+      try {
+        textarea.scrollTop = _savedScroll;
+      } catch (e) {}
+    }, 50);
+    setTimeout(function () {
+      try {
+        textarea.scrollTop = _savedScroll;
+      } catch (e) {}
+    }, 200);
   },
 
   _updateCount() {
@@ -1030,12 +1414,20 @@ const findReplaceController = {
   _doReplace() {
     if (this._matches.length === 0 || this._currentMatchIndex < 0) return;
     if (!this._checkTarget()) return;
-    const isSendTextarea = this._targetTextarea[0] === getMessageInput()[0];
-    if (isSendTextarea) saveStateBeforeAction();
     const replaceWith = this._barEl.find(".ih-replace-input").val();
-    const text = this._targetTextarea.val();
     const pos = this._matches[this._currentMatchIndex];
     const termLen = this._searchTerm.length;
+    if (this._cmView) {
+      this._cmView.dispatch({
+        changes: { from: pos, to: pos + termLen, insert: replaceWith },
+      });
+      toastr.info("已替换 1 处", "", { timeOut: 1000 });
+      this._doSearch();
+      return;
+    }
+    const isSendTextarea = this._targetTextarea[0] === getMessageInput()[0];
+    if (isSendTextarea) saveStateBeforeAction();
+    const text = this._targetTextarea.val();
     const newText =
       text.substring(0, pos) + replaceWith + text.substring(pos + termLen);
     this._targetTextarea.val(newText);
@@ -1050,10 +1442,21 @@ const findReplaceController = {
   _doReplaceAll() {
     if (this._matches.length === 0) return;
     if (!this._checkTarget()) return;
-    const isSendTextarea = this._targetTextarea[0] === getMessageInput()[0];
-    if (isSendTextarea) saveStateBeforeAction();
     const replaceWith = this._barEl.find(".ih-replace-input").val();
     const count = this._matches.length;
+    if (this._cmView) {
+      const changes = this._matches.map((p) => ({
+        from: p,
+        to: p + this._searchTerm.length,
+        insert: replaceWith,
+      }));
+      this._cmView.dispatch({ changes });
+      toastr.success(`已替换 ${count} 处`, "", { timeOut: 1500 });
+      this._doSearch();
+      return;
+    }
+    const isSendTextarea = this._targetTextarea[0] === getMessageInput()[0];
+    if (isSendTextarea) saveStateBeforeAction();
     const escaped = this._searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const regex = new RegExp(escaped, "gi");
     const newText = this._targetTextarea.val().replace(regex, replaceWith);
@@ -1089,10 +1492,13 @@ async function pickFaIcon() {
 
 const historyManager = {
   states: [],
+  _undoBtnEl: null,
+  _redoBtnEl: null,
   pointer: -1,
   maxHistory: 50,
   isPerformingUndoRedo: false,
   inputDebounceTimer: null,
+  externalHistories: new WeakMap(),
 
   init() {
     const textarea = getMessageInput();
@@ -1103,52 +1509,204 @@ const historyManager = {
     this.updateButtons();
   },
 
-  pushState(textarea) {
-    if (this.isPerformingUndoRedo) return;
-    const text = textarea.val();
-    const cursorPos = textarea.prop("selectionStart");
-    if (this.pointer >= 0 && this.states[this.pointer].text === text) return;
-    if (this.pointer < this.states.length - 1) {
-      this.states = this.states.slice(0, this.pointer + 1);
+  _getExternalHistory(el) {
+    let h = this.externalHistories.get(el);
+    if (!h) {
+      h = {
+        states: [{ text: el.value || "", cursorPos: el.selectionStart || 0 }],
+        pointer: 0,
+        isPerformingUndoRedo: false,
+        inputDebounceTimer: null,
+      };
+      this.externalHistories.set(el, h);
     }
-    this.states.push({ text, cursorPos });
-    if (this.states.length > this.maxHistory) this.states.shift();
-    this.pointer = this.states.length - 1;
-    this.updateButtons();
+    return h;
+  },
+
+  pushState(textarea) {
+    const el = textarea[0] || textarea;
+    if (!el) return;
+    if (el === getMessageInput()[0]) {
+      if (this.isPerformingUndoRedo) return;
+      const text = el.value;
+      const cursorPos = el.selectionStart;
+      if (this.pointer >= 0 && this.states[this.pointer].text === text) return;
+      if (this.pointer < this.states.length - 1) {
+        this.states = this.states.slice(0, this.pointer + 1);
+      }
+      this.states.push({ text, cursorPos });
+      if (this.states.length > this.maxHistory) this.states.shift();
+      this.pointer = this.states.length - 1;
+      this.updateButtons();
+    } else {
+      const h = this._getExternalHistory(el);
+      if (h.isPerformingUndoRedo) return;
+      const text = el.value || "";
+      const cursorPos = el.selectionStart || 0;
+      if (h.pointer >= 0 && h.states[h.pointer].text === text) return;
+      if (h.pointer < h.states.length - 1) {
+        h.states = h.states.slice(0, h.pointer + 1);
+      }
+      h.states.push({ text, cursorPos });
+      if (h.states.length > this.maxHistory) h.states.shift();
+      h.pointer = h.states.length - 1;
+      this.updateButtons();
+    }
   },
 
   undo() {
-    if (this.pointer <= 0) return;
-    const textarea = getMessageInput();
-    if (this.states[this.pointer].text !== textarea.val())
-      this.pushState(textarea);
-    this.isPerformingUndoRedo = true;
-    this.pointer--;
-    const state = this.states[this.pointer];
-    textarea.val(state.text);
-    setTimeout(() => {
-      textarea.prop("selectionStart", state.cursorPos);
-      textarea.prop("selectionEnd", state.cursorPos);
-      textarea.focus();
-      this.isPerformingUndoRedo = false;
-      this.updateButtons();
-    }, 0);
+    const target = getInsertionTarget();
+    if (!target) return;
+    if (target.isContentEditable) {
+      const cmView = getCodeMirrorView(target);
+      if (cmView) {
+        cmView.contentDOM.focus();
+        const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+        cmView.contentDOM.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "z",
+            code: "KeyZ",
+            keyCode: 90,
+            which: 90,
+            ctrlKey: !isMac,
+            metaKey: isMac,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        return;
+      }
+      target.focus();
+      try {
+        document.execCommand("undo");
+      } catch (e) {}
+      return;
+    }
+    if (target === getMessageInput()[0]) {
+      if (this.pointer <= 0) return;
+      const textarea = $(target);
+      if (this.states[this.pointer].text !== textarea.val())
+        this.pushState(textarea);
+      this.isPerformingUndoRedo = true;
+      this.pointer--;
+      const state = this.states[this.pointer];
+      textarea.val(state.text);
+      setTimeout(() => {
+        textarea.prop("selectionStart", state.cursorPos);
+        textarea.prop("selectionEnd", state.cursorPos);
+        textarea.focus();
+        this.isPerformingUndoRedo = false;
+        this.updateButtons();
+      }, 0);
+    } else {
+      const h = this._getExternalHistory(target);
+      if (h.pointer <= 0) {
+        target.focus();
+        try {
+          document.execCommand("undo");
+        } catch (e) {}
+        return;
+      }
+      if (h.states[h.pointer].text !== target.value) {
+        this.pushState($(target));
+      }
+      h.isPerformingUndoRedo = true;
+      h.pointer--;
+      const state = h.states[h.pointer];
+      target.value = state.text;
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+      setTimeout(() => {
+        try {
+          target.selectionStart = state.cursorPos;
+          target.selectionEnd = state.cursorPos;
+          target.focus();
+        } catch (e) {}
+        h.isPerformingUndoRedo = false;
+        this.updateButtons();
+      }, 0);
+    }
   },
 
   redo() {
-    if (this.pointer >= this.states.length - 1) return;
-    this.isPerformingUndoRedo = true;
-    this.pointer++;
-    const state = this.states[this.pointer];
-    const textarea = getMessageInput();
-    textarea.val(state.text);
-    setTimeout(() => {
-      textarea.prop("selectionStart", state.cursorPos);
-      textarea.prop("selectionEnd", state.cursorPos);
-      textarea.focus();
-      this.isPerformingUndoRedo = false;
-      this.updateButtons();
-    }, 0);
+    const target = getInsertionTarget();
+    if (!target) return;
+    if (target.isContentEditable) {
+      const cmView = getCodeMirrorView(target);
+      if (cmView) {
+        cmView.contentDOM.focus();
+        const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+        if (isMac) {
+          cmView.contentDOM.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "z",
+              code: "KeyZ",
+              keyCode: 90,
+              which: 90,
+              metaKey: true,
+              shiftKey: true,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        } else {
+          cmView.contentDOM.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "y",
+              code: "KeyY",
+              keyCode: 89,
+              which: 89,
+              ctrlKey: true,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        }
+        return;
+      }
+      target.focus();
+      try {
+        document.execCommand("redo");
+      } catch (e) {}
+      return;
+    }
+    if (target === getMessageInput()[0]) {
+      if (this.pointer >= this.states.length - 1) return;
+      this.isPerformingUndoRedo = true;
+      this.pointer++;
+      const state = this.states[this.pointer];
+      const textarea = $(target);
+      textarea.val(state.text);
+      setTimeout(() => {
+        textarea.prop("selectionStart", state.cursorPos);
+        textarea.prop("selectionEnd", state.cursorPos);
+        textarea.focus();
+        this.isPerformingUndoRedo = false;
+        this.updateButtons();
+      }, 0);
+    } else {
+      const h = this._getExternalHistory(target);
+      if (h.pointer >= h.states.length - 1) {
+        target.focus();
+        try {
+          document.execCommand("redo");
+        } catch (e) {}
+        return;
+      }
+      h.isPerformingUndoRedo = true;
+      h.pointer++;
+      const state = h.states[h.pointer];
+      target.value = state.text;
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+      setTimeout(() => {
+        try {
+          target.selectionStart = state.cursorPos;
+          target.selectionEnd = state.cursorPos;
+          target.focus();
+        } catch (e) {}
+        h.isPerformingUndoRedo = false;
+        this.updateButtons();
+      }, 0);
+    }
   },
 
   onInput() {
@@ -1159,11 +1717,53 @@ const historyManager = {
     }, 800);
   },
 
+  onExternalInput(el) {
+    const h = this._getExternalHistory(el);
+    if (h.isPerformingUndoRedo) return;
+    clearTimeout(h.inputDebounceTimer);
+    h.inputDebounceTimer = setTimeout(() => {
+      this.pushState($(el));
+    }, 800);
+  },
+
+  _updateButtonsRaf: null,
   updateButtons() {
-    const undoDisabled = this.pointer <= 0;
-    const redoDisabled = this.pointer >= this.states.length - 1;
-    $("#input_undo_btn").toggleClass("input-helper-btn-disabled", undoDisabled);
-    $("#input_redo_btn").toggleClass("input-helper-btn-disabled", redoDisabled);
+    if (this._updateButtonsRaf) return;
+    this._updateButtonsRaf = requestAnimationFrame(() => {
+      this._updateButtonsRaf = null;
+      this._doUpdateButtons();
+    });
+  },
+  _doUpdateButtons() {
+    const target = getInsertionTarget();
+    let undoDisabled = true;
+    let redoDisabled = true;
+    if (target) {
+      if (target === getMessageInput()[0]) {
+        undoDisabled = this.pointer <= 0;
+        redoDisabled = this.pointer >= this.states.length - 1;
+      } else if (target.isContentEditable) {
+        undoDisabled = false;
+        redoDisabled = false;
+      } else {
+        const h = this.externalHistories.get(target);
+        if (h) {
+          undoDisabled = h.pointer <= 0;
+          redoDisabled = h.pointer >= h.states.length - 1;
+        } else {
+          undoDisabled = false;
+          redoDisabled = false;
+        }
+      }
+    }
+    if (!this._undoBtnEl || !document.contains(this._undoBtnEl[0])) {
+      this._undoBtnEl = $("#input_undo_btn");
+    }
+    if (!this._redoBtnEl || !document.contains(this._redoBtnEl[0])) {
+      this._redoBtnEl = $("#input_redo_btn");
+    }
+    this._undoBtnEl.toggleClass("input-helper-btn-disabled", undoDisabled);
+    this._redoBtnEl.toggleClass("input-helper-btn-disabled", redoDisabled);
     $(".ih-folder-dropdown-portal [data-button-key='undo']").toggleClass(
       "input-helper-btn-disabled",
       undoDisabled,
@@ -1262,46 +1862,124 @@ const shiftMode = {
   active: false,
   anchorPos: 0,
   _handler: null,
+  _targetEl: null,
+  _cmView: null,
+  _anchorNode: null,
+  _anchorOffset: 0,
 
   toggle() {
     this.active ? this.deactivate() : this.activate();
   },
 
   activate() {
-    const textarea = getMessageInput();
-    if (!textarea.length) return;
-    this.anchorPos = textarea.prop("selectionStart");
-    this.active = true;
-    this._handler = () => {
-      if (!this.active) return;
-      setTimeout(() => {
-        const ta = getMessageInput();
-        if (!ta.length) return;
-        const start = ta.prop("selectionStart");
-        const end = ta.prop("selectionEnd");
-        const anchor = this.anchorPos;
-        const target =
-          Math.abs(end - anchor) >= Math.abs(start - anchor) ? end : start;
-        ta.prop("selectionStart", Math.min(anchor, target));
-        ta.prop("selectionEnd", Math.max(anchor, target));
-      }, 10);
-    };
-    const el = textarea[0];
-    el.addEventListener("mouseup", this._handler);
-    el.addEventListener("touchend", this._handler);
+    const target = getInsertionTarget();
+    if (!target) return;
+    if (target.isContentEditable) {
+      const cmView = getCodeMirrorView(target);
+      if (cmView) {
+        this._cmView = cmView;
+        this._targetEl = cmView.contentDOM;
+        this.anchorPos = cmView.state.selection.main.head;
+        this.active = true;
+        this._handler = () => {
+          if (!this.active || !this._cmView) return;
+          setTimeout(() => {
+            try {
+              const state = this._cmView.state;
+              const currentHead = state.selection.main.head;
+              const anchor = this.anchorPos;
+              if (currentHead !== anchor) {
+                this._cmView.dispatch({
+                  selection: { anchor: anchor, head: currentHead },
+                });
+              }
+            } catch (e) {}
+          }, 10);
+        };
+        cmView.contentDOM.addEventListener("mouseup", this._handler);
+        cmView.contentDOM.addEventListener("touchend", this._handler);
+      } else {
+        const doc = target.ownerDocument || document;
+        const win = doc.defaultView || window;
+        const sel = win.getSelection();
+        if (!sel || sel.rangeCount === 0) {
+          toastr.warning("无法获取光标位置", "", { timeOut: 1500 });
+          return;
+        }
+        this._targetEl = target;
+        this._anchorNode = sel.focusNode;
+        this._anchorOffset = sel.focusOffset;
+        this.active = true;
+        this._handler = () => {
+          if (!this.active || !this._targetEl) return;
+          setTimeout(() => {
+            try {
+              const s = win.getSelection();
+              if (!s || s.rangeCount === 0) return;
+              s.setBaseAndExtent(
+                this._anchorNode,
+                this._anchorOffset,
+                s.focusNode,
+                s.focusOffset,
+              );
+            } catch (e) {}
+          }, 10);
+        };
+        target.addEventListener("mouseup", this._handler);
+        target.addEventListener("touchend", this._handler);
+      }
+    } else {
+      this._targetEl = target;
+      this.anchorPos = target.selectionStart || 0;
+      this.active = true;
+      this._handler = () => {
+        if (!this.active || !this._targetEl) return;
+        setTimeout(() => {
+          const ta = this._targetEl;
+          if (!ta) return;
+          try {
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd;
+            const anchor = this.anchorPos;
+            const t =
+              Math.abs(end - anchor) >= Math.abs(start - anchor) ? end : start;
+            ta.selectionStart = Math.min(anchor, t);
+            ta.selectionEnd = Math.max(anchor, t);
+          } catch (e) {}
+        }, 10);
+      };
+      target.addEventListener("mouseup", this._handler);
+      target.addEventListener("touchend", this._handler);
+    }
     $("#input_shift_btn").addClass("input-helper-btn-active");
+    $(".ih-folder-dropdown-portal [data-button-key='shift']").addClass(
+      "input-helper-btn-active",
+    );
+    $(".ih-floating-panel [data-button-key='shift']").addClass(
+      "input-helper-btn-active",
+    );
   },
 
   deactivate() {
     this.active = false;
-    const textarea = getMessageInput();
-    if (this._handler && textarea.length) {
-      const el = textarea[0];
-      el.removeEventListener("mouseup", this._handler);
-      el.removeEventListener("touchend", this._handler);
+    if (this._handler && this._targetEl) {
+      try {
+        this._targetEl.removeEventListener("mouseup", this._handler);
+        this._targetEl.removeEventListener("touchend", this._handler);
+      } catch (e) {}
     }
     this._handler = null;
+    this._targetEl = null;
+    this._cmView = null;
+    this._anchorNode = null;
+    this._anchorOffset = 0;
     $("#input_shift_btn").removeClass("input-helper-btn-active");
+    $(".ih-folder-dropdown-portal [data-button-key='shift']").removeClass(
+      "input-helper-btn-active",
+    );
+    $(".ih-floating-panel [data-button-key='shift']").removeClass(
+      "input-helper-btn-active",
+    );
   },
 };
 
@@ -1347,7 +2025,7 @@ function _doUpdateToolbarMaxHeight() {
 
 function generateFaIconProtectionCSS() {
   clearTimeout(_faProtectionTimer);
-  _faProtectionTimer = setTimeout(_doGenerateFaIconProtectionCSS, 50);
+  _faProtectionTimer = setTimeout(_doGenerateFaIconProtectionCSS, 150);
 }
 
 function _doGenerateFaIconProtectionCSS() {
@@ -1466,8 +2144,18 @@ ${css}`;
   }
 }
 
+let _cachedMessageInput = null;
 function getMessageInput() {
-  return $("#send_textarea, #prompt_textarea").first();
+  if (
+    _cachedMessageInput &&
+    _cachedMessageInput.length &&
+    _cachedMessageInput[0] &&
+    document.contains(_cachedMessageInput[0])
+  ) {
+    return _cachedMessageInput;
+  }
+  _cachedMessageInput = $("#send_textarea, #prompt_textarea").first();
+  return _cachedMessageInput;
 }
 
 function saveStateBeforeAction() {
@@ -1514,6 +2202,9 @@ function getButtonIdFromKey(key) {
     jumpToFloor: "input_jump_to_floor_btn",
     findReplace: "input_find_replace_btn",
     openQRAssistant: "input_open_qr_assistant_btn",
+    switchPanelProfile: "input_switch_panel_profile_btn",
+    bottomNavMode: "input_bottom_nav_mode_btn",
+    enterDeleteMode: "input_enter_delete_mode_btn",
   };
   return map[key] || "";
 }
@@ -1548,26 +2239,90 @@ function getButtonLabel(key) {
 
 function insertPair(left, right, cursorOffset) {
   if (!getSettings().enabled) return;
-  saveStateBeforeAction();
-  const textarea = getMessageInput();
-  const startPos = textarea.prop("selectionStart");
-  const endPos = textarea.prop("selectionEnd");
-  const text = textarea.val();
+  const target = getInsertionTarget();
+  if (!target) return;
+  console.log("[输入助手调试]", {
+    target: target,
+    tagName: target.tagName,
+    isContentEditable: target.isContentEditable,
+    inIframe: target.ownerDocument !== document,
+    lastFocusedEditable: _lastFocusedEditable,
+    activeElement: document.activeElement,
+  });
+  const isExternal = isExternalTarget(target);
+
+  if (target.isContentEditable) {
+    const cmView = getCodeMirrorView(target);
+    if (cmView) {
+      const state = cmView.state;
+      const { from, to } = state.selection.main;
+      const selectedText = state.sliceDoc(from, to);
+      const insert = left + selectedText + right;
+      cmView.dispatch({
+        changes: { from, to, insert },
+        selection:
+          selectedText.length > 0
+            ? {
+                anchor: from + left.length,
+                head: from + left.length + selectedText.length,
+              }
+            : { anchor: from + left.length },
+      });
+      cmView.focus();
+      return;
+    }
+    insertToContentEditable(target, left, right, cursorOffset);
+    return;
+  }
+
+  if (isExternal) historyManager.pushState($(target));
+  else saveStateBeforeAction();
+  const startPos = target.selectionStart || 0;
+  const endPos = target.selectionEnd || 0;
+  const text = target.value || "";
   const selected = text.substring(startPos, endPos);
   const insert = left + selected + right;
   const newText = text.substring(0, startPos) + insert + text.substring(endPos);
-  textarea.val(newText);
+  target.value = newText;
+  target.dispatchEvent(new Event("input", { bubbles: true }));
+
   setTimeout(() => {
-    textarea.prop("selectionStart", startPos + cursorOffset);
-    textarea.prop(
-      "selectionEnd",
-      selected.length > 0
-        ? startPos + cursorOffset + selected.length
-        : startPos + cursorOffset,
-    );
-    textarea.focus();
-    historyManager.pushState(textarea);
+    try {
+      target.selectionStart = startPos + cursorOffset;
+      target.selectionEnd =
+        selected.length > 0
+          ? startPos + cursorOffset + selected.length
+          : startPos + cursorOffset;
+      target.focus();
+    } catch (e) {}
+    historyManager.pushState($(target));
   }, 0);
+}
+
+function insertToContentEditable(el, left, right, cursorOffset) {
+  const doc = el.ownerDocument || document;
+  const win = doc.defaultView || window;
+  el.focus();
+  const sel = win.getSelection();
+  if (_savedRange) {
+    try {
+      if (
+        _savedRange.startContainer &&
+        doc.contains(_savedRange.startContainer)
+      ) {
+        sel.removeAllRanges();
+        sel.addRange(_savedRange);
+      }
+    } catch (e) {}
+    _savedRange = null;
+  }
+  if (!sel || sel.rangeCount === 0) {
+    doc.execCommand("insertText", false, left + right);
+    return;
+  }
+  const selectedText = sel.toString();
+  const insertText = left + selectedText + right;
+  doc.execCommand("insertText", false, insertText);
 }
 
 function insertQuotes() {
@@ -1591,36 +2346,109 @@ function insertBookQuotes3() {
 
 function insertNewLine() {
   if (!getSettings().enabled) return;
-  saveStateBeforeAction();
-  const textarea = getMessageInput();
-  const text = textarea.val();
-  const cursorPos = textarea.prop("selectionStart");
+  const target = getInsertionTarget();
+  if (!target) return;
+  const isExternal = isExternalTarget(target);
+
+  if (target.isContentEditable) {
+    const cmView = getCodeMirrorView(target);
+    if (cmView) {
+      const state = cmView.state;
+      const pos = state.selection.main.head;
+      const line = state.doc.lineAt(pos);
+      cmView.dispatch({
+        changes: { from: line.to, insert: "\n" },
+        selection: { anchor: line.to + 1 },
+      });
+      cmView.focus();
+      return;
+    }
+    const doc = target.ownerDocument || document;
+    const win = doc.defaultView || window;
+    target.focus();
+    const sel = win.getSelection();
+    if (_savedRange) {
+      try {
+        sel.removeAllRanges();
+        sel.addRange(_savedRange);
+      } catch (e) {}
+      _savedRange = null;
+    }
+    try {
+      doc.execCommand("insertLineBreak");
+    } catch (e) {
+      doc.execCommand("insertHTML", false, "<br>");
+    }
+    return;
+  }
+
+  if (isExternal) historyManager.pushState($(target));
+  else saveStateBeforeAction();
+  const text = target.value || "";
+  const cursorPos = target.selectionStart || 0;
   let lineEnd = text.indexOf("\n", cursorPos);
   if (lineEnd === -1) lineEnd = text.length;
   const newText = text.substring(0, lineEnd) + "\n" + text.substring(lineEnd);
-  textarea.val(newText);
+  target.value = newText;
+  target.dispatchEvent(new Event("input", { bubbles: true }));
   setTimeout(() => {
-    textarea.prop("selectionStart", lineEnd + 1);
-    textarea.prop("selectionEnd", lineEnd + 1);
-    textarea.focus();
-    historyManager.pushState(textarea);
+    try {
+      target.selectionStart = lineEnd + 1;
+      target.selectionEnd = lineEnd + 1;
+      target.focus();
+    } catch (e) {}
+    historyManager.pushState($(target));
   }, 0);
 }
 
 function insertTag(tag) {
   if (!getSettings().enabled) return;
-  saveStateBeforeAction();
-  const textarea = getMessageInput();
-  const startPos = textarea.prop("selectionStart");
-  const endPos = textarea.prop("selectionEnd");
-  const text = textarea.val();
+  const target = getInsertionTarget();
+  if (!target) return;
+  const isExternal = isExternalTarget(target);
+
+  if (target.isContentEditable) {
+    const cmView = getCodeMirrorView(target);
+    if (cmView) {
+      const state = cmView.state;
+      const { from, to } = state.selection.main;
+      cmView.dispatch({
+        changes: { from, to, insert: tag },
+        selection: { anchor: from + tag.length },
+      });
+      cmView.focus();
+      return;
+    }
+    const doc = target.ownerDocument || document;
+    const win = doc.defaultView || window;
+    target.focus();
+    const sel = win.getSelection();
+    if (_savedRange) {
+      try {
+        sel.removeAllRanges();
+        sel.addRange(_savedRange);
+      } catch (e) {}
+      _savedRange = null;
+    }
+    doc.execCommand("insertText", false, tag);
+    return;
+  }
+
+  if (isExternal) historyManager.pushState($(target));
+  else saveStateBeforeAction();
+  const startPos = target.selectionStart || 0;
+  const endPos = target.selectionEnd || 0;
+  const text = target.value || "";
   const newText = text.substring(0, startPos) + tag + text.substring(endPos);
-  textarea.val(newText);
+  target.value = newText;
+  target.dispatchEvent(new Event("input", { bubbles: true }));
   setTimeout(() => {
-    textarea.prop("selectionStart", startPos + tag.length);
-    textarea.prop("selectionEnd", startPos + tag.length);
-    textarea.focus();
-    historyManager.pushState(textarea);
+    try {
+      target.selectionStart = startPos + tag.length;
+      target.selectionEnd = startPos + tag.length;
+      target.focus();
+    } catch (e) {}
+    historyManager.pushState($(target));
   }, 0);
 }
 
@@ -1632,11 +2460,13 @@ function insertCharTag() {
 }
 
 function doScrollToTop() {
-  const chatEl = document.getElementById("chat");
-  if (chatEl) chatEl.scrollTo({ top: 0, behavior: "smooth" });
-  messageNavigation._currentAiIndex = -1;
-  messageNavigation._lastNavTime = Date.now();
-  messageNavigation._pendingJump = "top";
+  const scrollEl = findActiveScrollContainer();
+  if (scrollEl) scrollEl.scrollTo({ top: 0, behavior: "smooth" });
+  if (scrollEl === document.getElementById("chat")) {
+    messageNavigation._currentAiIndex = -1;
+    messageNavigation._lastNavTime = Date.now();
+    messageNavigation._pendingJump = "top";
+  }
 }
 
 function doScrollToLastAi() {
@@ -1648,12 +2478,15 @@ function doScrollToLastAi() {
 }
 
 function doScrollToBottom() {
-  const chatEl = document.getElementById("chat");
-  if (chatEl) chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: "smooth" });
-  const aiMessages = $("#chat .mes[is_user='false']:visible");
-  messageNavigation._currentAiIndex = aiMessages.length;
-  messageNavigation._lastNavTime = Date.now();
-  messageNavigation._pendingJump = "bottom";
+  const scrollEl = findActiveScrollContainer();
+  if (scrollEl)
+    scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "smooth" });
+  if (scrollEl === document.getElementById("chat")) {
+    const aiMessages = $("#chat .mes[is_user='false']:visible");
+    messageNavigation._currentAiIndex = aiMessages.length;
+    messageNavigation._lastNavTime = Date.now();
+    messageNavigation._pendingJump = "bottom";
+  }
 }
 
 function doPrevAiMsg() {
@@ -1729,7 +2562,7 @@ function doJumpToFloor() {
   overlay.append(content);
   syncDialogTheme(content[0]);
   content.on("click", (e) => e.stopPropagation());
-  requestAnimationFrame(() => generateFaIconProtectionCSS());
+  generateFaIconProtectionCSS();
   const closeDialog = () => {
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
@@ -1802,14 +2635,52 @@ function doGenerateSwipe() {
 
 function insertCustomSymbol(symbol) {
   if (!getSettings().enabled) return;
-  saveStateBeforeAction();
-  const textarea = getMessageInput();
-  const startPos = textarea.prop("selectionStart");
-  const endPos = textarea.prop("selectionEnd");
-  const text = textarea.val();
+  const target = getInsertionTarget();
+  if (!target) return;
+  const isExternal = isExternalTarget(target);
+
+  if (target.isContentEditable) {
+    const cmView = getCodeMirrorView(target);
+    if (cmView) {
+      const state = cmView.state;
+      const { from, to } = state.selection.main;
+      let cp;
+      if (symbol.cursorPos === "start") cp = 0;
+      else if (symbol.cursorPos === "end") cp = symbol.symbol.length;
+      else if (symbol.cursorPos === "middle")
+        cp = Math.floor(symbol.symbol.length / 2);
+      else cp = parseInt(symbol.cursorPos) || 0;
+      cmView.dispatch({
+        changes: { from, to, insert: symbol.symbol },
+        selection: { anchor: from + cp },
+      });
+      cmView.focus();
+      return;
+    }
+    const doc = target.ownerDocument || document;
+    const win = doc.defaultView || window;
+    target.focus();
+    const sel = win.getSelection();
+    if (_savedRange) {
+      try {
+        sel.removeAllRanges();
+        sel.addRange(_savedRange);
+      } catch (e) {}
+      _savedRange = null;
+    }
+    doc.execCommand("insertText", false, symbol.symbol);
+    return;
+  }
+
+  if (isExternal) historyManager.pushState($(target));
+  else saveStateBeforeAction();
+  const startPos = target.selectionStart || 0;
+  const endPos = target.selectionEnd || 0;
+  const text = target.value || "";
   const newText =
     text.substring(0, startPos) + symbol.symbol + text.substring(endPos);
-  textarea.val(newText);
+  target.value = newText;
+  target.dispatchEvent(new Event("input", { bubbles: true }));
   setTimeout(() => {
     let cursorPos;
     if (symbol.cursorPos === "start") cursorPos = startPos;
@@ -1818,10 +2689,12 @@ function insertCustomSymbol(symbol) {
     else if (symbol.cursorPos === "middle")
       cursorPos = startPos + Math.floor(symbol.symbol.length / 2);
     else cursorPos = startPos + (parseInt(symbol.cursorPos) || 0);
-    textarea.prop("selectionStart", cursorPos);
-    textarea.prop("selectionEnd", cursorPos);
-    textarea.focus();
-    historyManager.pushState(textarea);
+    try {
+      target.selectionStart = cursorPos;
+      target.selectionEnd = cursorPos;
+      target.focus();
+    } catch (e) {}
+    historyManager.pushState($(target));
   }, 0);
 }
 
@@ -1972,6 +2845,8 @@ function openBeautyPromptPanel() {
 插件通过 JS 给 #send_form 添加/移除 .textarea-focused 类来控制工具栏展开收起。
 展开选择器为：#send_form.textarea-focused .input-helper-toolbar
 固定展开选择器为：#send_form.ih-toolbar-pinned .input-helper-toolbar
+外部输入框聚焦展开选择器为：#send_form.ih-external-focused .input-helper-toolbar
+（当用户点击其他位置的输入框（如沙盒网页里的输入框）时，工具栏也会展开，方便插入内容到那些输入框）
 
 插件按钮的默认样式供参考（你可以按需覆盖其中任何属性）：
 - display: inline-flex，内容自适应宽度
@@ -2017,6 +2892,14 @@ function openBeautyPromptPanel() {
 - 面板按钮悬停：.ih-floating-panel .input-helper-btn:hover
 - 面板按钮按下：.ih-floating-panel .input-helper-btn:active
 
+### 双栏模式（可选）
+工具栏开启双栏模式后，\`#input_helper_toolbar\` 会自动获得 \`.ih-two-row-active\` class，
+内部会生成 \`.ih-two-row-container\` 容器，包含两行：
+- 符号栏：.ih-two-row.ih-two-row-input
+- 功能栏：.ih-two-row.ih-two-row-function
+这两行各自可以横向滚动。如果需要在双栏模式下微调各行样式，可以使用以上选择器。
+注意不要改变 flex-direction 等布局属性。
+
 ## 重要约束（必须遵守）
 
 1. **不要写 display 属性**
@@ -2041,7 +2924,10 @@ function openBeautyPromptPanel() {
    如果你不需要修改容器外观，可以完全不写容器样式。
 
 3. **不要用 :hover 或 :focus-within 控制工具栏展开**
-   插件的伸缩逻辑通过 JS 给 #send_form 添加 .textarea-focused 类来控制，
+   插件的伸缩逻辑通过 JS 给 #send_form 添加以下类来控制：
+   - .textarea-focused：发送框聚焦时
+   - .ih-external-focused：外部输入框（如沙盒网页输入框）聚焦时
+   - .ih-toolbar-pinned：固定展开模式
    只在用户手动点击输入框时才触发展开。
    不要写 \`#send_form:hover\` 或 \`#send_form:focus-within\` 来控制工具栏的
    max-height、opacity、pointer-events 等展开属性，否则会导致：
@@ -2049,6 +2935,7 @@ function openBeautyPromptPanel() {
    - 点击输入栏内其他插件按钮时工具栏意外弹出
    如果你需要覆盖展开状态的样式，使用：
    \`#send_form.textarea-focused .input-helper-toolbar\`
+   \`#send_form.ih-external-focused .input-helper-toolbar\`
    或固定展开时使用：
    \`#send_form.ih-toolbar-pinned .input-helper-toolbar\`
 
@@ -2057,20 +2944,28 @@ function openBeautyPromptPanel() {
    的组合（通常用于图标渐变效果），请确保这些选择器不会命中快捷工具栏的按钮。
    否则按钮文字会变透明看不见。
 
-5. **每条属性加 !important**（display 除外）
+5. **中文符号按钮的特殊样式**
+   插件通过 JS 检测按钮文本中的 CJK 字符（中日韩文字及符号），对纯文本按钮（无图标）自动应用
+   \`letter-spacing: -3px\` 和 \`padding: 3px\` 的 inline style + !important 来收窄按钮宽度。
+   这会影响「」『』《》三个内置按钮，以及任何显示文字包含中文的自定义按钮。
+   悬浮面板中的 CJK 按钮也有类似的 padding 收窄处理。
+   由于是 inline style + !important，外部 CSS 无法覆盖这些属性。
+   通常不需要单独处理这些按钮。
+
+6. **每条属性加 !important**（display 除外）
    因为需要覆盖插件默认样式，所有属性都需要 !important。
    唯一例外是 display 属性，原因见第 1 条。
 
-6. **容器高度由 CSS 变量 \`--ih-toolbar-max-h\` 控制**
+7. **容器高度由 CSS 变量 \`--ih-toolbar-max-h\` 控制**
    插件 JS 会动态计算工具栏内容高度并设置这个变量。
    不要用固定的 \`max-height\` 值覆盖它，否则双栏模式下按钮会被裁切。
 
-7. **不要写查找替换栏的容器样式**
+8. **不要写查找替换栏的容器样式**
    不要给 \`.ih-find-bar\` 写任何样式。
    查找替换栏由插件控制显示/隐藏和定位，覆盖后会导致动画和定位异常。
    如果需要美化查找栏内的按钮，使用上述「查找替换栏按钮」部分提供的选择器。
 
-8. **悬浮球样式约束**
+9. **悬浮球样式约束**
    如果你要给 \`.ih-floating-ball\` 写样式：
    - ✅ 允许：background、background-color、background-image、background-size、
      background-position、background-repeat、border、border-color、
@@ -2096,7 +2991,7 @@ function openBeautyPromptPanel() {
    CSS 背景色/背景图会被图片遮住。美化有图片的球时，
    建议用 border、box-shadow、outline 等不会被遮挡的属性做外框装饰。
 
-9. **悬浮面板样式约束**
+10. **悬浮面板样式约束**
    如果你要给 \`.ih-floating-panel\` 写样式：
    - ✅ 允许：background、background-color、border、border-color、border-radius、
      box-shadow、opacity、backdrop-filter、filter、color、outline
@@ -2137,7 +3032,7 @@ function openBeautyPromptPanel() {
   overlay.append(content);
   syncDialogTheme(content[0]);
   content.on("click", (e) => e.stopPropagation());
-  requestAnimationFrame(() => generateFaIconProtectionCSS());
+  generateFaIconProtectionCSS();
   const closeDialog = () => {
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
@@ -2187,7 +3082,10 @@ function openHelpPanel() {
     <i class="fa-solid fa-circle-question"></i> 快捷工具栏 使用说明
 </h3>
 <div style="font-size:12px;line-height:1.8;opacity:0.92;">
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-keyboard"></i> 符号按钮</h4>
+<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-globe"></i> 外部输入框支持</h4>
+<p>工具栏不只服务于聊天输入框，当你编辑聊天中的消息、点击酒馆沙盒网页、iframe 中的输入框、CodeMirror 编辑器、contentEditable 区域时，工具栏也会自动展开，此时点击符号按钮或自定义内容按钮会插入到你正在编辑的外部输入框中。</p>
+<p>这意味着你可以在编辑角色卡定义、世界书条目、预设内容等场景中，也能使用撤回/重做、查找替换、shift选中模式、符号插入等功能。</p>
+<p>此外，当光标在设置面板、世界书编辑器等非聊天区域的输入框中时，回顶/回底/翻页等滚动功能会自动作用于光标所在的可滚动容器，而不是默认的聊天区。</p>
 <p>点击工具栏上的符号按钮（如 <b>**</b>、<b>""</b>、<b>()</b>、<b>「」</b> 等），会在输入框光标处插入对应符号，并自动将光标定位在符号中间，方便直接输入内容。</p>
 <p>如果先选中文本再点击符号按钮，选中的文本会被符号包裹。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-rotate-left"></i> 撤回 / 重做</h4>
@@ -2203,6 +3101,7 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-book-open"></i> <b>翻页模式</b>：开启后，上/下导航变为翻页（也支持音量键翻页，需安装Key Mapper）；双击音量上键跳到最新AI消息顶部，双击音量下键跳到聊天底部。移动端开启翻页模式后，点击聊天区域上半部分向上翻页，下半部分向下翻页</li>
     <li><i class="fa-solid fa-gauge-high"></i> <b>自动滚动</b>：以设定速度自动向下滚动，适合阅读长文；用户手动滚动时暂停，2秒后恢复</li>
     <li><i class="fa-solid fa-location-dot"></i> <b>跳转指定楼层</b>：输入楼层号直接跳转</li>
+    <li><i class="fa-solid fa-angle-double-down"></i> <b>底部跳转模式</b>：开启后，上/下一条AI消息跳转改为对齐消息底部，而不是顶部。适合从底部往上浏览的阅读习惯</li>
 </ul>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-wand-magic-sparkles"></i> 消息操作</h4>
 <ul style="margin:4px 0;padding-left:18px;list-style:none;">
@@ -2210,7 +3109,10 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-scissors"></i> <b>删除当前备选</b>：删除最后一条消息的当前 Swipe</li>
     <li><i class="fa-solid fa-forward"></i> <b>继续回复</b>：让AI继续生成上一条回复</li>
     <li><i class="fa-solid fa-rotate"></i> <b>重新生成</b>：重新生成最后一条AI回复</li>
-    <li><i class="fa-solid fa-magnifying-glass"></i> <b>查找替换</b>：在输入框或正在编辑中的消息里查找和替换文本，支持 Enter 跳转下一个、Shift+Enter 跳转上一个、Esc 关闭</li>
+    <li><i class="fa-solid fa-shuffle"></i> <b>生成备选回复</b>：为最后一条AI消息生成一条新的备选回复（Swipe）</li>
+    <li><i class="fa-solid fa-trash-arrow-up"></i> <b>撤回删除</b>：在执行删除消息或删除备选等操作后，点击此按钮可以撤回到操作前的状态。快照保留 5 分钟，过期或切换聊天后自动清除</li>
+    <li><i class="fa-solid fa-trash-can"></i> <b>进入删除模式</b>：一键进入/退出酒馆原生的消息多选删除模式。进入后可以勾选多条消息批量删除</li>
+    <li><i class="fa-solid fa-magnifying-glass"></i> <b>查找替换</b>：在输入框、正在编辑中的消息、以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）里查找和替换文本，支持 Enter 跳转下一个、Shift+Enter 跳转上一个、Esc 关闭</li>
 </ul>
 <p style="opacity:0.7;font-size:11px;">⚠️ 删除类操作可在设置中开启"删除操作前弹窗确认"来防止误操作。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-ghost"></i> 消息隐藏管理</h4>
@@ -2233,6 +3135,7 @@ function openHelpPanel() {
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-circle-dot"></i> 悬浮面板</h4>
 <p>开启后会出现一个可拖拽的悬浮球或固定面板。可以把导航跳转等功能按钮放进去。悬浮球模式下点击展开面板，点击其他区域自动收起；固定面板模式下常驻显示。支持自定义悬浮球样式（包括GIF）、面板方向（横向/竖向）。放进悬浮面板的按钮不会在主工具栏中重复显示。面板中的按钮可拖拽排序。</p>
 <p><b>透明背景</b>选项仅在上传了自定义图片时生效，开启后悬浮球的默认边框、阴影、背景色都会隐藏，只显示图片本身。</p>
+<p><b>面板方案</b>：可以创建多套面板按钮配置（比如"全屏模式"用翻页按钮、"编辑模式"用符号按钮），通过设置面板里的方案管理器切换，或者把「切换面板方案」按钮放进悬浮面板，一键循环切换不同布局。</p>
 <p>开启「自动隐藏」后，悬浮球/面板平时隐藏，点击聊天区域显示，再次点击聊天区域或点击其他区域自动隐藏。翻页模式开启时会自动显示悬浮球，关闭翻页后自动隐藏回去。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-bolt"></i> 自动跳转</h4>
 <p>开启"非流自动跳转至AI消息顶部"后，非流式模式下 AI 生成回复完毕会自动滚动到该条消息的顶部，方便从头阅读长回复。流式输出时不受影响。</p>
@@ -2258,7 +3161,7 @@ function openHelpPanel() {
   overlay.append(content);
   syncDialogTheme(content[0]);
   content.on("click", (e) => e.stopPropagation());
-  requestAnimationFrame(() => generateFaIconProtectionCSS());
+  generateFaIconProtectionCSS();
   const closeDialog = () => {
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
@@ -2328,7 +3231,7 @@ function openHideManagerPanel() {
   overlay.append(content);
   syncDialogTheme(content[0]);
   content.on("click", (e) => e.stopPropagation());
-  requestAnimationFrame(() => generateFaIconProtectionCSS());
+  generateFaIconProtectionCSS();
   const closeDialog = () => {
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
@@ -2394,6 +3297,9 @@ const floatingPanelController = {
   _dragOffset: { x: 0, y: 0 },
   _expanded: false,
   _imageRefreshTimer: null,
+  _dialogObserver: null,
+  _dialogDebounceTimer: null,
+  _currentDialogHost: null,
   _autoHideVisible: true,
   _ahTouchStart: null,
   _ahTouchMove: null,
@@ -2413,12 +3319,16 @@ const floatingPanelController = {
     this._createPanel();
     this._updateVisibility();
     this._setupAutoHide();
+    this._setupDialogDetection();
     this._setupKeyboardAdaptation();
+    this._setupWindowResize();
   },
 
   destroy() {
     this._removeAutoHide();
+    this._removeDialogDetection();
     this._removeKeyboardAdaptation();
+    this._removeWindowResize();
     if (this._panelEl) {
       this._panelEl.remove();
       this._panelEl = null;
@@ -2548,6 +3458,7 @@ const floatingPanelController = {
     ].forEach((evt) => {
       panel[0].addEventListener(evt, (e) => e.stopPropagation(), false);
     });
+    panel[0].addEventListener("mousedown", (e) => e.preventDefault(), false);
     this._panelEl = panel;
     if (fp.displayMode === "ball") {
       panel.hide();
@@ -2564,7 +3475,7 @@ const floatingPanelController = {
       .find("[data-button-key='findReplace']")
       .toggleClass("input-helper-btn-active", findReplaceController.active);
     historyManager.updateButtons();
-    requestAnimationFrame(() => generateFaIconProtectionCSS());
+    generateFaIconProtectionCSS();
   },
 
   _setupDrag(el, isBall, handle, onTap) {
@@ -2740,7 +3651,6 @@ const floatingPanelController = {
       this._panelEl
         .find(".ih-fp-btn")
         .toggleClass("input-helper-btn-active", false);
-      syncToolbarButtonStyles(this._panelEl);
       this._panelEl
         .find("[data-button-key='pagingMode']")
         .toggleClass("input-helper-btn-active", pagingController.active);
@@ -2754,7 +3664,16 @@ const floatingPanelController = {
   },
   _applyButtonSize(el, size) {
     const pv = Math.max(2, Math.round(size * 0.25));
-    const ph = Math.max(4, Math.round(size * 0.5));
+    let ph = Math.max(4, Math.round(size * 0.5));
+    const text = el.textContent || "";
+    const hasCJK =
+      /[\u3000-\u303f\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\uff00-\uffef]/.test(
+        text,
+      );
+    if (hasCJK) {
+      ph = Math.max(2, Math.round(size * 0.17));
+    }
+
     el.style.setProperty("font-size", `${size}px`, "important");
     el.style.setProperty("padding", `${pv}px ${ph}px`, "important");
   },
@@ -3008,6 +3927,62 @@ const floatingPanelController = {
     window.visualViewport.addEventListener("resize", this._vvResizeHandler);
   },
 
+  _winResizeHandler: null,
+
+  _setupWindowResize() {
+    const self = this;
+    this._winResizeHandler = function () {
+      self._clampToViewport();
+    };
+    window.addEventListener("resize", this._winResizeHandler);
+    window.addEventListener("orientationchange", this._winResizeHandler);
+  },
+
+  _removeWindowResize() {
+    if (this._winResizeHandler) {
+      window.removeEventListener("resize", this._winResizeHandler);
+      window.removeEventListener("orientationchange", this._winResizeHandler);
+      this._winResizeHandler = null;
+    }
+  },
+
+  _clampToViewport() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const targets = [];
+    if (this._ballEl && this._ballEl.length) targets.push(this._ballEl);
+    if (this._panelEl && this._panelEl.length) targets.push(this._panelEl);
+    let saved = false;
+    targets.forEach((t) => {
+      const el = t[0];
+      const w = el.offsetWidth || 0;
+      const h = el.offsetHeight || 0;
+      if (!w || !h) return;
+      let left = parseFloat(el.style.left);
+      let top = parseFloat(el.style.top);
+      if (isNaN(left) || isNaN(top)) return;
+      const newLeft = Math.max(0, Math.min(vw - w, left));
+      const newTop = Math.max(0, Math.min(vh - h, top));
+      if (newLeft !== left || newTop !== top) {
+        el.style.left = newLeft + "px";
+        el.style.top = newTop + "px";
+        if (t === this._ballEl || (t === this._panelEl && !this._ballEl)) {
+          if (!saved) {
+            const fp = getSettings().floatingPanel;
+            fp.position = { x: Math.round(newLeft), y: Math.round(newTop) };
+            saveSettingsDebounced();
+            saved = true;
+          }
+        }
+      }
+    });
+    if (this._expanded && this._ballEl && this._panelEl) {
+      this._panelEl.stop(true).hide();
+      this._expanded = false;
+      this._updateBallImage();
+    }
+  },
+
   _removeKeyboardAdaptation() {
     if (this._vvResizeHandler && window.visualViewport) {
       window.visualViewport.removeEventListener(
@@ -3075,6 +4050,100 @@ const floatingPanelController = {
     }
   },
 
+  _setupDialogDetection() {
+    if (this._dialogObserver) return;
+    const self = this;
+    this._dialogObserver = new MutationObserver(() => {
+      clearTimeout(self._dialogDebounceTimer);
+      self._dialogDebounceTimer = setTimeout(() => {
+        self._updateDialogHost();
+      }, 100);
+    });
+    this._dialogObserver.observe(document.body, {
+      childList: true,
+      subtree: false,
+    });
+    this._updateDialogHost();
+  },
+
+  _removeDialogDetection() {
+    if (this._dialogObserver) {
+      this._dialogObserver.disconnect();
+      this._dialogObserver = null;
+    }
+    clearTimeout(this._dialogDebounceTimer);
+    if (this._currentDialogHost) {
+      this._moveElementsToBody();
+      this._currentDialogHost = null;
+    }
+  },
+
+  _updateDialogHost() {
+    const openDialogs = document.querySelectorAll("dialog[open]");
+    const topDialog =
+      openDialogs.length > 0 ? openDialogs[openDialogs.length - 1] : null;
+    if (topDialog === this._currentDialogHost) return;
+    this._currentDialogHost = topDialog;
+    if (topDialog) {
+      this._moveElementsToDialog(topDialog);
+    } else {
+      this._moveElementsToBody();
+    }
+  },
+
+  _moveElementsToDialog(dialog) {
+    const self = this;
+    if (
+      this._ballEl &&
+      this._ballEl[0] &&
+      this._ballEl[0].parentNode !== dialog
+    ) {
+      dialog.appendChild(this._ballEl[0]);
+    }
+    if (
+      this._panelEl &&
+      this._panelEl[0] &&
+      this._panelEl[0].parentNode !== dialog
+    ) {
+      dialog.appendChild(this._panelEl[0]);
+    }
+    dialog.addEventListener(
+      "close",
+      function () {
+        if (self._currentDialogHost === dialog) {
+          self._currentDialogHost = undefined;
+        }
+        self._moveElementsToBody();
+        const remaining = document.querySelectorAll("dialog[open]");
+        if (remaining.length > 0) {
+          const next = remaining[remaining.length - 1];
+          self._currentDialogHost = next;
+          self._moveElementsToDialog(next);
+        } else {
+          self._currentDialogHost = null;
+        }
+      },
+      { once: true },
+    );
+  },
+
+  _moveElementsToBody() {
+    if (
+      this._ballEl &&
+      this._ballEl[0] &&
+      this._ballEl[0].parentNode !== document.body
+    ) {
+      document.body.appendChild(this._ballEl[0]);
+    }
+    if (
+      this._panelEl &&
+      this._panelEl[0] &&
+      this._panelEl[0].parentNode !== document.body
+    ) {
+      document.body.appendChild(this._panelEl[0]);
+    }
+  },
+
   _applyAutoHideState() {
     const target = this._ballEl || this._panelEl;
     if (!target) return;
@@ -3114,6 +4183,31 @@ const floatingPanelController = {
       this.destroy();
     }
     this.init();
+  },
+  refreshPanelOnly() {
+    const fp = getSettings().floatingPanel;
+    if (!fp || !fp.enabled || !getSettings().enabled) return;
+    if (!this._panelEl) {
+      this.refresh();
+      return;
+    }
+    const wasExpanded = this._expanded;
+    const wasVisible = this._panelEl.is(":visible");
+    this._panelEl.remove();
+    this._panelEl = null;
+    this._expanded = false;
+    this._createPanel();
+    if (this._currentDialogHost && this._panelEl && this._panelEl[0]) {
+      if (this._panelEl[0].parentNode !== this._currentDialogHost) {
+        this._currentDialogHost.appendChild(this._panelEl[0]);
+      }
+    }
+    if (fp.displayMode === "ball" && this._panelEl) {
+      this._panelEl.hide();
+      if (wasExpanded && wasVisible) {
+        setTimeout(() => this.toggleExpand(), 30);
+      }
+    }
   },
 };
 
@@ -3155,145 +4249,159 @@ function bindButtonAction(btn, key) {
   }
 }
 
-function syncDialogTheme(contentEl, options) {
-  if (!contentEl) return;
-  options = options || {};
-  const skipBg = options.skipBg === true;
+let _cachedThemeSample = null;
+let _cachedThemeSampleTime = 0;
+const _THEME_SAMPLE_TTL = 15000;
 
+function _getThemeSample() {
+  const now = Date.now();
+  if (_cachedThemeSample && now - _cachedThemeSampleTime < _THEME_SAMPLE_TTL) {
+    return _cachedThemeSample;
+  }
   try {
     const rootDoc = (window.parent && window.parent.document) || document;
     const rootWin = (window.parent && window.parent.defaultView) || window;
     const samples = rootDoc.querySelectorAll(".drawer-content");
-
-    if (!skipBg) {
-      let bgImg = "",
-        bgSize = "",
-        bgPos = "",
-        bgRepeat = "";
-      for (const el of samples) {
-        const cs = rootWin.getComputedStyle(el);
-        if (cs.backgroundImage && cs.backgroundImage !== "none") {
-          bgImg = cs.backgroundImage;
-          bgSize = cs.backgroundSize || "cover";
-          bgPos = cs.backgroundPosition || "center";
-          bgRepeat = cs.backgroundRepeat || "no-repeat";
-          break;
-        }
-      }
-      if (bgImg) {
-        contentEl.style.backgroundImage = bgImg;
-        contentEl.style.backgroundSize = bgSize;
-        contentEl.style.backgroundPosition = bgPos;
-        contentEl.style.backgroundRepeat = bgRepeat;
-      }
-      const pcs = rootWin.getComputedStyle(rootDoc.documentElement);
-      const rawColor = pcs.getPropertyValue("--SmartThemeBlurTintColor").trim();
-      if (rawColor) {
-        const d = document.createElement("div");
-        d.style.color = rawColor;
-        d.style.display = "none";
-        document.body.appendChild(d);
-        const parsed = getComputedStyle(d).color;
-        document.body.removeChild(d);
-        const m = parsed.match(
-          /rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/,
-        );
-        if (m) {
-          const r = m[1],
-            g = m[2],
-            b = m[3];
-          const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
-          const minAlpha = 0.82;
-          const finalAlpha = Math.max(a, minAlpha);
-          contentEl.style.setProperty(
-            "background-color",
-            `rgba(${r},${g},${b},${finalAlpha})`,
-            "important",
-          );
-        }
+    if (!samples.length) return null;
+    const drawerEl = samples[0];
+    const drawerCs = rootWin.getComputedStyle(drawerEl);
+    const probeCss =
+      "position:absolute;left:-9999px;top:-9999px;pointer-events:none;opacity:0;width:1px;height:1px;";
+    const result = {
+      color: drawerCs.color,
+      bgColor: drawerCs.backgroundColor,
+      bgImage: "",
+      bgSize: "",
+      bgPos: "",
+      bgRepeat: "",
+      tintColor: "",
+    };
+    for (const el of samples) {
+      const cs = rootWin.getComputedStyle(el);
+      if (cs.backgroundImage && cs.backgroundImage !== "none") {
+        result.bgImage = cs.backgroundImage;
+        result.bgSize = cs.backgroundSize || "cover";
+        result.bgPos = cs.backgroundPosition || "center";
+        result.bgRepeat = cs.backgroundRepeat || "no-repeat";
+        break;
       }
     }
-
-    if (samples.length > 0) {
-      const drawerEl = samples[0];
-      const drawerCs = rootWin.getComputedStyle(drawerEl);
-      if (drawerCs.color && !skipBg) {
-        contentEl.style.setProperty("color", drawerCs.color, "important");
+    const pcs = rootWin.getComputedStyle(rootDoc.documentElement);
+    const rawColor = pcs.getPropertyValue("--SmartThemeBlurTintColor").trim();
+    if (rawColor) {
+      const d = document.createElement("div");
+      d.style.cssText = "color:" + rawColor + ";display:none;";
+      document.body.appendChild(d);
+      const parsed = getComputedStyle(d).color;
+      document.body.removeChild(d);
+      const m = parsed.match(
+        /rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/,
+      );
+      if (m) {
+        const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
+        result.tintColor = `rgba(${m[1]},${m[2]},${m[3]},${Math.max(a, 0.82)})`;
       }
-      const probeCss =
-        "position:absolute;left:-9999px;top:-9999px;pointer-events:none;opacity:0;width:1px;height:1px;";
+    }
+    const probeInput = rootDoc.createElement("input");
+    probeInput.type = "text";
+    probeInput.style.cssText = probeCss;
+    drawerEl.appendChild(probeInput);
+    result.inputColor = rootWin.getComputedStyle(probeInput).color;
+    probeInput.remove();
+    result.inputBg = drawerCs.backgroundColor;
+    const probeBtn = rootDoc.createElement("div");
+    probeBtn.className = "menu_button";
+    probeBtn.textContent = "x";
+    probeBtn.style.cssText = probeCss;
+    drawerEl.appendChild(probeBtn);
+    const btnCs = rootWin.getComputedStyle(probeBtn);
+    result.btnColor = btnCs.color;
+    result.btnBg = btnCs.backgroundColor;
+    probeBtn.remove();
+    const probeSelect = rootDoc.createElement("select");
+    probeSelect.style.cssText = probeCss;
+    drawerEl.appendChild(probeSelect);
+    const selCs = rootWin.getComputedStyle(probeSelect);
+    result.selColor = selCs.color;
+    result.selBg = selCs.backgroundColor;
+    probeSelect.remove();
+    _cachedThemeSample = result;
+    _cachedThemeSampleTime = now;
+    return result;
+  } catch (e) {
+    return null;
+  }
+}
 
-      const probeInput = rootDoc.createElement("input");
-      probeInput.type = "text";
-      probeInput.style.cssText = probeCss;
-      drawerEl.appendChild(probeInput);
-      const inputCs = rootWin.getComputedStyle(probeInput);
-      const syncInputColor = inputCs.color;
-      probeInput.remove();
-      const syncInputBg = drawerCs.backgroundColor;
+function _invalidateThemeSample() {
+  _cachedThemeSample = null;
+  _cachedThemeSampleTime = 0;
+}
 
-      contentEl
-        .querySelectorAll(
-          "input[type='text'], input[type='number'], textarea, .ih-hm-status, .ih-beauty-prompt-box, .shortcut-input",
-        )
-        .forEach(function (el) {
-          if (syncInputColor)
-            el.style.setProperty("color", syncInputColor, "important");
-          if (
-            syncInputBg &&
-            syncInputBg !== "rgba(0, 0, 0, 0)" &&
-            syncInputBg !== "transparent"
-          ) {
-            el.style.setProperty("background-color", syncInputBg, "important");
-          }
-        });
-
-      const probeBtn = rootDoc.createElement("div");
-      probeBtn.className = "menu_button";
-      probeBtn.textContent = "x";
-      probeBtn.style.cssText = probeCss;
-      drawerEl.appendChild(probeBtn);
-      const btnCs = rootWin.getComputedStyle(probeBtn);
-      const syncBtnColor = btnCs.color;
-      const syncBtnBg = btnCs.backgroundColor;
-      probeBtn.remove();
-
-      contentEl
-        .querySelectorAll(
-          "button, .menu_button, .ih-folder-chip, .input-helper-btn, .button-preview",
-        )
-        .forEach(function (el) {
-          if (syncBtnColor)
-            el.style.setProperty("color", syncBtnColor, "important");
-          if (
-            syncBtnBg &&
-            syncBtnBg !== "rgba(0, 0, 0, 0)" &&
-            syncBtnBg !== "transparent"
-          ) {
-            el.style.setProperty("background-color", syncBtnBg, "important");
-          }
-        });
-
-      const probeSelect = rootDoc.createElement("select");
-      probeSelect.style.cssText = probeCss;
-      drawerEl.appendChild(probeSelect);
-      const selCs = rootWin.getComputedStyle(probeSelect);
-      const syncSelColor = selCs.color;
-      const syncSelBg = selCs.backgroundColor;
-      probeSelect.remove();
-
-      contentEl.querySelectorAll("select").forEach(function (el) {
-        if (syncSelColor)
-          el.style.setProperty("color", syncSelColor, "important");
+function syncDialogTheme(contentEl, options) {
+  if (!contentEl) return;
+  options = options || {};
+  const skipBg = options.skipBg === true;
+  const s = _getThemeSample();
+  if (!s) return;
+  try {
+    if (!skipBg) {
+      if (s.bgImage) {
+        contentEl.style.backgroundImage = s.bgImage;
+        contentEl.style.backgroundSize = s.bgSize;
+        contentEl.style.backgroundPosition = s.bgPos;
+        contentEl.style.backgroundRepeat = s.bgRepeat;
+      }
+      if (s.tintColor) {
+        contentEl.style.setProperty(
+          "background-color",
+          s.tintColor,
+          "important",
+        );
+      }
+      if (s.color) {
+        contentEl.style.setProperty("color", s.color, "important");
+      }
+    }
+    contentEl
+      .querySelectorAll(
+        "input[type='text'], input[type='number'], textarea, .ih-hm-status, .ih-beauty-prompt-box, .shortcut-input",
+      )
+      .forEach(function (el) {
+        if (s.inputColor)
+          el.style.setProperty("color", s.inputColor, "important");
         if (
-          syncSelBg &&
-          syncSelBg !== "rgba(0, 0, 0, 0)" &&
-          syncSelBg !== "transparent"
+          s.inputBg &&
+          s.inputBg !== "rgba(0, 0, 0, 0)" &&
+          s.inputBg !== "transparent"
         ) {
-          el.style.setProperty("background-color", syncSelBg, "important");
+          el.style.setProperty("background-color", s.inputBg, "important");
         }
       });
-    }
+    contentEl
+      .querySelectorAll(
+        "button, .menu_button, .ih-folder-chip, .input-helper-btn, .button-preview",
+      )
+      .forEach(function (el) {
+        if (s.btnColor) el.style.setProperty("color", s.btnColor, "important");
+        if (
+          s.btnBg &&
+          s.btnBg !== "rgba(0, 0, 0, 0)" &&
+          s.btnBg !== "transparent"
+        ) {
+          el.style.setProperty("background-color", s.btnBg, "important");
+        }
+      });
+    contentEl.querySelectorAll("select").forEach(function (el) {
+      if (s.selColor) el.style.setProperty("color", s.selColor, "important");
+      if (
+        s.selBg &&
+        s.selBg !== "rgba(0, 0, 0, 0)" &&
+        s.selBg !== "transparent"
+      ) {
+        el.style.setProperty("background-color", s.selBg, "important");
+      }
+    });
   } catch (e) {}
 }
 
@@ -3350,7 +4458,7 @@ let _cachedToolbarStylesTime = 0;
 
 function syncToolbarButtonStyles(targetContainer) {
   const now = Date.now();
-  const CACHE_TTL = 3000;
+  const CACHE_TTL = 15000;
   if (!_cachedToolbarStyles || now - _cachedToolbarStylesTime > CACHE_TTL) {
     const referenceBtn = $("#input_helper_toolbar .input-helper-btn:visible")
       .not(".ih-folder-btn")
@@ -3405,7 +4513,9 @@ function syncToolbarButtonStyles(targetContainer) {
 }
 
 function closeAllFolderDropdowns() {
-  $(".ih-folder-dropdown-portal").remove();
+  const portals = document.querySelectorAll(".ih-folder-dropdown-portal");
+  if (portals.length === 0) return;
+  portals.forEach((el) => el.remove());
 }
 
 function openFolderDropdown(folderBtn, fi) {
@@ -3461,6 +4571,25 @@ function openFolderDropdown(folderBtn, fi) {
   dropdown
     .find("[data-button-key='autoScroll']")
     .toggleClass("input-helper-btn-active", autoScrollController.active);
+}
+
+function applyCJKNarrowToToolbar() {
+  const toolbar = document.getElementById("input_helper_toolbar");
+  if (!toolbar) return;
+  const cjkRegex =
+    /[\u3000-\u303f\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\uff00-\uffef]/;
+  toolbar
+    .querySelectorAll(
+      ".input-helper-btn:not(.ih-folder-btn):not([data-cjk-done])",
+    )
+    .forEach((btn) => {
+      if (btn.querySelector("i")) return;
+      const text = btn.textContent || "";
+      if (cjkRegex.test(text)) {
+        btn.style.setProperty("padding", "3px", "important");
+      }
+      btn.setAttribute("data-cjk-done", "1");
+    });
 }
 
 function buildToolbar() {
@@ -3589,7 +4718,8 @@ function buildToolbar() {
   toolbar.toggleClass("ih-two-row-active", !!settings.twoRowMode);
   if (toolbarNext.length) toolbarNext.before(toolbar);
   else toolbarParent.append(toolbar);
-  requestAnimationFrame(() => generateFaIconProtectionCSS());
+  generateFaIconProtectionCSS();
+  applyCJKNarrowToToolbar();
   updateToolbarMaxHeight();
 }
 
@@ -3831,12 +4961,170 @@ function deleteBallProfile(index) {
   const fp = getSettings().floatingPanel;
   if (!fp.ballProfiles || !fp.ballProfiles[index]) return;
   const name = fp.ballProfiles[index].name;
+  const wasCurrent = fp.currentProfileIndex === index;
   fp.ballProfiles.splice(index, 1);
-  fp.currentProfileIndex = -1;
+
+  if (fp.ballProfiles.length === 0) {
+    fp.currentProfileIndex = -1;
+  } else if (wasCurrent) {
+    const newIndex = Math.min(index, fp.ballProfiles.length - 1);
+    fp.currentProfileIndex = newIndex;
+    applyBallProfileData(fp.ballProfiles[newIndex]);
+  } else if (fp.currentProfileIndex > index) {
+    fp.currentProfileIndex -= 1;
+  }
+  saveSettingsDebounced();
+  toastr.info(`已删除"${name}"`, "", { timeOut: 1000 });
+
+  setTimeout(() => {
+    renderFloatingPanelSettings();
+    floatingPanelController.refresh();
+  }, 0);
+}
+
+function getPanelProfileData() {
+  const fp = getSettings().floatingPanel;
+  return {
+    buttons: [...(fp.buttons || [])],
+    orientation: fp.orientation || "vertical",
+    buttonSize: fp.buttonSize || 12,
+  };
+}
+
+function _isPanelProfileDirty() {
+  const fp = getSettings().floatingPanel;
+  const idx = fp.currentPanelProfileIndex;
+  if (idx < 0 || !fp.panelProfiles || !fp.panelProfiles[idx]) return false;
+  const saved = fp.panelProfiles[idx];
+  const cur = getPanelProfileData();
+  const sb = saved.buttons || [];
+  const cb = cur.buttons || [];
+  if (sb.length !== cb.length) return true;
+  for (let i = 0; i < cb.length; i++) {
+    if (sb[i] !== cb[i]) return true;
+  }
+  if ((saved.orientation || "vertical") !== cur.orientation) return true;
+  if ((saved.buttonSize || 12) !== cur.buttonSize) return true;
+  return false;
+}
+
+function applyPanelProfileData(data) {
+  const fp = getSettings().floatingPanel;
+  fp.buttons = [...(data.buttons || [])];
+  fp.orientation = data.orientation || "vertical";
+  fp.buttonSize = data.buttonSize || 12;
+}
+
+function createPanelProfile(name) {
+  const fp = getSettings().floatingPanel;
+  if (!fp.panelProfiles) fp.panelProfiles = [];
+  const data = {
+    name: name,
+    buttons: [],
+    orientation: fp.orientation || "vertical",
+    buttonSize: 12,
+  };
+  fp.panelProfiles.push(data);
+  fp.currentPanelProfileIndex = fp.panelProfiles.length - 1;
+  fp.buttons = [];
+  fp.buttonSize = 12;
   saveSettingsDebounced();
   renderFloatingPanelSettings();
   floatingPanelController.refresh();
-  toastr.info(`已删除方案"${name}"`, "", { timeOut: 1500 });
+  buildToolbar();
+  toastr.success(`已创建空方案"${name}"，请添加按钮`, "", { timeOut: 1000 });
+}
+
+function savePanelProfile(index) {
+  const fp = getSettings().floatingPanel;
+  if (!fp.panelProfiles || !fp.panelProfiles[index]) return;
+  const name = fp.panelProfiles[index].name;
+  const data = getPanelProfileData();
+  data.name = name;
+  fp.panelProfiles[index] = data;
+  saveSettingsDebounced();
+  toastr.success(`已保存面板方案"${name}"`, "", { timeOut: 1500 });
+}
+
+function loadPanelProfile(index) {
+  const fp = getSettings().floatingPanel;
+  if (!fp.panelProfiles || !fp.panelProfiles[index]) return;
+  if (_isPanelProfileDirty()) {
+    const curName =
+      fp.panelProfiles[fp.currentPanelProfileIndex]?.name || "当前";
+    if (
+      !confirm(
+        `方案"${curName}"有未保存的修改，切换后会丢失。\n确定继续吗？\n（取消可以先点"保存"按钮）`,
+      )
+    ) {
+      $("#ih_fp_panel_profile_select").val(fp.currentPanelProfileIndex);
+      return;
+    }
+  }
+  const data = fp.panelProfiles[index];
+  applyPanelProfileData(data);
+  fp.currentPanelProfileIndex = index;
+  saveSettingsDebounced();
+  renderFloatingPanelSettings();
+  floatingPanelController.refreshPanelOnly();
+  buildToolbar();
+  toastr.info(`已切换到面板方案"${data.name}"`, "", { timeOut: 1000 });
+}
+
+function renamePanelProfile(index, newName) {
+  const fp = getSettings().floatingPanel;
+  if (!fp.panelProfiles || !fp.panelProfiles[index]) return;
+  fp.panelProfiles[index].name = newName;
+  saveSettingsDebounced();
+  renderFloatingPanelSettings();
+  toastr.success(`已重命名为"${newName}"`, "", { timeOut: 1500 });
+}
+
+function deletePanelProfile(index) {
+  const fp = getSettings().floatingPanel;
+  if (!fp.panelProfiles || !fp.panelProfiles[index]) return;
+  const name = fp.panelProfiles[index].name;
+  const wasCurrent = fp.currentPanelProfileIndex === index;
+  fp.panelProfiles.splice(index, 1);
+
+  if (fp.panelProfiles.length === 0) {
+    fp.panelProfiles.push({
+      name: "默认方案",
+      buttons: [],
+      orientation: fp.orientation || "vertical",
+      buttonSize: 12,
+    });
+    fp.currentPanelProfileIndex = 0;
+    fp.buttons = [];
+    fp.buttonSize = 12;
+  } else if (wasCurrent) {
+    const newIndex = Math.min(index, fp.panelProfiles.length - 1);
+    fp.currentPanelProfileIndex = newIndex;
+    applyPanelProfileData(fp.panelProfiles[newIndex]);
+  } else if (fp.currentPanelProfileIndex > index) {
+    fp.currentPanelProfileIndex -= 1;
+  }
+  saveSettingsDebounced();
+  toastr.info(`已删除"${name}"`, "", { timeOut: 1000 });
+
+  setTimeout(() => {
+    renderFloatingPanelSettings();
+    floatingPanelController.refreshPanelOnly();
+    buildToolbar();
+  }, 0);
+}
+
+function switchToNextPanelProfile() {
+  const fp = getSettings().floatingPanel;
+  if (!fp.panelProfiles || fp.panelProfiles.length === 0) {
+    toastr.warning("还没有任何面板方案，请先在设置里创建", "", {
+      timeOut: 2000,
+    });
+    return;
+  }
+  const cur = fp.currentPanelProfileIndex ?? -1;
+  const next = (cur + 1) % fp.panelProfiles.length;
+  loadPanelProfile(next);
 }
 
 function renderFloatingPanelSettings() {
@@ -3850,26 +5138,26 @@ function renderFloatingPanelSettings() {
   customSymbols.forEach((_, i) => allKeys.push(`custom_${i}`));
   const content = $(`
         <div class="ih-fp-settings-body">
-            <div class="ih-hm-group">
-                <div class="ih-hm-group-label">面板方向</div>
-                <div class="ih-hm-row">
-                    <select id="ih_fp_orientation" style="flex:1;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
-                        <option value="vertical" ${fp.orientation === "vertical" ? "selected" : ""}>竖向（从球左侧展开）</option>
-                        <option value="vertical-down" ${fp.orientation === "vertical-down" ? "selected" : ""}>竖向（从球下方展开）</option>
-                        <option value="horizontal" ${fp.orientation === "horizontal" ? "selected" : ""}>横向（从球下方展开）</option>
-                    </select>
+            <div class="ih-hm-group" style="border-bottom:none;">
+                <div class="ih-hm-row" style="gap:8px;">
+                    <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
+                        <div style="font-size:11px;opacity:0.75;">方向</div>
+                        <select id="ih_fp_orientation" style="padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
+                            <option value="vertical" ${fp.orientation === "vertical" ? "selected" : ""}>竖向（左侧展开）</option>
+                            <option value="vertical-down" ${fp.orientation === "vertical-down" ? "selected" : ""}>竖向（下方展开）</option>
+                            <option value="horizontal" ${fp.orientation === "horizontal" ? "selected" : ""}>横向（下方展开）</option>
+                        </select>
+                    </div>
+                    <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
+                        <div style="font-size:11px;opacity:0.75;">显示</div>
+                        <select id="ih_fp_display_mode" style="padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
+                            <option value="ball" ${fp.displayMode === "ball" ? "selected" : ""}>悬浮球</option>
+                            <option value="fixed" ${fp.displayMode === "fixed" ? "selected" : ""}>固定面板</option>
+                        </select>
+                    </div>
                 </div>
             </div>
-            <div class="ih-hm-group">
-                <div class="ih-hm-group-label">显示模式</div>
-                <div class="ih-hm-row">
-                    <select id="ih_fp_display_mode" style="flex:1;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
-                        <option value="ball" ${fp.displayMode === "ball" ? "selected" : ""}>悬浮球（点击展开）</option>
-                        <option value="fixed" ${fp.displayMode === "fixed" ? "selected" : ""}>固定面板（常驻显示）</option>
-                    </select>
-                </div>
-            </div>
-            <div class="ih-hm-group" id="ih_fp_ball_profile_group" style="display:${fp.displayMode === "ball" ? "block" : "none"};">
+            <div class="ih-hm-group" id="ih_fp_ball_profile_group" style="display:${fp.displayMode === "ball" ? "block" : "none"};padding-top:0;margin-top:-4px;">
                 <div class="ih-hm-group-label">图片方案</div>
                 <div class="ih-hm-row" style="gap:4px;flex-wrap:wrap;">
                     <select id="ih_fp_profile_select" style="flex:1;min-width:100px;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
@@ -3882,19 +5170,18 @@ function renderFloatingPanelSettings() {
                     <button class="ih-hm-btn" id="ih_fp_profile_delete" title="删除方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-trash"></i></button>
                 </div>
             </div>
-            <div class="ih-hm-group" id="ih_fp_ball_settings" style="display:${fp.displayMode === "ball" ? "block" : "none"};">
+            <div class="ih-hm-group" id="ih_fp_ball_settings" style="display:${fp.displayMode === "ball" ? "block" : "none"};padding-top:0;margin-top:-4px;">
                 <div class="ih-hm-group-label">悬浮球设置</div>
-                <div class="ih-hm-row" style="flex-wrap:wrap;gap:6px;">
-                    <label style="font-size:11px;flex-shrink:0;">大小</label>
-                    <input type="range" id="ih_fp_ball_size" min="32" max="80" value="${fp.ballSize || 48}" style="width:80px;accent-color:var(--SmartThemeQuoteColor,cornflowerblue);" />
-                    <span id="ih_fp_ball_size_val" style="font-size:11px;min-width:28px;">${fp.ballSize || 48}px</span>
-                </div>
-                <div class="ih-hm-row" style="margin-top:6px;gap:6px;">
+                <div class="ih-hm-row" style="gap:6px;align-items:center;">
                     <label style="font-size:11px;flex-shrink:0;">形状</label>
-                    <select id="ih_fp_ball_shape" style="flex:1;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
+                    <select id="ih_fp_ball_shape" style="width:62px;padding:4px 6px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;flex-shrink:0;">
                         <option value="circle" ${(fp.ballShape || "circle") === "circle" ? "selected" : ""}>圆形</option>
                         <option value="square" ${fp.ballShape === "square" ? "selected" : ""}>方形</option>
                     </select>
+                    <label style="font-size:11px;flex-shrink:0;margin-left:4px;">大小</label>
+                    <input type="range" id="ih_fp_ball_size" min="32" max="80" value="${fp.ballSize || 48}" style="flex:1;min-width:50px;accent-color:var(--SmartThemeQuoteColor,cornflowerblue);" />
+                    <input type="number" id="ih_fp_ball_size_input" min="32" max="80" value="${fp.ballSize || 48}" style="width:48px;padding:3px 4px;border:1px solid var(--SmartThemeBorderColor);border-radius:4px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;text-align:center;" />
+                    <span style="font-size:11px;flex-shrink:0;opacity:0.6;">px</span>
                 </div>
                 <div class="ih-hm-row" style="margin-top:6px;">
                     <input type="text" id="ih_fp_ball_image" placeholder="自定义图片URL（支持 GIF / JPG / PNG）" value="${fp.ballImage || ""}" style="flex:1;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;" />
@@ -3929,7 +5216,7 @@ function renderFloatingPanelSettings() {
                     开启：美化CSS可控制悬浮球外观<br>关闭：插件自定义设置（图片等）优先于美化CSS
                 </div>
             </div>
-            <div class="ih-hm-group">
+            <div class="ih-hm-group" style="padding-top:0;margin-top:-4px;">
                 <div class="ih-switch-row">
                     <label class="ih-switch-label" style="font-size:12px;">
                         <i class="fa-solid fa-eye-slash" style="width:16px;text-align:center;opacity:0.6;"></i>
@@ -3946,9 +5233,25 @@ function renderFloatingPanelSettings() {
             </div>
             <div class="ih-hm-group" id="ih_fp_btn_size_group">
                 <div class="ih-hm-group-label">面板按钮大小</div>
-                <div class="ih-hm-row" style="gap:6px;">
-                    <input type="range" id="ih_fp_btn_size" min="10" max="30" value="${fp.buttonSize || 12}" style="width:100px;accent-color:var(--SmartThemeQuoteColor,cornflowerblue);" />
-                    <span id="ih_fp_btn_size_val" style="font-size:11px;min-width:28px;">${fp.buttonSize || 12}px</span>
+                <div class="ih-hm-row" style="gap:6px;align-items:center;">
+                    <input type="range" id="ih_fp_btn_size" min="10" max="30" value="${fp.buttonSize || 12}" style="flex:1;min-width:80px;accent-color:var(--SmartThemeQuoteColor,cornflowerblue);" />
+                    <input type="number" id="ih_fp_btn_size_input" min="10" max="30" value="${fp.buttonSize || 12}" style="width:48px;padding:3px 4px;border:1px solid var(--SmartThemeBorderColor);border-radius:4px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;text-align:center;" />
+                    <span style="font-size:11px;flex-shrink:0;opacity:0.6;">px</span>
+                </div>
+            </div>
+            <div class="ih-hm-group" style="padding-top:0;margin-top:-4px;">
+                <div class="ih-hm-group-label">面板方案</div>
+                <div class="ih-hm-row" style="gap:4px;flex-wrap:wrap;">
+                    <select id="ih_fp_panel_profile_select" style="flex:1;min-width:100px;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
+                        ${(fp.panelProfiles || []).map((p, i) => `<option value="${i}" ${fp.currentPanelProfileIndex === i ? "selected" : ""}>${p.name}</option>`).join("")}
+                    </select>
+                    <button class="ih-hm-btn" id="ih_fp_panel_profile_new" title="新建方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-plus"></i></button>
+                    <button class="ih-hm-btn" id="ih_fp_panel_profile_save" title="保存到当前方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-floppy-disk"></i></button>
+                    <button class="ih-hm-btn" id="ih_fp_panel_profile_rename" title="重命名" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-pen"></i></button>
+                    <button class="ih-hm-btn" id="ih_fp_panel_profile_delete" title="删除方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-trash"></i></button>
+                </div>
+                <div style="font-size:10px;opacity:0.5;margin-top:4px;line-height:1.5;">
+                    保存当前面板按钮配置为方案，可放入"切换面板方案"按钮快速切换
                 </div>
             </div>
             <div class="ih-hm-group">
@@ -3968,10 +5271,10 @@ function renderFloatingPanelSettings() {
                     <button class="ih-folder-add-button-btn" id="ih_fp_add_button">
                         <i class="fa-solid fa-plus"></i> 添加
                     </button>
+                    <button class="ih-folder-add-button-btn" id="ih_fp_clear_buttons" style="border-color:rgba(255,100,100,0.45);color:rgba(255,120,120,0.9);">
+                        <i class="fa-solid fa-broom"></i> 清空
+                    </button>
                 </div>
-            </div>
-            <div class="ih-hm-row" style="margin-top:8px;">
-                <button class="ih-hm-btn" id="ih_fp_reset_pos"><i class="fa-solid fa-arrows-to-dot"></i> 重置位置</button>
             </div>
         </div>
     `);
@@ -4012,21 +5315,27 @@ function renderFloatingPanelSettings() {
     $("#ih_fp_ball_profile_group").toggle(isBall);
     floatingPanelController.refresh();
   });
-  container.on("input", "#ih_fp_ball_size", function () {
-    const val = parseInt($(this).val());
+  function _applyBallSizeLive(rawVal) {
+    let val = parseInt(rawVal);
+    if (isNaN(val)) val = 48;
+    val = Math.max(32, Math.min(80, val));
     getSettings().floatingPanel.ballSize = val;
-    $("#ih_fp_ball_size_val").text(val + "px");
+    $("#ih_fp_ball_size").val(val);
+    $("#ih_fp_ball_size_input").val(val);
     saveSettingsDebounced();
     const ball = floatingPanelController._ballEl;
     if (ball && ball.length) {
       ball.css({ width: val + "px", height: val + "px" });
       ball.find("i.fa-ellipsis").css("font-size", Math.max(14, val / 3) + "px");
     }
-  });
-  container.on("input", "#ih_fp_btn_size", function () {
-    const val = parseInt($(this).val());
+  }
+  function _applyBtnSizeLive(rawVal) {
+    let val = parseInt(rawVal);
+    if (isNaN(val)) val = 12;
+    val = Math.max(10, Math.min(30, val));
     getSettings().floatingPanel.buttonSize = val;
-    $("#ih_fp_btn_size_val").text(val + "px");
+    $("#ih_fp_btn_size").val(val);
+    $("#ih_fp_btn_size_input").val(val);
     saveSettingsDebounced();
     const panel = floatingPanelController._panelEl;
     if (panel && panel.length) {
@@ -4035,6 +5344,18 @@ function renderFloatingPanelSettings() {
         ctrl._applyButtonSize(this, val);
       });
     }
+  }
+  container.on("input", "#ih_fp_ball_size", function () {
+    _applyBallSizeLive($(this).val());
+  });
+  container.on("input change", "#ih_fp_ball_size_input", function () {
+    _applyBallSizeLive($(this).val());
+  });
+  container.on("input", "#ih_fp_btn_size", function () {
+    _applyBtnSizeLive($(this).val());
+  });
+  container.on("input change", "#ih_fp_btn_size_input", function () {
+    _applyBtnSizeLive($(this).val());
   });
   container.on("change", "#ih_fp_ball_shape", function () {
     getSettings().floatingPanel.ballShape = $(this).val();
@@ -4043,11 +5364,12 @@ function renderFloatingPanelSettings() {
   });
   container.on("change", "#ih_fp_profile_select", function () {
     const idx = parseInt($(this).val());
-    getSettings().floatingPanel.currentProfileIndex = idx;
     if (idx >= 0) {
       loadBallProfile(idx);
+    } else {
+      getSettings().floatingPanel.currentProfileIndex = -1;
+      saveSettingsDebounced();
     }
-    saveSettingsDebounced();
   });
   container.on("click", "#ih_fp_profile_new", function () {
     const name = prompt("输入方案名称：");
@@ -4196,11 +5518,66 @@ function renderFloatingPanelSettings() {
       closePicker();
     });
   });
-  container.on("click", "#ih_fp_reset_pos", function () {
-    getSettings().floatingPanel.position = { x: null, y: null };
+  container.on("click", "#ih_fp_clear_buttons", function () {
+    const buttons = getSettings().floatingPanel.buttons || [];
+    if (buttons.length === 0) {
+      toastr.info("已经是空的啦", "", { timeOut: 1200 });
+      return;
+    }
+    if (!confirm("确定清空悬浮面板里的所有按钮吗？\n按钮会回到主工具栏。"))
+      return;
+    getSettings().floatingPanel.buttons = [];
     saveSettingsDebounced();
+    renderFloatingPanelSettings();
     floatingPanelController.refresh();
-    toastr.info("悬浮面板位置已重置", "", { timeOut: 1500 });
+    buildToolbar();
+  });
+  container.on("change", "#ih_fp_panel_profile_select", function () {
+    const idx = parseInt($(this).val());
+    if (idx >= 0) {
+      loadPanelProfile(idx);
+    } else {
+      getSettings().floatingPanel.currentPanelProfileIndex = -1;
+      saveSettingsDebounced();
+    }
+  });
+  container.on("click", "#ih_fp_panel_profile_new", function () {
+    const name = prompt("输入面板方案名称：");
+    if (!name || !name.trim()) return;
+    createPanelProfile(name.trim());
+  });
+  container.on("click", "#ih_fp_panel_profile_save", function () {
+    const idx = getSettings().floatingPanel.currentPanelProfileIndex;
+    if (idx < 0) {
+      toastr.warning("请先选择或新建一个方案", "", { timeOut: 1500 });
+      return;
+    }
+    savePanelProfile(idx);
+  });
+  container.on("click", "#ih_fp_panel_profile_rename", function () {
+    const idx = getSettings().floatingPanel.currentPanelProfileIndex;
+    if (idx < 0) {
+      toastr.warning("请先选择一个方案", "", { timeOut: 1500 });
+      return;
+    }
+    const current = getSettings().floatingPanel.panelProfiles[idx];
+    const name = prompt("输入新名称：", current.name);
+    if (!name || !name.trim()) return;
+    renamePanelProfile(idx, name.trim());
+  });
+  container.on("click", "#ih_fp_panel_profile_delete", function () {
+    const idx = getSettings().floatingPanel.currentPanelProfileIndex;
+    if (idx < 0) {
+      toastr.warning("请先选择一个方案", "", { timeOut: 1500 });
+      return;
+    }
+    if (
+      !confirm(
+        `确定删除方案"${getSettings().floatingPanel.panelProfiles[idx].name}"吗？`,
+      )
+    )
+      return;
+    deletePanelProfile(idx);
   });
   try {
     const _settingsPanel = document.querySelector(".input-helper-settings");
@@ -4238,6 +5615,7 @@ function renderFolderSettings() {
                       )
                       .join("")}
                     <button class="ih-folder-add-button-btn" data-folder-index="${fi}"><i class="fa-solid fa-plus"></i> 添加</button>
+                    <button class="ih-folder-add-button-btn ih-folder-clear-btn" data-folder-index="${fi}" style="border-color:rgba(255,100,100,0.45);color:rgba(255,120,120,0.9);"><i class="fa-solid fa-broom"></i> 清空</button>
                 </div>
             </div>
         `);
@@ -4315,8 +5693,33 @@ function renderFolderSettings() {
     });
   container
     .off("click", ".ih-folder-add-button-btn")
-    .on("click", ".ih-folder-add-button-btn", function () {
-      showButtonPicker(parseInt($(this).data("folder-index")));
+    .on(
+      "click",
+      ".ih-folder-add-button-btn:not(.ih-folder-clear-btn)",
+      function () {
+        showButtonPicker(parseInt($(this).data("folder-index")));
+      },
+    );
+  container
+    .off("click", ".ih-folder-clear-btn")
+    .on("click", ".ih-folder-clear-btn", function () {
+      const fi = parseInt($(this).data("folder-index"));
+      const folder = getSettings().folders[fi];
+      if (!folder || !(folder.buttons || []).length) {
+        toastr.info("已经是空的啦", "", { timeOut: 1200 });
+        return;
+      }
+      if (
+        !confirm(
+          `确定清空文件夹"${folder.name}"里的所有按钮吗？\n按钮会回到主工具栏。`,
+        )
+      )
+        return;
+      folder.buttons = [];
+      saveSettingsDebounced();
+      renderFolderSettings();
+      renderSettingsPanel();
+      buildToolbar();
     });
   try {
     container.find(".ih-folder-button-list").each(function () {
@@ -4421,7 +5824,7 @@ function showButtonPicker(folderIndex) {
   content.on("click", function (e) {
     e.stopPropagation();
   });
-  requestAnimationFrame(() => generateFaIconProtectionCSS());
+  generateFaIconProtectionCSS();
   const closeDialog = function () {
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
@@ -4545,6 +5948,20 @@ function deleteCustomSymbol(index) {
       }
       return bk;
     });
+  const panelProfiles = getSettings().floatingPanel.panelProfiles || [];
+  panelProfiles.forEach((profile) => {
+    if (profile.buttons) {
+      profile.buttons = profile.buttons
+        .filter((bk) => bk !== deletedKey)
+        .map((bk) => {
+          if (bk.startsWith("custom_")) {
+            const bIdx = parseInt(bk.replace("custom_", ""));
+            if (bIdx > index) return `custom_${bIdx - 1}`;
+          }
+          return bk;
+        });
+    }
+  });
   const orderIdx = getSettings().buttonOrder.indexOf(deletedKey);
   if (orderIdx > -1) getSettings().buttonOrder.splice(orderIdx, 1);
   delete getSettings().buttons[deletedKey];
@@ -4643,7 +6060,7 @@ function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
   content.on("click", function (e) {
     e.stopPropagation();
   });
-  requestAnimationFrame(() => generateFaIconProtectionCSS());
+  generateFaIconProtectionCSS();
   overlay.off("click").on("click", function (e) {
     if (e.target === overlay[0]) {
       document.removeEventListener("keydown", escHandler, true);
@@ -5007,6 +6424,18 @@ async function loadSettings() {
   if (!s.floatingPanel.ballProfiles) s.floatingPanel.ballProfiles = [];
   if (s.floatingPanel.currentProfileIndex === undefined)
     s.floatingPanel.currentProfileIndex = -1;
+  if (!s.floatingPanel.panelProfiles) s.floatingPanel.panelProfiles = [];
+  if (s.floatingPanel.currentPanelProfileIndex === undefined)
+    s.floatingPanel.currentPanelProfileIndex = -1;
+  if (s.floatingPanel.panelProfiles.length === 0) {
+    s.floatingPanel.panelProfiles.push({
+      name: "默认方案",
+      buttons: [...(s.floatingPanel.buttons || [])],
+      orientation: s.floatingPanel.orientation || "vertical",
+      buttonSize: s.floatingPanel.buttonSize || 12,
+    });
+    s.floatingPanel.currentPanelProfileIndex = 0;
+  }
   if (s.floatingPanel.collapsed === undefined) s.floatingPanel.collapsed = true;
   if (s.floatingPanel.autoHide === undefined) s.floatingPanel.autoHide = false;
   s.folders.forEach((folder) => {
@@ -5073,6 +6502,16 @@ function setupTextareaFocusTracking() {
   const toolbar = document.getElementById("input_helper_toolbar");
   if (toolbar) {
     toolbar.addEventListener("mousedown", function (e) {
+      if (_lastFocusedEditable && _lastFocusedEditable.isContentEditable) {
+        try {
+          const doc = _lastFocusedEditable.ownerDocument || document;
+          const win = doc.defaultView || window;
+          const sel = win.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            _savedRange = sel.getRangeAt(0).cloneRange();
+          }
+        } catch (err) {}
+      }
       if ($(e.target).closest(".ih-folder-btn").length) return;
       e.preventDefault();
     });
@@ -5101,6 +6540,206 @@ function setupGlobalDropdownClose() {
       closeAllFolderDropdowns();
     }
   });
+}
+
+function setupGlobalFocusTracking() {
+  const sendForm = document.getElementById("send_form");
+  const sendTextarea = document.getElementById("send_textarea");
+
+  function markExternalFocused() {
+    if (sendForm) sendForm.classList.add("ih-external-focused");
+  }
+
+  function clearExternalFocused() {
+    if (sendForm) sendForm.classList.remove("ih-external-focused");
+  }
+
+  function isOurUiElement(el) {
+    if (!el) return false;
+    try {
+      if (el.ownerDocument !== document) return false;
+      return (
+        $(el).closest(
+          "#input_helper_toolbar, .ih-find-bar, .ih-folder-dropdown-portal, " +
+            ".ih-floating-panel, .ih-floating-ball, .ih-dialog-overlay, " +
+            ".input-helper-settings, #extensions_settings, #extensions_settings2",
+        ).length > 0
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function handleOutsideInteraction(e) {
+    const target = e.target;
+    if (!target) return;
+    if (isEditableElement(target)) return;
+    if (isOurUiElement(target)) return;
+    if (target === sendTextarea) return;
+    _lastFocusedEditable = null;
+    clearExternalFocused();
+  }
+
+  document.addEventListener(
+    "focusin",
+    function (e) {
+      const el = e.target;
+      if (!isEditableElement(el)) {
+        return;
+      }
+      try {
+        const $el = $(el);
+        if (
+          !$el.closest(
+            ".ih-dialog-overlay, #input_helper_toolbar, " +
+              ".ih-find-bar, .ih-folder-dropdown-portal, .ih-floating-panel, " +
+              ".shortcut-input",
+          ).length
+        ) {
+          _lastFocusedForScroll = el;
+        }
+      } catch (ex) {}
+      if (shouldIgnoreFocusedElement(el)) {
+        return;
+      }
+      if (el === sendTextarea) {
+        clearExternalFocused();
+        return;
+      }
+      _lastFocusedEditable = el;
+      markExternalFocused();
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "input",
+    function (e) {
+      const el = e.target;
+      if (!isEditableElement(el)) return;
+      if (shouldIgnoreFocusedElement(el)) return;
+      if (el === sendTextarea) return;
+      if (el.isContentEditable) return;
+      historyManager.onExternalInput(el);
+    },
+    true,
+  );
+
+  document.addEventListener("mousedown", handleOutsideInteraction, true);
+  document.addEventListener("touchstart", handleOutsideInteraction, {
+    capture: true,
+    passive: true,
+  });
+
+  function attachToIframe(iframe) {
+    try {
+      const doc = iframe.contentDocument;
+      if (!doc || doc.__ihFocusAttached) return;
+      doc.__ihFocusAttached = true;
+      doc.addEventListener(
+        "focusin",
+        function (e) {
+          const el = e.target;
+          if (!isEditableElement(el)) return;
+          _lastFocusedEditable = el;
+          markExternalFocused();
+        },
+        true,
+      );
+      doc.addEventListener(
+        "input",
+        function (e) {
+          const el = e.target;
+          if (!isEditableElement(el)) return;
+          if (el.isContentEditable) return;
+          historyManager.onExternalInput(el);
+        },
+        true,
+      );
+      doc.addEventListener(
+        "mousedown",
+        function (e) {
+          const target = e.target;
+          if (!target) return;
+          if (isEditableElement(target)) return;
+          _lastFocusedEditable = null;
+          clearExternalFocused();
+        },
+        true,
+      );
+      doc.addEventListener(
+        "touchstart",
+        function (e) {
+          const target = e.target;
+          if (!target) return;
+          if (isEditableElement(target)) return;
+          _lastFocusedEditable = null;
+          clearExternalFocused();
+        },
+        { capture: true, passive: true },
+      );
+
+      doc.querySelectorAll("iframe").forEach((nestedIfr) => {
+        attachToIframe(nestedIfr);
+        nestedIfr.addEventListener("load", () => attachToIframe(nestedIfr));
+      });
+
+      try {
+        const nestedObs = new MutationObserver((muts) => {
+          muts.forEach((m) => {
+            m.addedNodes.forEach((n) => {
+              if (!n.tagName) return;
+              if (n.tagName === "IFRAME") {
+                attachToIframe(n);
+                n.addEventListener("load", () => attachToIframe(n));
+              } else if (n.querySelectorAll) {
+                n.querySelectorAll("iframe").forEach((ifr) => {
+                  attachToIframe(ifr);
+                  ifr.addEventListener("load", () => attachToIframe(ifr));
+                });
+              }
+            });
+          });
+        });
+        if (doc.body) {
+          nestedObs.observe(doc.body, { childList: true, subtree: true });
+        } else {
+          iframe.addEventListener("load", () => {
+            try {
+              if (doc.body) {
+                nestedObs.observe(doc.body, { childList: true, subtree: true });
+              }
+            } catch (e) {}
+          });
+        }
+      } catch (e) {}
+    } catch (err) {}
+  }
+
+  document.querySelectorAll("iframe").forEach(attachToIframe);
+  document.querySelectorAll("iframe").forEach((ifr) => {
+    ifr.addEventListener("load", () => attachToIframe(ifr));
+  });
+
+  try {
+    const obs = new MutationObserver((muts) => {
+      muts.forEach((m) => {
+        m.addedNodes.forEach((n) => {
+          if (!n.tagName) return;
+          if (n.tagName === "IFRAME") {
+            attachToIframe(n);
+            n.addEventListener("load", () => attachToIframe(n));
+          } else if (n.querySelectorAll) {
+            n.querySelectorAll("iframe").forEach((ifr) => {
+              attachToIframe(ifr);
+              ifr.addEventListener("load", () => attachToIframe(ifr));
+            });
+          }
+        });
+      });
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  } catch (e) {}
 }
 
 function setupVolumeKeyPaging() {
@@ -5212,7 +6851,7 @@ jQuery(async () => {
   document.head.appendChild(hiddenCSS);
   extension_settings[extensionName] = extension_settings[extensionName] || {};
   const settingsHtml = await $.get(`${extensionFolderPath}/settings.html`);
-  $("#extensions_settings2").append(settingsHtml);
+  $("#extensions_settings2").prepend(settingsHtml);
 
   const toolbarHtml = await $.get(`${extensionFolderPath}/toolbar.html`);
   if ($("#qr--bar").length) {
@@ -5259,6 +6898,24 @@ jQuery(async () => {
       '<button id="input_open_qr_assistant_btn" class="input-helper-btn" title="QR助手面板" data-norefocus="true"><i class="fa-solid fa-rocket"></i></button>',
     );
     $("#input_helper_toolbar").append(qrAssistantBtn);
+  }
+  if (!$("#input_switch_panel_profile_btn").length) {
+    const switchPanelBtn = $(
+      '<button id="input_switch_panel_profile_btn" class="input-helper-btn" title="切换面板方案" data-norefocus="true"><i class="fa-solid fa-layer-group"></i></button>',
+    );
+    $("#input_helper_toolbar").append(switchPanelBtn);
+  }
+  if (!$("#input_bottom_nav_mode_btn").length) {
+    const bottomNavBtn = $(
+      '<button id="input_bottom_nav_mode_btn" class="input-helper-btn" title="底部跳转模式" data-norefocus="true"><i class="fa-solid fa-angle-double-down"></i></button>',
+    );
+    $("#input_helper_toolbar").append(bottomNavBtn);
+  }
+  if (!$("#input_enter_delete_mode_btn").length) {
+    const enterDelBtn = $(
+      '<button id="input_enter_delete_mode_btn" class="input-helper-btn" title="进入删除模式" data-norefocus="true"><i class="fa-solid fa-trash-can"></i></button>',
+    );
+    $("#input_helper_toolbar").append(enterDelBtn);
   }
   if (!$("#input_chat_undo_btn").length) {
     const chatUndoBtn = $(
@@ -5391,7 +7048,13 @@ jQuery(async () => {
   $(document).on("click", "#ih_open_help_btn", function () {
     openHelpPanel();
   });
-
+  $(document).on("click", "#ih_fp_reset_pos_header", function (e) {
+    e.stopPropagation();
+    getSettings().floatingPanel.position = { x: null, y: null };
+    saveSettingsDebounced();
+    floatingPanelController.refresh();
+    toastr.info("悬浮面板位置已重置", "", { timeOut: 1500 });
+  });
   $(document).on("input", "#auto_scroll_speed", function () {
     const val = parseInt($(this).val());
     getSettings().autoScrollSpeed = val;
@@ -5411,7 +7074,8 @@ jQuery(async () => {
     const body = $(`#${targetId}`);
     header.addClass("ih-collapsed");
     body.addClass("ih-body-collapsed");
-    header.on("click", function () {
+    header.on("click", function (e) {
+      if ($(e.target).closest(".ih-header-toggle").length) return;
       header.toggleClass("ih-collapsed");
       if (header.hasClass("ih-collapsed")) {
         body.addClass("ih-body-collapsed");
@@ -5450,6 +7114,7 @@ jQuery(async () => {
       _themeChangeTimer = setTimeout(() => {
         _cachedToolbarStyles = null;
         _cachedToolbarStylesTime = 0;
+        _invalidateThemeSample();
         floatingPanelController.refresh();
         updateToolbarMaxHeight();
         try {
@@ -5468,7 +7133,104 @@ jQuery(async () => {
 
   setupTextareaFocusTracking();
   setupGlobalDropdownClose();
+  setupGlobalFocusTracking();
+  try {
+    const delCancelBtn = document.getElementById("dialogue_del_mes_cancel");
+    const delOkBtn = document.getElementById("dialogue_del_mes_ok");
+    const syncDelBtnState = () => {
+      const cb = document.getElementById("dialogue_del_mes_cancel");
+      const isOn = cb && $(cb).is(":visible");
+      const sel =
+        "#input_enter_delete_mode_btn, " +
+        ".ih-folder-dropdown-portal [data-button-key='enterDeleteMode'], " +
+        ".ih-floating-panel [data-button-key='enterDeleteMode']";
+      $(sel).toggleClass("input-helper-btn-active", !!isOn);
+    };
+    if (delCancelBtn) {
+      const obs = new MutationObserver(syncDelBtnState);
+      obs.observe(delCancelBtn, {
+        attributes: true,
+        attributeFilter: ["style", "class"],
+      });
+      delCancelBtn.addEventListener("click", () =>
+        setTimeout(syncDelBtnState, 100),
+      );
+    }
+    if (delOkBtn) {
+      delOkBtn.addEventListener("click", () =>
+        setTimeout(syncDelBtnState, 100),
+      );
+    }
+  } catch (e) {
+    console.warn("快捷工具栏: 删除模式监听失败", e);
+  }
   setupVolumeKeyPaging();
+  try {
+    if (typeof eventOn === "function" && typeof iframe_events !== "undefined") {
+      eventOn(
+        iframe_events.MESSAGE_IFRAME_RENDER_ENDED,
+        function (iframe_name) {
+          setTimeout(() => {
+            document.querySelectorAll("iframe").forEach((ifr) => {
+              try {
+                const doc = ifr.contentDocument;
+                if (!doc || doc.__ihFocusAttached) return;
+                doc.__ihFocusAttached = true;
+                doc.addEventListener(
+                  "focusin",
+                  function (e) {
+                    const el = e.target;
+                    if (!isEditableElement(el)) return;
+                    _lastFocusedEditable = el;
+                    if (document.getElementById("send_form")) {
+                      document
+                        .getElementById("send_form")
+                        .classList.add("ih-external-focused");
+                    }
+                  },
+                  true,
+                );
+                doc.addEventListener(
+                  "input",
+                  function (e) {
+                    const el = e.target;
+                    if (!isEditableElement(el)) return;
+                    if (el.isContentEditable) return;
+                    historyManager.onExternalInput(el);
+                  },
+                  true,
+                );
+                doc.addEventListener(
+                  "mousedown",
+                  function (e) {
+                    const target = e.target;
+                    if (!target || isEditableElement(target)) return;
+                    _lastFocusedEditable = null;
+                    const sf = document.getElementById("send_form");
+                    if (sf) sf.classList.remove("ih-external-focused");
+                  },
+                  true,
+                );
+                doc.addEventListener(
+                  "touchstart",
+                  function (e) {
+                    const target = e.target;
+                    if (!target || isEditableElement(target)) return;
+                    _lastFocusedEditable = null;
+                    const sf = document.getElementById("send_form");
+                    if (sf) sf.classList.remove("ih-external-focused");
+                  },
+                  { capture: true, passive: true },
+                );
+              } catch (err) {}
+            });
+          }, 50);
+        },
+      );
+    }
+  } catch (e) {
+    console.warn("快捷工具栏: 无法监听酒馆助手 iframe 事件", e);
+  }
   setupAutoScrollPauseOnUserScroll();
   setupNavFlagClearOnUserScroll();
 

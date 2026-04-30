@@ -120,8 +120,18 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-trash-can",
     text: null,
   },
+  multiSelectDelete: {
+    label: "多选删除",
+    icon: "fa-solid fa-list-check",
+    text: null,
+  },
   copyText: { label: "复制", icon: "fa-solid fa-copy", text: null },
   pasteText: { label: "粘贴", icon: "fa-solid fa-paste", text: null },
+  wrapToggle: {
+    label: "选中包裹模式",
+    icon: "fa-solid fa-object-group",
+    text: null,
+  },
   asterisk: { label: "双星号", icon: null, text: "**" },
   quotes: { label: "双引号", icon: null, text: '""' },
   parentheses: { label: "圆括号", icon: null, text: "()" },
@@ -188,7 +198,7 @@ function shouldIgnoreFocusedElement(el) {
       $el.closest(
         ".ih-dialog-overlay, .input-helper-settings, #input_helper_toolbar, " +
           ".ih-find-bar, .ih-folder-dropdown-portal, .ih-floating-panel, " +
-          ".shortcut-input, #extensions_settings, #extensions_settings2",
+          ".shortcut-input",
       ).length
     )
       return true;
@@ -222,14 +232,18 @@ function getCodeMirrorView(el) {
         node.classList.contains("cm-content") &&
         node.cmView
       ) {
-        const rootView = node.cmView.rootView;
-        return rootView && rootView.view ? rootView.view : null;
+        const v =
+          node.cmView.view ||
+          (node.cmView.rootView && node.cmView.rootView.view);
+        if (v) return v;
       }
       if (node.classList && node.classList.contains("cm-editor")) {
         const content = node.querySelector(".cm-content");
         if (content && content.cmView) {
-          const rootView = content.cmView.rootView;
-          return rootView && rootView.view ? rootView.view : null;
+          const v =
+            content.cmView.view ||
+            (content.cmView.rootView && content.cmView.rootView.view);
+          if (v) return v;
         }
         return null;
       }
@@ -251,10 +265,12 @@ const defaultSettings = {
   confirmDangerousActions: false,
   toolbarPinned: false,
   autoScrollSpeed: 50,
+  pagingScrollRatio: 0.93,
   autoScrollToAiOnStream: false,
   lockScrollOnGeneration: false,
   twoRowMode: false,
   twoRowOrder: "input-first",
+  bottomNavMode: false,
   floatingPanel: {
     enabled: false,
     orientation: "vertical",
@@ -267,6 +283,8 @@ const defaultSettings = {
     ballShape: "circle",
     transparentBall: false,
     buttonSize: 12,
+    panelWidth: 0,
+    panelMaxHeight: 0,
     followTheme: true,
     ballProfiles: [],
     currentProfileIndex: -1,
@@ -297,6 +315,7 @@ const defaultSettings = {
       k === "switchPanelProfile" ||
       k === "bottomNavMode" ||
       k === "enterDeleteMode" ||
+      k === "multiSelectDelete" ||
       k === "copyText" ||
       k === "pasteText"
         ? false
@@ -341,10 +360,124 @@ const shortcutFunctionMap = {
   openQRAssistant: doOpenQRAssistant,
   switchPanelProfile: () => switchToNextPanelProfile(),
   bottomNavMode: () => bottomNavController.toggle(),
+  wrapToggle: () => wrapModeController.toggle(),
   enterDeleteMode: () => doEnterDeleteMode(),
+  multiSelectDelete: () => doMultiSelectDelete(),
   copyText: () => doCopy(),
   pasteText: () => doPaste(),
 };
+
+function ihBlurToDismissKeyboard(targetEl) {
+  try {
+    const ae = document.activeElement;
+    if (!ae) return;
+    if (targetEl && ae === targetEl) return;
+    if (
+      ae.tagName === "TEXTAREA" ||
+      ae.tagName === "INPUT" ||
+      ae.isContentEditable
+    ) {
+      ae.blur();
+    }
+  } catch (e) {}
+}
+
+let _ihKeyboardLikelyVisible = false;
+let _ihMaxViewportHeightForKeyboard = 0;
+
+function ihIsMobileDevice() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent,
+  );
+}
+
+function ihRefreshKeyboardVisibleState() {
+  try {
+    if (!window.visualViewport || !ihIsMobileDevice()) {
+      _ihKeyboardLikelyVisible = false;
+      return;
+    }
+
+    const vv = window.visualViewport;
+    const h = vv.height || 0;
+
+    if (h > _ihMaxViewportHeightForKeyboard) {
+      _ihMaxViewportHeightForKeyboard = h;
+    }
+
+    const baseH = Math.max(
+      _ihMaxViewportHeightForKeyboard || 0,
+      window.innerHeight || 0,
+    );
+
+    _ihKeyboardLikelyVisible = !!(baseH && h && h < baseH - 120);
+  } catch (e) {
+    _ihKeyboardLikelyVisible = false;
+  }
+}
+
+function ihBlurIfKeyboardAlreadyDismissed() {
+  try {
+    ihRefreshKeyboardVisibleState();
+
+    if (_ihKeyboardLikelyVisible) return;
+
+    const ae = document.activeElement;
+    if (!isEditableElement(ae)) return;
+    if (shouldIgnoreFocusedElement(ae)) return;
+
+    ae.blur();
+  } catch (e) {}
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener(
+    "resize",
+    ihRefreshKeyboardVisibleState,
+  );
+  window.visualViewport.addEventListener(
+    "scroll",
+    ihRefreshKeyboardVisibleState,
+  );
+  ihRefreshKeyboardVisibleState();
+}
+
+function ihSmoothScrollTo(el, targetTop, duration) {
+  if (!el) return;
+  if (duration === undefined) duration = 320;
+  if (el._ihScrollRaf) {
+    cancelAnimationFrame(el._ihScrollRaf);
+    el._ihScrollRaf = null;
+  }
+  const startTop = el.scrollTop;
+  const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+  const finalTop = Math.max(0, Math.min(maxTop, targetTop));
+  const distance = finalTop - startTop;
+  if (Math.abs(distance) < 1) {
+    el.scrollTop = finalTop;
+    return;
+  }
+  const startTime = performance.now();
+  const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+  const step = (now) => {
+    const elapsed = now - startTime;
+    const progress = Math.min(1, elapsed / duration);
+    const eased = easeOutCubic(progress);
+    el.scrollTop = startTop + distance * eased;
+    if (progress < 1) {
+      el._ihScrollRaf = requestAnimationFrame(step);
+    } else {
+      el.scrollTop = finalTop;
+      el._ihScrollRaf = null;
+      setTimeout(() => {
+        if (Math.abs(el.scrollTop - finalTop) > 2) {
+          el.scrollTop = finalTop;
+        }
+      }, 100);
+    }
+  };
+  el._ihScrollRaf = requestAnimationFrame(step);
+}
 
 function findActiveScrollContainer() {
   const openDialogs = document.querySelectorAll("dialog[open]");
@@ -418,15 +551,13 @@ function findActiveScrollContainer() {
       el = el.parentElement;
     }
   }
-
   return document.getElementById("chat");
 }
 
 function scrollChatToElement(element, behavior = "smooth", center = false) {
   const chatEl = document.getElementById("chat");
   if (!chatEl || !element) return;
-  chatEl.scrollTop = chatEl.scrollTop;
-  requestAnimationFrame(() => {
+  function doScroll() {
     const chatRect = chatEl.getBoundingClientRect();
     const elemRect = element.getBoundingClientRect();
     let targetTop = chatEl.scrollTop + (elemRect.top - chatRect.top);
@@ -434,6 +565,21 @@ function scrollChatToElement(element, behavior = "smooth", center = false) {
       targetTop -= (chatEl.clientHeight - elemRect.height) / 2;
     }
     chatEl.scrollTo({ top: Math.max(0, targetTop), behavior });
+  }
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      doScroll();
+      setTimeout(() => {
+        const chatRect = chatEl.getBoundingClientRect();
+        const elemRect = element.getBoundingClientRect();
+        const expectedTop = center
+          ? chatRect.top + (chatEl.clientHeight - elemRect.height) / 2
+          : chatRect.top;
+        if (Math.abs(elemRect.top - expectedTop) > 5) {
+          doScroll();
+        }
+      }, 250);
+    });
   });
 }
 
@@ -485,11 +631,18 @@ const messageNavigation = {
   },
 
   _scrollToMsgBottom(chatEl, element) {
-    chatEl.scrollTop = chatEl.scrollTop;
     requestAnimationFrame(() => {
       const rect = element.getBoundingClientRect();
       const chatRect = chatEl.getBoundingClientRect();
-      const targetTop = chatEl.scrollTop + (rect.bottom - chatRect.bottom);
+      let effectiveBottom = chatRect.bottom;
+      const formSheld = document.getElementById("form_sheld");
+      if (formSheld) {
+        const formRect = formSheld.getBoundingClientRect();
+        if (formRect.height > 10 && formRect.top < chatRect.bottom - 10) {
+          effectiveBottom = Math.min(effectiveBottom, formRect.top - 4);
+        }
+      }
+      const targetTop = chatEl.scrollTop + (rect.bottom - effectiveBottom);
       chatEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
     });
   },
@@ -633,10 +786,33 @@ const messageNavigation = {
   },
 };
 
+const wrapModeController = {
+  active: false,
+  toggle() {
+    this.active = !this.active;
+    const sel =
+      "#input_wrap_toggle_btn, " +
+      ".ih-folder-dropdown-portal [data-button-key='wrapToggle'], " +
+      ".ih-floating-panel [data-button-key='wrapToggle']";
+    $(sel).toggleClass("input-helper-btn-active", this.active);
+    toastr.info(
+      this.active
+        ? "选中包裹模式已开启：自定义按钮会包裹选中文本"
+        : "选中包裹模式已关闭",
+      "",
+      { timeOut: 800 },
+    );
+  },
+};
+
 const bottomNavController = {
   active: false,
   toggle() {
     this.active = !this.active;
+    try {
+      getSettings().bottomNavMode = this.active;
+      saveSettingsDebounced();
+    } catch (e) {}
     const selector =
       "#input_bottom_nav_mode_btn, " +
       ".ih-folder-dropdown-portal [data-button-key='bottomNavMode'], " +
@@ -647,24 +823,24 @@ const bottomNavController = {
         ? "底部跳转模式已开启：上/下一条AI跳到消息底部"
         : "底部跳转模式已关闭：恢复跳到消息顶部",
       "",
-      { timeOut: 1500 },
+      { timeOut: 1000 },
     );
   },
 };
 
 function doEnterDeleteMode() {
   if (chat.length === 0) {
-    toastr.warning("当前没有聊天消息", "", { timeOut: 1500 });
+    toastr.warning("当前没有聊天消息", "", { timeOut: 800 });
     return;
   }
   const cancelBtn = document.getElementById("dialogue_del_mes_cancel");
   const inDelMode = cancelBtn && $(cancelBtn).is(":visible");
   if (inDelMode) {
     cancelBtn.click();
-    toastr.info("已退出删除模式", "", { timeOut: 1200 });
+    toastr.info("已退出删除模式", "", { timeOut: 1000 });
   } else {
     executeSlashCommandsWithOptions("/del");
-    toastr.info("已进入删除模式，再次点击退出", "", { timeOut: 1500 });
+    toastr.info("已进入删除模式，再次点击退出", "", { timeOut: 1000 });
   }
   setTimeout(() => {
     const cb = document.getElementById("dialogue_del_mes_cancel");
@@ -675,6 +851,121 @@ function doEnterDeleteMode() {
       ".ih-floating-panel [data-button-key='enterDeleteMode']";
     $(sel).toggleClass("input-helper-btn-active", !!isOn);
   }, 120);
+}
+
+function doMultiSelectDelete() {
+  if (chat.length === 0) {
+    toastr.warning("当前没有聊天消息", "", { timeOut: 1000 });
+    return;
+  }
+  const { overlay, escHandler } = createDialogOverlay();
+
+  const itemsHtml = chat
+    .map((msg, idx) => {
+      const rawMes = String(msg?.mes || "");
+      const sender = ihEscapeHtml(msg.is_user ? "你" : msg.name || "AI");
+      const previewText = rawMes.replace(/\s+/g, " ").substring(0, 60);
+      const preview = ihEscapeHtml(previewText);
+      const isHidden = isMessageHidden(msg);
+      return `
+      <label class="ih-msd-item" data-floor="${idx}">
+        <input type="checkbox" data-floor="${idx}" />
+        <span class="ih-msd-floor">#${idx}</span>
+        <span class="ih-msd-sender">${sender}</span>
+        <span class="ih-msd-preview">${preview}${rawMes.length > 60 ? "..." : ""}</span>
+        ${isHidden ? '<span class="ih-msd-hidden">[隐]</span>' : ""}
+      </label>
+    `;
+    })
+    .join("");
+
+  const content = $(`
+    <div class="ih-hide-manager-content" style="width:520px;max-width:94%;">
+      <h3><i class="fa-solid fa-trash-can"></i> 多选删除消息</h3>
+      <div class="ih-hm-status">
+        <i class="fa-solid fa-circle-info"></i>
+        <span>勾选要删除的消息（可任意选不连续的楼层），共 ${chat.length} 条</span>
+      </div>
+      <div class="ih-hm-row" style="margin-bottom:8px;">
+        <button class="ih-hm-btn" id="ih_msd_select_all"><i class="fa-solid fa-check-double"></i> 全选</button>
+        <button class="ih-hm-btn" id="ih_msd_invert"><i class="fa-solid fa-rotate"></i> 反选</button>
+        <button class="ih-hm-btn" id="ih_msd_clear"><i class="fa-solid fa-eraser"></i> 清空</button>
+        <span class="ih-hm-hint" id="ih_msd_count">已选 0 条</span>
+      </div>
+      <div class="ih-msd-list" style="max-height:50vh;overflow-y:auto;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;padding:4px;">
+        ${itemsHtml}
+      </div>
+      <div class="ih-jump-actions" style="margin-top:12px;">
+        <button class="ih-hm-btn" id="ih_msd_cancel">取消</button>
+        <button class="ih-hm-btn ih-hm-btn-warn" id="ih_msd_confirm"><i class="fa-solid fa-trash"></i> 删除选中</button>
+      </div>
+    </div>
+  `);
+  overlay.append(content);
+  syncDialogTheme(content[0]);
+  content.on("click", (e) => e.stopPropagation());
+  generateFaIconProtectionCSS();
+
+  const closeDialog = () => {
+    document.removeEventListener("keydown", escHandler, true);
+    overlay.remove();
+  };
+  overlay.off("click").on("click", (e) => {
+    if (e.target === overlay[0]) closeDialog();
+  });
+
+  function updateCount() {
+    const n = content.find(
+      ".ih-msd-list input[type='checkbox']:checked",
+    ).length;
+    content.find("#ih_msd_count").text(`已选 ${n} 条`);
+  }
+
+  content.find("#ih_msd_cancel").on("click", closeDialog);
+  content.find("#ih_msd_select_all").on("click", () => {
+    content.find(".ih-msd-list input[type='checkbox']").prop("checked", true);
+    updateCount();
+  });
+  content.find("#ih_msd_clear").on("click", () => {
+    content.find(".ih-msd-list input[type='checkbox']").prop("checked", false);
+    updateCount();
+  });
+  content.find("#ih_msd_invert").on("click", () => {
+    content.find(".ih-msd-list input[type='checkbox']").each(function () {
+      this.checked = !this.checked;
+    });
+    updateCount();
+  });
+  content.on("change", ".ih-msd-list input[type='checkbox']", updateCount);
+
+  content.find("#ih_msd_confirm").on("click", async () => {
+    const selected = [];
+    content
+      .find(".ih-msd-list input[type='checkbox']:checked")
+      .each(function () {
+        selected.push(parseInt($(this).data("floor")));
+      });
+    if (selected.length === 0) {
+      toastr.warning("还没选中任何消息哦", "", { timeOut: 1000 });
+      return;
+    }
+    if (getSettings().confirmDangerousActions) {
+      if (
+        !confirm(
+          `确定删除选中的 ${selected.length} 条消息吗？\n楼层：${selected.join(", ")}`,
+        )
+      )
+        return;
+    }
+    chatUndoManager.save();
+    closeDialog();
+    selected.sort((a, b) => b - a);
+    const cmd = "/cut " + selected.join(" ");
+    await executeSlashCommandsWithOptions(cmd);
+    toastr.success(`已删除 ${selected.length} 条消息（可点撤回按钮还原）`, "", {
+      timeOut: 2000,
+    });
+  });
 }
 
 const pagingController = {
@@ -720,11 +1011,11 @@ const pagingController = {
           ? "翻页模式已开启，点击屏幕上/下半区翻页"
           : "翻页模式已开启，使用导航按钮或音量键翻页",
         "",
-        { timeOut: 1500 },
+        { timeOut: 1000 },
       );
     } else {
       this._removeTapPaging();
-      toastr.info("翻页模式已关闭", "", { timeOut: 1500 });
+      toastr.info("翻页模式已关闭", "", { timeOut: 1000 });
     }
   },
 
@@ -735,48 +1026,57 @@ const pagingController = {
     return Math.max(visibleBottom - visibleTop, 200);
   },
 
-  pageUp() {
-    const scrollEl = findActiveScrollContainer();
+  pageUp(forceEl) {
+    const scrollEl = forceEl || findActiveScrollContainer();
     if (!scrollEl) return;
-    const pageHeight = this._getVisibleHeight(scrollEl) * 0.93;
+    const isTextLike =
+      scrollEl.tagName === "TEXTAREA" || scrollEl.tagName === "INPUT";
+    const pageHeight =
+      this._getVisibleHeight(scrollEl) *
+      (getSettings().pagingScrollRatio || 0.93);
     const newTop = Math.max(0, scrollEl.scrollTop - pageHeight);
-    scrollEl.scrollTo({ top: newTop, behavior: "smooth" });
+    if (isTextLike) {
+      ihBlurToDismissKeyboard(scrollEl);
+      ihSmoothScrollTo(scrollEl, newTop, 180);
+    } else {
+      ihSmoothScrollTo(scrollEl, newTop, 180);
+    }
   },
 
-  pageDown() {
-    const scrollEl = findActiveScrollContainer();
+  pageDown(forceEl) {
+    const scrollEl = forceEl || findActiveScrollContainer();
     if (!scrollEl) return;
-    const pageHeight = this._getVisibleHeight(scrollEl) * 0.93;
+    const isTextLike =
+      scrollEl.tagName === "TEXTAREA" || scrollEl.tagName === "INPUT";
+    const pageHeight =
+      this._getVisibleHeight(scrollEl) *
+      (getSettings().pagingScrollRatio || 0.93);
     const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
     const newTop = Math.min(maxScroll, scrollEl.scrollTop + pageHeight);
-    scrollEl.scrollTo({ top: newTop, behavior: "smooth" });
+    if (isTextLike) {
+      ihBlurToDismissKeyboard(scrollEl);
+      ihSmoothScrollTo(scrollEl, newTop, 200);
+    } else {
+      ihSmoothScrollTo(scrollEl, newTop, 200);
+    }
   },
+
   _tapTouchStart: null,
   _tapTouchMove: null,
   _tapTouchEnd: null,
+  _tapClick: null,
 
   _setupTapPaging() {
-    const isMobile =
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-        navigator.userAgent,
-      );
-    if (!isMobile) return;
     const chatEl = document.getElementById("chat");
     if (!chatEl) return;
+
     let touchStartY = 0;
     let touchMoved = false;
+    let lastTouchPagingAt = 0;
     const self = this;
-    this._tapTouchStart = function (e) {
-      touchStartY = e.touches[0].clientY;
-      touchMoved = false;
-    };
-    this._tapTouchMove = function () {
-      touchMoved = true;
-    };
-    this._tapTouchEnd = function (e) {
-      if (!self.active) return;
-      if (touchMoved) return;
-      const $target = $(e.target);
+
+    function shouldIgnoreTapTarget(target) {
+      const $target = $(target);
       if (
         $target.is(
           "a, button, input, textarea, select, label, video, audio, iframe",
@@ -785,42 +1085,114 @@ const pagingController = {
           "[onclick], [contenteditable], [role='button'], [tabindex]:not([tabindex='-1'])",
         )
       ) {
-        return;
+        return true;
       }
       if (
         $target.closest(
           ".mes_buttons, .swipe_left, .swipe_right, .mes_edit_buttons, " +
             ".ih-floating-ball, .ih-floating-panel, " +
-            ".qr--button, .qr--buttons",
+            ".qr--button, .qr--buttons, " +
+            ".ih-folder-dropdown-portal, .ih-dialog-overlay, .ih-find-bar",
         ).length
       ) {
-        return;
+        return true;
       }
       if ($target.is("summary") || $target.closest("summary").length) {
-        return;
+        return true;
       }
       if (
         $target.is(".reasoning-toggle-btn") ||
         $target.closest(".reasoning-toggle-btn").length
       ) {
-        return;
+        return true;
       }
       if (
         $target.is(".inline-drawer-toggle, .inline-drawer-header") ||
         $target.closest(".inline-drawer-toggle, .inline-drawer-header").length
       ) {
+        return true;
+      }
+      return false;
+    }
+
+    function doTapPage(clientY, clientX) {
+      if (!self.active) {
         return;
       }
-      const touch = e.changedTouches[0];
+      if (floatingPanelController._expanded) {
+        const panelEl = document.querySelector(".ih-floating-panel");
+        if (panelEl) {
+          const panelRect = panelEl.getBoundingClientRect();
+          const ballEl = document.querySelector(".ih-floating-ball");
+          const ballRect = ballEl ? ballEl.getBoundingClientRect() : null;
+          const inPanel =
+            clientY >= panelRect.top &&
+            clientY <= panelRect.bottom &&
+            clientX >= panelRect.left &&
+            clientX <= panelRect.right;
+          const inBall =
+            ballRect &&
+            clientY >= ballRect.top &&
+            clientY <= ballRect.bottom &&
+            clientX >= ballRect.left &&
+            clientX <= ballRect.right;
+          if (inPanel || inBall) {
+            return;
+          }
+        }
+      }
       const chatRect = chatEl.getBoundingClientRect();
-      const relativeY = touch.clientY - chatRect.top;
+      if (clientY < chatRect.top || clientY > chatRect.bottom) {
+        return;
+      }
+      const relativeY = clientY - chatRect.top;
       const halfHeight = chatRect.height / 2;
       if (relativeY < halfHeight) {
-        self.pageUp();
+        self.pageUp(chatEl);
       } else {
-        self.pageDown();
+        self.pageDown(chatEl);
       }
+    }
+
+    this._tapTouchStart = function (e) {
+      if (!self.active) return;
+      touchStartY = e.touches[0].clientY;
+      touchMoved = false;
     };
+
+    this._tapTouchMove = function (e) {
+      if (!self.active) return;
+      const y = e.touches && e.touches[0] ? e.touches[0].clientY : touchStartY;
+      if (Math.abs(y - touchStartY) > 8) touchMoved = true;
+    };
+
+    this._tapTouchEnd = function (e) {
+      if (!self.active) {
+        return;
+      }
+      if (touchMoved) {
+        return;
+      }
+      if (shouldIgnoreTapTarget(e.target)) {
+        return;
+      }
+      const touch = e.changedTouches && e.changedTouches[0];
+      if (!touch) {
+        return;
+      }
+      lastTouchPagingAt = Date.now();
+      doTapPage(touch.clientY, touch.clientX);
+    };
+
+    this._tapClick = function (e) {
+      if (!self.active) return;
+      if (Date.now() - lastTouchPagingAt < 450) return;
+      if (shouldIgnoreTapTarget(e.target)) {
+        return;
+      }
+      doTapPage(e.clientY, e.clientX);
+    };
+
     chatEl.addEventListener("touchstart", this._tapTouchStart, {
       passive: true,
     });
@@ -830,6 +1202,7 @@ const pagingController = {
     chatEl.addEventListener("touchend", this._tapTouchEnd, {
       passive: true,
     });
+    chatEl.addEventListener("click", this._tapClick, true);
   },
 
   _removeTapPaging() {
@@ -841,9 +1214,12 @@ const pagingController = {
       chatEl.removeEventListener("touchmove", this._tapTouchMove);
     if (this._tapTouchEnd)
       chatEl.removeEventListener("touchend", this._tapTouchEnd);
+    if (this._tapClick)
+      chatEl.removeEventListener("click", this._tapClick, true);
     this._tapTouchStart = null;
     this._tapTouchMove = null;
     this._tapTouchEnd = null;
+    this._tapClick = null;
   },
 };
 
@@ -857,6 +1233,8 @@ const autoScrollController = {
   _chatEl: null,
   _boundStep: null,
   _speed: 50,
+  _lastKnownScrollTop: 0,
+  _lastKnownScrollEl: null,
 
   toggle() {
     this.active ? this.stop() : this.start();
@@ -868,18 +1246,26 @@ const autoScrollController = {
     this._isStreaming = false;
     this._lastTimestamp = null;
     this._scrollAccum = 0;
-    this._chatEl = document.getElementById("chat");
+    this._chatEl = findActiveScrollContainer();
+    this._lastKnownScrollEl = this._chatEl;
+    this._lastKnownScrollTop = this._chatEl ? this._chatEl.scrollTop : 0;
     this._speed = getSettings().autoScrollSpeed || 50;
     if (!this._boundStep) {
       this._boundStep = this._step.bind(this);
     }
     this._updateActiveUI(true);
-    toastr.info("自动滚动已开启，再次点击停止", "", { timeOut: 1500 });
-    if (
-      !this._chatEl ||
-      this._chatEl.scrollHeight <= this._chatEl.clientHeight
-    ) {
-      toastr.warning("当前内容不够多，没有可滚动的空间", "", {
+    toastr.info("自动滚动已开启，再次点击停止", "", { timeOut: 1000 });
+    if (!this._chatEl) {
+      toastr.warning("没有找到可滚动的目标", "", {
+        timeOut: 1500,
+      });
+      this.active = false;
+      this._updateActiveUI(false);
+      return;
+    }
+
+    if (this._chatEl.scrollHeight <= this._chatEl.clientHeight) {
+      toastr.warning("当前目标内容不够多，没有可滚动的空间", "", {
         timeOut: 1500,
       });
       this.active = false;
@@ -892,6 +1278,8 @@ const autoScrollController = {
   stop() {
     this.active = false;
     this._paused = false;
+    this._lastKnownScrollTop = 0;
+    this._lastKnownScrollEl = null;
     this._cancelAnimation();
     this._updateActiveUI(false);
   },
@@ -907,11 +1295,23 @@ const autoScrollController = {
       this._lastTimestamp = null;
       this._scrollAccum = 0;
       this._speed = getSettings().autoScrollSpeed || 50;
-      this._chatEl = document.getElementById("chat");
+
+      const oldEl = this._chatEl;
+      const oldElAlive =
+        oldEl &&
+        oldEl.ownerDocument &&
+        oldEl.ownerDocument.contains(oldEl) &&
+        oldEl.scrollHeight > oldEl.clientHeight + 2;
+
+      if (!oldElAlive) {
+        this._chatEl = findActiveScrollContainer();
+        this._lastKnownScrollEl = this._chatEl;
+        this._lastKnownScrollTop = this._chatEl ? this._chatEl.scrollTop : 0;
+      }
+
       this._rafId = requestAnimationFrame(this._boundStep);
     }
   },
-
   setStreaming(isStreaming) {
     this._isStreaming = isStreaming;
     if (isStreaming && this.active) {
@@ -951,12 +1351,37 @@ const autoScrollController = {
       return;
     }
     if (!this._chatEl) {
-      this._chatEl = document.getElementById("chat");
+      this._chatEl = findActiveScrollContainer();
     }
     const chatEl = this._chatEl;
     if (!chatEl) {
       this._rafId = null;
       return;
+    }
+
+    const isTextLike =
+      chatEl.tagName === "TEXTAREA" || chatEl.tagName === "INPUT";
+
+    if (this._lastKnownScrollEl !== chatEl) {
+      this._lastKnownScrollEl = chatEl;
+      this._lastKnownScrollTop = chatEl.scrollTop;
+    }
+
+    if (
+      isTextLike &&
+      this._lastKnownScrollTop > 20 &&
+      chatEl.scrollTop < this._lastKnownScrollTop - 20
+    ) {
+      chatEl.scrollTop = this._lastKnownScrollTop;
+
+      requestAnimationFrame(() => {
+        if (
+          chatEl.ownerDocument?.contains(chatEl) &&
+          chatEl.scrollTop < this._lastKnownScrollTop - 20
+        ) {
+          chatEl.scrollTop = this._lastKnownScrollTop;
+        }
+      });
     }
     if (!this._lastTimestamp) {
       this._lastTimestamp = timestamp;
@@ -971,9 +1396,15 @@ const autoScrollController = {
       this._scrollAccum -= px;
       const before = chatEl.scrollTop;
       chatEl.scrollTop += px;
+
+      if (chatEl.scrollTop > this._lastKnownScrollTop) {
+        this._lastKnownScrollTop = chatEl.scrollTop;
+        this._lastKnownScrollEl = chatEl;
+      }
+
       if (chatEl.scrollTop === before) {
         this.stop();
-        toastr.info("已滚动到底部", "", { timeOut: 1500 });
+        toastr.info("已滚动到底部", "", { timeOut: 1000 });
         return;
       }
     }
@@ -984,20 +1415,22 @@ const autoScrollController = {
 const streamScrollController = {
   _shouldScroll: false,
   _isRealStream: false,
-  _pendingScroll: false,
-  _fallbackTimer: null,
   _ready: false,
   _armTimer: null,
   _chatLengthAtStart: 0,
 
-  onStreamStart() {
-    if (!this._ready) return;
-    if (!getSettings().autoScrollToAiOnStream) return;
+  onStreamStart(type) {
+    if (!this._ready) {
+      return;
+    }
+    if (!getSettings().autoScrollToAiOnStream) {
+      return;
+    }
     this._shouldScroll = true;
     this._isRealStream = false;
-    this._pendingScroll = false;
     this._chatLengthAtStart = chat.length;
-    clearTimeout(this._fallbackTimer);
+    this._lastMesLengthAtStart =
+      chat.length > 0 ? (chat[chat.length - 1].mes || "").length : 0;
   },
 
   onStreamToken() {
@@ -1017,51 +1450,36 @@ const streamScrollController = {
       this.reset();
       return;
     }
-    if (getSettings().lockScrollOnGeneration) {
+    if (scrollLockController.isActive()) {
       this.reset();
       return;
     }
-    if (chat.length <= this._chatLengthAtStart) {
+    const lastMes = chat[chat.length - 1];
+    const lastMesLen = lastMes ? (lastMes.mes || "").length : 0;
+    const noNewMes = chat.length <= this._chatLengthAtStart;
+    const noContentChange = lastMesLen === this._lastMesLengthAtStart;
+    if (noNewMes && noContentChange) {
       this.reset();
       return;
     }
-    this._pendingScroll = true;
-    this._shouldScroll = false;
-    this._isRealStream = false;
-    this._fallbackTimer = setTimeout(() => {
-      if (this._pendingScroll) {
-        this._pendingScroll = false;
-        doScrollToLastAi();
-      }
-    }, 2000);
+    this.reset();
+    setTimeout(() => {
+      doScrollToLastAi();
+    }, 400);
   },
 
-  onMessageRendered() {
-    if (!this._ready) return;
-    if (this._pendingScroll) {
-      clearTimeout(this._fallbackTimer);
-      this._pendingScroll = false;
-      if (getSettings().lockScrollOnGeneration) return;
-      setTimeout(() => {
-        doScrollToLastAi();
-      }, 100);
-    }
-  },
+  onMessageRendered() {},
 
   reset() {
     this._shouldScroll = false;
     this._isRealStream = false;
-    this._pendingScroll = false;
     this._chatLengthAtStart = 0;
-    clearTimeout(this._fallbackTimer);
   },
 
   onGenerationStopped() {
     this._shouldScroll = false;
     this._isRealStream = false;
-    this._pendingScroll = false;
     this._chatLengthAtStart = 0;
-    clearTimeout(this._fallbackTimer);
   },
 
   arm() {
@@ -1069,9 +1487,7 @@ const streamScrollController = {
     this._ready = false;
     this._shouldScroll = false;
     this._isRealStream = false;
-    this._pendingScroll = false;
     this._chatLengthAtStart = 0;
-    clearTimeout(this._fallbackTimer);
     this._armTimer = setTimeout(() => {
       this._ready = true;
     }, 3000);
@@ -1171,6 +1587,12 @@ const findReplaceController = {
   _matches: [],
   _currentMatchIndex: -1,
   _searchTerm: "",
+  _madeReadonly: false,
+  _caseSensitive: false,
+  _collapsed: false,
+  _readonlyCleanupFn: null,
+  _liveSearchHandler: null,
+  _cmInputHandler: null,
 
   toggle() {
     this.active ? this.close() : this.open();
@@ -1205,26 +1627,118 @@ const findReplaceController = {
       !this._cmView &&
       (!this._targetTextarea || !this._targetTextarea.length)
     ) {
-      toastr.warning("没有可搜索的文本区域", "", { timeOut: 1500 });
+      toastr.warning("没有可搜索的文本区域", "", { timeOut: 1000 });
       return;
     }
     this.active = true;
     this._createBar();
     this._updateActiveUI(true);
+    document.body.classList.add("ih-find-active");
+    setTimeout(() => {
+      try {
+        if (this._barEl) this._barEl.find(".ih-find-input").focus();
+      } catch (e) {}
+    }, 50);
   },
 
   close() {
     this.active = false;
+    this._collapsed = false;
+    if (this._searchDebounceTimer) {
+      clearTimeout(this._searchDebounceTimer);
+      this._searchDebounceTimer = null;
+    }
+    if (
+      this._liveSearchHandler &&
+      this._targetTextarea &&
+      this._targetTextarea.length
+    ) {
+      try {
+        this._targetTextarea[0].removeEventListener(
+          "input",
+          this._liveSearchHandler,
+        );
+      } catch (e) {}
+      this._liveSearchHandler = null;
+    }
+    if (this._cmInputHandler && this._cmView && this._cmView.contentDOM) {
+      try {
+        this._cmView.contentDOM.removeEventListener(
+          "input",
+          this._cmInputHandler,
+        );
+      } catch (e) {}
+      this._cmInputHandler = null;
+    }
+    if (
+      this._readonlyCleanupFn &&
+      this._targetTextarea &&
+      this._targetTextarea.length
+    ) {
+      try {
+        this._targetTextarea[0].removeEventListener(
+          "mousedown",
+          this._readonlyCleanupFn,
+        );
+        this._targetTextarea[0].removeEventListener(
+          "touchstart",
+          this._readonlyCleanupFn,
+        );
+      } catch (e) {}
+      this._readonlyCleanupFn = null;
+    }
+    if (
+      this._madeReadonly &&
+      this._targetTextarea &&
+      this._targetTextarea.length
+    ) {
+      try {
+        this._targetTextarea[0].removeAttribute("readonly");
+      } catch (e) {}
+      this._madeReadonly = false;
+    }
+    if (this._barObserver) {
+      try {
+        this._barObserver.disconnect();
+      } catch (e) {}
+      this._barObserver = null;
+    }
+    if (this._focusStealGuard) {
+      document.removeEventListener("focusin", this._focusStealGuard, true);
+      this._focusStealGuard = null;
+    }
+    if (this._focusTrackHandler) {
+      document.removeEventListener("focusin", this._focusTrackHandler, true);
+      this._focusTrackHandler = null;
+    }
+    if (this._focusGuardDownHandler) {
+      document.removeEventListener(
+        "mousedown",
+        this._focusGuardDownHandler,
+        true,
+      );
+      document.removeEventListener(
+        "touchstart",
+        this._focusGuardDownHandler,
+        true,
+      );
+      this._focusGuardDownHandler = null;
+    }
+    this._lastValidFocus = null;
     if (this._barEl) {
       this._barEl.remove();
       this._barEl = null;
     }
+    this._targetTextarea = null;
+    this._cmView = null;
     this._matches = [];
     this._currentMatchIndex = -1;
     this._searchTerm = "";
-    this._targetTextarea = null;
-    this._cmView = null;
+    this._firstNavPending = false;
+    this._lastHighlightPos = null;
+    this._lastHighlightLen = 0;
     this._updateActiveUI(false);
+    document.body.classList.remove("ih-find-active");
   },
 
   _updateActiveUI(isActive) {
@@ -1250,21 +1764,21 @@ const findReplaceController = {
         !document.contains(this._cmView.dom)
       ) {
         this.close();
-        toastr.warning("编辑区域已关闭", "", { timeOut: 1500 });
+        toastr.warning("编辑区域已关闭", "", { timeOut: 1000 });
         return false;
       }
       return true;
     }
     if (!this._targetTextarea || !this._targetTextarea.length) {
       this.close();
-      toastr.warning("编辑区域已关闭", "", { timeOut: 1500 });
+      toastr.warning("编辑区域已关闭", "", { timeOut: 1000 });
       return false;
     }
     const el = this._targetTextarea[0];
     const doc = el.ownerDocument;
     if (!doc || !doc.contains(el)) {
       this.close();
-      toastr.warning("编辑区域已关闭", "", { timeOut: 1500 });
+      toastr.warning("编辑区域已关闭", "", { timeOut: 1000 });
       return false;
     }
     return true;
@@ -1275,16 +1789,26 @@ const findReplaceController = {
     const bar = $(`
             <div class="ih-find-bar" id="ih_find_bar">
                 <div class="ih-find-row">
-                    <input type="text" class="ih-find-input" id="ih_find_input" placeholder="查找..." />
-                    <span class="ih-find-count" id="ih_find_count">0/0</span>
+                    <div class="ih-find-input-wrap">
+                        <textarea class="ih-find-input" id="ih_find_input" placeholder="查找..." rows="1"></textarea>
+                        <button class="ih-find-input-fold" data-action="toggleFoldFind" title="折叠/展开" type="button"><i class="fa-solid fa-chevron-up"></i></button>
+                        <button class="ih-find-input-clear" data-action="clearFind" title="清空查找内容" type="button"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <span class="ih-find-count" id="ih_find_count"><span class="ih-find-count-cur">0</span><span class="ih-find-count-sep">/</span><span class="ih-find-count-total">0</span></span>
                     <button class="ih-find-nav-btn" data-action="prev" title="上一个 (Shift+Enter)"><i class="fa-solid fa-chevron-up"></i></button>
                     <button class="ih-find-nav-btn" data-action="next" title="下一个 (Enter)"><i class="fa-solid fa-chevron-down"></i></button>
                     <button class="ih-find-nav-btn ih-find-close-btn" data-action="close" title="关闭 (Esc)"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="ih-replace-row">
-                    <input type="text" class="ih-replace-input" id="ih_replace_input" placeholder="替换为..." />
-                    <button class="ih-find-action-btn" data-action="replace" title="替换当前">替换</button>
-                    <button class="ih-find-action-btn" data-action="replaceAll" title="全部替换">全部</button>
+                    <div class="ih-find-input-wrap ih-replace-input-wrap">
+  <textarea class="ih-replace-input" id="ih_replace_input" placeholder="替换为..." rows="1"></textarea>
+  <button class="ih-find-input-fold" data-action="toggleFoldReplace" title="折叠/展开" type="button"><i class="fa-solid fa-chevron-up"></i></button>
+  <button class="ih-find-input-clear" data-action="clearReplace" title="清空替换内容" type="button"><i class="fa-solid fa-xmark"></i></button>
+</div>
+                    <button class="ih-find-nav-btn ih-find-case-btn" data-action="toggleCase" title="区分大小写"><span style="font-size:11px;font-weight:bold;">Aa</span></button>
+                    <button class="ih-find-action-btn" data-action="replace" title="替换当前"><i class="fa-solid fa-right-left"></i></button>
+<button class="ih-find-action-btn" data-action="replaceAll" title="全部替换"><i class="fa-solid fa-repeat"></i></button>
+<button class="ih-find-nav-btn ih-find-collapse-btn" data-action="toggleCollapse" title="收起到侧边/展开"><i class="fa-solid fa-angles-left ih-collapse-icon-left"></i><i class="fa-solid fa-angles-right ih-collapse-icon-right"></i></button>
                 </div>
             </div>
         `);
@@ -1301,20 +1825,142 @@ const findReplaceController = {
     }
     this._barEl = bar;
     syncDialogTheme(bar[0]);
-    bar.find(".ih-find-input").on("input", () => this._doSearch());
+    generateFaIconProtectionCSS();
+    const _syncClearButton = (el) => {
+      if (!el) return;
+      const wrap = el.closest(".ih-find-input-wrap");
+      if (!wrap) return;
+      wrap.classList.toggle("ih-has-value", !!el.value);
+    };
+    const _autoGrow = (el) => {
+      if (!el) return;
+      const wrap = el.closest && el.closest(".ih-find-input-wrap");
+      if (wrap && wrap.classList.contains("ih-input-folded")) {
+        return;
+      }
+
+      const cs = window.getComputedStyle(el);
+      let lineHeight = parseFloat(cs.lineHeight);
+
+      if (isNaN(lineHeight) || lineHeight <= 0) {
+        const fontSize = parseFloat(cs.fontSize);
+        lineHeight = (isNaN(fontSize) ? 13 : fontSize) * 1.5;
+      }
+
+      const paddingY =
+        (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      const borderY =
+        (parseFloat(cs.borderTopWidth) || 0) +
+        (parseFloat(cs.borderBottomWidth) || 0);
+
+      const singleLineHeight = Math.ceil(lineHeight + paddingY + borderY);
+      const maxHeight = 150;
+
+      el.style.height = "auto";
+      void el.offsetHeight;
+
+      if (!el.value) {
+        el.style.height = singleLineHeight + "px";
+        el.scrollTop = 0;
+        return;
+      }
+
+      const nextHeight = Math.min(
+        Math.max(el.scrollHeight + borderY, singleLineHeight),
+        maxHeight,
+      );
+
+      el.style.height = nextHeight + "px";
+
+      if (wrap) {
+        wrap.classList.toggle(
+          "ih-multiline",
+          nextHeight > singleLineHeight + 2,
+        );
+      }
+    };
+    bar.find('[data-action="clearFind"]').on("click", () => {
+      const input = bar.find(".ih-find-input");
+      const replaceInput = bar.find(".ih-replace-input");
+      input.val("");
+      _autoGrow(input[0]);
+      _autoGrow(replaceInput[0]);
+      _syncClearButton(input[0]);
+      _syncClearButton(replaceInput[0]);
+      input[0].focus();
+      this._doSearch();
+    });
+    bar.find('[data-action="clearReplace"]').on("click", () => {
+      const input = bar.find(".ih-replace-input");
+      input.val("");
+      _autoGrow(input[0]);
+      _syncClearButton(input[0]);
+      input[0].focus();
+    });
+    const _toggleFold = function (wrapEl) {
+      const $wrap = $(wrapEl);
+      const ta = $wrap.find("textarea")[0];
+      const foldBtn = $wrap.find(".ih-find-input-fold");
+      const icon = foldBtn.find("i");
+      const isFolding = !$wrap.hasClass("ih-input-folded");
+      $wrap.toggleClass("ih-input-folded", isFolding);
+      if (isFolding) {
+        icon.removeClass("fa-chevron-up").addClass("fa-chevron-down");
+        if (ta) ta.style.height = "";
+      } else {
+        icon.removeClass("fa-chevron-down").addClass("fa-chevron-up");
+        if (ta) _autoGrow(ta);
+      }
+    };
+    bar.find('[data-action="toggleFoldFind"]').on("click", function () {
+      _toggleFold($(this).closest(".ih-find-input-wrap")[0]);
+    });
+    bar.find('[data-action="toggleFoldReplace"]').on("click", function () {
+      _toggleFold($(this).closest(".ih-find-input-wrap")[0]);
+    });
+    bar
+      .find(".ih-find-input, .ih-replace-input")
+      .each(function () {
+        _autoGrow(this);
+        _syncClearButton(this);
+      })
+      .on("input", function () {
+        _autoGrow(this);
+        _syncClearButton(this);
+      });
+
+    bar.find(".ih-find-input").on("input", () => {
+      clearTimeout(this._searchDebounceTimer);
+      this._searchDebounceTimer = setTimeout(() => {
+        if (this.active) this._doSearch();
+      }, 160);
+    });
     bar.find('[data-action="prev"]').on("click", () => this._navigate(-1));
     bar.find('[data-action="next"]').on("click", () => this._navigate(1));
+    bar.find('[data-action="toggleCase"]').on("click", () => {
+      this._caseSensitive = !this._caseSensitive;
+      bar
+        .find(".ih-find-case-btn")
+        .toggleClass("input-helper-btn-active", this._caseSensitive);
+      this._doSearch();
+    });
     bar.find('[data-action="close"]').on("click", () => this.close());
+    bar
+      .find('[data-action="toggleCollapse"]')
+      .on("click", () => this._toggleCollapse());
     bar.find('[data-action="replace"]').on("click", () => this._doReplace());
     bar
       .find('[data-action="replaceAll"]')
       .on("click", () => this._doReplaceAll());
     bar.on("keydown", (e) => {
+      const _isMobile = ihIsMobileDevice();
       if (e.key === "Escape") {
         e.stopPropagation();
         e.preventDefault();
         this.close();
       } else if (e.key === "Enter" && $(e.target).hasClass("ih-find-input")) {
+        if (e.ctrlKey || e.metaKey) return;
+        if (_isMobile) return;
         e.preventDefault();
         if (e.shiftKey) this._navigate(-1);
         else this._navigate(1);
@@ -1322,16 +1968,234 @@ const findReplaceController = {
         e.key === "Enter" &&
         $(e.target).hasClass("ih-replace-input")
       ) {
+        if (e.ctrlKey || e.metaKey) return;
+        if (_isMobile) return;
         e.preventDefault();
         this._doReplace();
       }
     });
-    bar.on("mousedown", (e) => e.stopPropagation());
-    setTimeout(() => bar.find(".ih-find-input").focus(), 50);
-    generateFaIconProtectionCSS();
+    bar.on("mousedown", (e) => {
+      e.stopPropagation();
+      if (!$(e.target).closest("input, textarea").length) {
+        e.preventDefault();
+      }
+    });
+    bar.on("click", (e) => e.stopPropagation());
+    bar.on("touchstart", (e) => e.stopPropagation());
+    bar.on("touchend", (e) => e.stopPropagation());
+    bar.on("pointerdown", (e) => e.stopPropagation());
+    bar.on("pointerup", (e) => e.stopPropagation());
+    if (this._targetTextarea && this._targetTextarea.length) {
+      const self2 = this;
+      this._liveSearchHandler = function () {
+        if (!self2.active) return;
+        if (self2._isReplacing) return;
+        const oldIdx = self2._currentMatchIndex;
+        self2._rebuildMatchesWithoutHighlight();
+        if (self2._matches.length <= 0) {
+          self2._currentMatchIndex = -1;
+          self2._updateCount();
+          return;
+        }
+        if (oldIdx >= 0 && oldIdx < self2._matches.length) {
+          self2._currentMatchIndex = oldIdx;
+        } else {
+          self2._currentMatchIndex = 0;
+        }
+        self2._updateCount();
+        self2._highlightMatch(false);
+      };
+      this._targetTextarea[0].addEventListener(
+        "input",
+        this._liveSearchHandler,
+      );
+    }
+    if (this._cmView) {
+      const self3 = this;
+      this._cmInputHandler = function () {
+        if (!self3.active) return;
+        if (self3._isReplacing) return;
+        const oldIdx = self3._currentMatchIndex;
+        self3._rebuildMatchesWithoutHighlight();
+        if (self3._matches.length <= 0) {
+          self3._currentMatchIndex = -1;
+          self3._updateCount();
+          return;
+        }
+        if (oldIdx >= 0 && oldIdx < self3._matches.length) {
+          self3._currentMatchIndex = oldIdx;
+        } else {
+          self3._currentMatchIndex = 0;
+        }
+        self3._updateCount();
+        self3._highlightMatch(false);
+      };
+      this._cmView.contentDOM.addEventListener("input", this._cmInputHandler);
+    }
+    if (this._targetTextarea && this._targetTextarea.length) {
+      const self = this;
+      this._readonlyCleanupFn = function () {
+        if (
+          self._madeReadonly &&
+          self._targetTextarea &&
+          self._targetTextarea.length
+        ) {
+          self._targetTextarea[0].removeAttribute("readonly");
+          self._madeReadonly = false;
+        }
+      };
+      this._targetTextarea[0].addEventListener(
+        "mousedown",
+        this._readonlyCleanupFn,
+      );
+      this._targetTextarea[0].addEventListener(
+        "touchstart",
+        this._readonlyCleanupFn,
+        { passive: true },
+      );
+    }
+    const self = this;
+    this._barObserver = new MutationObserver(() => {
+      if (!self.active || !self._barEl || !self._barEl[0]) return;
+      const openDialogs = document.querySelectorAll("dialog[open]");
+      const topHost =
+        openDialogs.length > 0
+          ? openDialogs[openDialogs.length - 1]
+          : document.body;
+      if (self._barEl[0].parentNode !== topHost) {
+        topHost.appendChild(self._barEl[0]);
+      }
+    });
+    this._barObserver.observe(document.body, {
+      childList: true,
+      subtree: false,
+    });
+    this._barObserver.observe(document.body, {
+      childList: true,
+      subtree: false,
+    });
+    const _focusGuardLastDown = { target: null, time: 0 };
+    this._focusGuardDownHandler = function (e) {
+      _focusGuardLastDown.target = e.target;
+      _focusGuardLastDown.time = Date.now();
+    };
+    document.addEventListener("mousedown", this._focusGuardDownHandler, true);
+    document.addEventListener("touchstart", this._focusGuardDownHandler, {
+      capture: true,
+      passive: true,
+    });
+    const _self = this;
+    this._focusTrackHandler = function (e) {
+      if (!_self.active || !_self._barEl || !_self._barEl[0]) return;
+      const target = e.target;
+      if (!target) return;
+      if (_self._barEl[0].contains(target)) {
+        _self._lastValidFocus = target;
+      }
+    };
+    document.addEventListener("focusin", this._focusTrackHandler, true);
+    this._focusStealGuard = function (e) {
+      if (!_self.active || !_self._barEl || !_self._barEl[0]) return;
+      if (_self._suspendFocusGuard) return;
+      const target = e.target;
+      if (!target) return;
+      if (target.id !== "send_textarea" && target.id !== "prompt_textarea")
+        return;
+      if (
+        _focusGuardLastDown.target &&
+        Date.now() - _focusGuardLastDown.time < 500
+      ) {
+        const dt = _focusGuardLastDown.target;
+        if (dt === target || (target.contains && target.contains(dt))) return;
+      }
+      setTimeout(() => {
+        if (!_self.active || !_self._barEl) return;
+        if (_self._suspendFocusGuard) return;
+        if (document.activeElement !== target) return;
+        try {
+          target.blur();
+        } catch (err) {}
+        if (
+          _self._lastValidFocus &&
+          _self._barEl[0].contains(_self._lastValidFocus) &&
+          document.contains(_self._lastValidFocus)
+        ) {
+          try {
+            _self._lastValidFocus.focus();
+            return;
+          } catch (err) {}
+        }
+        const findInput = _self._barEl.find(".ih-find-input");
+        if (findInput && findInput.length) {
+          try {
+            findInput[0].focus();
+          } catch (err) {}
+        }
+      }, 0);
+    };
+    document.addEventListener("focusin", this._focusStealGuard, true);
   },
 
   _doSearch() {
+    if (this._isReplacing) return;
+    try {
+      const _editingTA = $("#chat .mes textarea:visible").first();
+      let _candidate = null;
+      if (_editingTA.length) {
+        _candidate = _editingTA[0];
+      } else if (
+        _lastFocusedEditable &&
+        _lastFocusedEditable.ownerDocument &&
+        _lastFocusedEditable.ownerDocument.contains(_lastFocusedEditable) &&
+        !$(_lastFocusedEditable).closest(".ih-find-bar").length
+      ) {
+        _candidate = _lastFocusedEditable;
+      }
+      if (_candidate) {
+        const _curEl = this._cmView
+          ? this._cmView.contentDOM
+          : this._targetTextarea && this._targetTextarea[0];
+        if (_candidate !== _curEl) {
+          if (
+            this._liveSearchHandler &&
+            this._targetTextarea &&
+            this._targetTextarea.length
+          ) {
+            try {
+              this._targetTextarea[0].removeEventListener(
+                "input",
+                this._liveSearchHandler,
+              );
+            } catch (e) {}
+          }
+          if (this._cmInputHandler && this._cmView && this._cmView.contentDOM) {
+            try {
+              this._cmView.contentDOM.removeEventListener(
+                "input",
+                this._cmInputHandler,
+              );
+            } catch (e) {}
+          }
+          const _cm = getCodeMirrorView(_candidate);
+          if (_cm) {
+            this._cmView = _cm;
+            this._targetTextarea = null;
+            if (this._cmInputHandler) {
+              _cm.contentDOM.addEventListener("input", this._cmInputHandler);
+            }
+          } else if (
+            _candidate.tagName === "TEXTAREA" ||
+            _candidate.tagName === "INPUT"
+          ) {
+            this._cmView = null;
+            this._targetTextarea = $(_candidate);
+            if (this._liveSearchHandler) {
+              _candidate.addEventListener("input", this._liveSearchHandler);
+            }
+          }
+        }
+      }
+    } catch (e) {}
     const term = this._barEl.find(".ih-find-input").val();
     this._searchTerm = term;
     this._matches = [];
@@ -1343,30 +2207,151 @@ const findReplaceController = {
     const text = this._cmView
       ? this._cmView.state.doc.toString()
       : this._targetTextarea.val();
-    const lowerText = text.toLowerCase();
-    const lowerTerm = term.toLowerCase();
+    const searchText = this._caseSensitive ? text : text.toLowerCase();
+    const searchTerm = this._caseSensitive ? term : term.toLowerCase();
     let pos = 0;
-    while ((pos = lowerText.indexOf(lowerTerm, pos)) !== -1) {
+    const MAX_MATCHES = 10000;
+    let truncated = false;
+    while ((pos = searchText.indexOf(searchTerm, pos)) !== -1) {
       this._matches.push(pos);
-      pos += lowerTerm.length;
+      pos += searchTerm.length;
+      if (this._matches.length >= MAX_MATCHES) {
+        truncated = true;
+        break;
+      }
+    }
+    if (truncated) {
+      try {
+        toastr.warning(
+          `匹配项太多，只显示前 ${MAX_MATCHES} 个，建议输入更具体的关键词`,
+          "",
+          { timeOut: 2500 },
+        );
+      } catch (e) {}
     }
     if (this._matches.length > 0) {
-      this._currentMatchIndex = 0;
-      this._highlightMatch(false);
+      this._currentMatchIndex = -1;
+      this._firstNavPending = false;
+      this._hideNoMatchHint();
+    } else if (term && this._barEl) {
+      this._showNoMatchHint();
+    } else if (!term && this._barEl) {
+      this._hideNoMatchHint();
     }
     this._updateCount();
   },
 
+  _rebuildMatchesWithoutHighlight() {
+    const term = this._barEl ? this._barEl.find(".ih-find-input").val() : "";
+    this._searchTerm = term;
+    this._matches = [];
+    this._currentMatchIndex = -1;
+    if (!term || !this._checkTarget()) {
+      this._updateCount();
+      this._hideNoMatchHint();
+      return;
+    }
+    const text = this._cmView
+      ? this._cmView.state.doc.toString()
+      : this._targetTextarea.val();
+    const searchText = this._caseSensitive ? text : text.toLowerCase();
+    const searchTerm = this._caseSensitive ? term : term.toLowerCase();
+    let pos = 0;
+    const MAX_MATCHES = 10000;
+    while ((pos = searchText.indexOf(searchTerm, pos)) !== -1) {
+      this._matches.push(pos);
+      pos += searchTerm.length;
+      if (this._matches.length >= MAX_MATCHES) break;
+    }
+    this._currentMatchIndex = -1;
+    this._updateCount();
+    if (this._matches.length > 0) {
+      this._hideNoMatchHint();
+    } else if (term) {
+      this._showNoMatchHint();
+    }
+  },
+
+  _toggleCollapse() {
+    this._collapsed = !this._collapsed;
+    if (this._barEl) {
+      this._barEl.toggleClass("ih-find-bar-collapsed", this._collapsed);
+    }
+  },
+  syncTheme() {
+    if (!this.active || !this._barEl || !this._barEl[0]) return;
+    try {
+      syncDialogTheme(this._barEl[0]);
+    } catch (e) {
+      console.warn("快捷工具栏: 同步查找框主题失败", e);
+    }
+  },
   _navigate(direction) {
     if (this._matches.length === 0) return;
     if (!this._checkTarget()) return;
-    this._currentMatchIndex += direction;
-    if (this._currentMatchIndex < 0)
-      this._currentMatchIndex = this._matches.length - 1;
-    if (this._currentMatchIndex >= this._matches.length)
-      this._currentMatchIndex = 0;
-    this._highlightMatch();
+    if (this._currentMatchIndex < 0) {
+      this._currentMatchIndex = direction > 0 ? 0 : this._matches.length - 1;
+    } else {
+      this._currentMatchIndex += direction;
+      if (this._currentMatchIndex < 0)
+        this._currentMatchIndex = this._matches.length - 1;
+      if (this._currentMatchIndex >= this._matches.length)
+        this._currentMatchIndex = 0;
+    }
+    this._highlightMatch(true);
     this._updateCount();
+  },
+
+  _scrollTextareaToPos(textarea, pos) {
+    const fullText = textarea.value;
+    const textBefore = fullText.substring(0, pos);
+    const style = window.getComputedStyle(textarea);
+    let targetPixelTop;
+    try {
+      const mirror = document.createElement("div");
+      mirror.style.cssText =
+        "position:absolute;visibility:hidden;pointer-events:none;" +
+        "white-space:pre-wrap;word-wrap:break-word;overflow:hidden;" +
+        "width:" +
+        textarea.clientWidth +
+        "px;" +
+        "padding:" +
+        style.padding +
+        ";" +
+        "font:" +
+        style.font +
+        ";" +
+        "line-height:" +
+        style.lineHeight +
+        ";" +
+        "letter-spacing:" +
+        style.letterSpacing +
+        ";" +
+        "border:none;margin:0;box-sizing:border-box;";
+      mirror.textContent = textBefore;
+      document.body.appendChild(mirror);
+      targetPixelTop = mirror.offsetHeight;
+      document.body.removeChild(mirror);
+    } catch (e) {
+      const linesBefore = (textBefore.match(/\n/g) || []).length;
+      let lineHeight = parseFloat(style.lineHeight);
+      if (isNaN(lineHeight) || lineHeight <= 0) {
+        const fontSize = parseFloat(style.fontSize);
+        lineHeight = (isNaN(fontSize) ? 14 : fontSize) * 1.4;
+      }
+      targetPixelTop = linesBefore * lineHeight;
+    }
+    let _findBarH = 0;
+    if (this._barEl && this._barEl[0]) {
+      _findBarH = this._barEl[0].offsetHeight || 0;
+    }
+    const desiredScroll =
+      targetPixelTop - Math.max(textarea.clientHeight * 0.4, _findBarH + 20);
+    const clampedScroll = Math.max(
+      0,
+      Math.min(desiredScroll, textarea.scrollHeight - textarea.clientHeight),
+    );
+    textarea.scrollTop = clampedScroll;
   },
 
   _highlightMatch(shouldFocus) {
@@ -1379,44 +2364,70 @@ const findReplaceController = {
         selection: { anchor: pos, head: pos + len },
         scrollIntoView: true,
       });
-      if (shouldFocus) this._cmView.focus();
+      if (shouldFocus) {
+        this._suspendFocusGuard = true;
+        this._cmView.focus();
+        setTimeout(() => {
+          this._suspendFocusGuard = false;
+        }, 250);
+      }
       return;
     }
     if (!this._targetTextarea || !this._targetTextarea.length) return;
     const el0 = this._targetTextarea[0];
     if (!el0.ownerDocument || !el0.ownerDocument.contains(el0)) return;
     const textarea = this._targetTextarea[0];
-    if (shouldFocus) textarea.focus();
-    textarea.setSelectionRange(pos, pos + len);
-    const fullText = textarea.value;
-    const textBefore = fullText.substring(0, pos);
-    const linesBefore = (textBefore.match(/\n/g) || []).length;
-    const style = window.getComputedStyle(textarea);
-    let lineHeight = parseFloat(style.lineHeight);
-    if (isNaN(lineHeight) || lineHeight <= 0) {
-      const fontSize = parseFloat(style.fontSize);
-      lineHeight = (isNaN(fontSize) ? 14 : fontSize) * 1.4;
+
+    if (shouldFocus) {
+      this._suspendFocusGuard = true;
+      textarea.focus();
+      setTimeout(() => {
+        this._suspendFocusGuard = false;
+      }, 250);
     }
-    const desiredScroll = linesBefore * lineHeight - textarea.clientHeight / 3;
-    textarea.scrollTop = Math.max(0, desiredScroll);
-    var _savedScroll = Math.max(0, desiredScroll);
-    setTimeout(function () {
-      try {
-        textarea.scrollTop = _savedScroll;
-      } catch (e) {}
-    }, 50);
-    setTimeout(function () {
-      try {
-        textarea.scrollTop = _savedScroll;
-      } catch (e) {}
-    }, 200);
+    try {
+      textarea.setSelectionRange(pos, pos + len);
+    } catch (e) {}
+    this._scrollTextareaToPos(textarea, pos);
+    this._lastHighlightPos = pos;
+    this._lastHighlightLen = len;
   },
 
   _updateCount() {
     if (!this._barEl) return;
     const total = this._matches.length;
     const current = total > 0 ? this._currentMatchIndex + 1 : 0;
-    this._barEl.find(".ih-find-count").text(`${current}/${total}`);
+    this._barEl.find(".ih-find-count-cur").text(current);
+    this._barEl.find(".ih-find-count-total").text(total);
+  },
+
+  _showNoMatchHint() {
+    if (!this._barEl) return;
+    const term = this._searchTerm || "";
+    let textLen = 0;
+    if (this._cmView) {
+      textLen = this._cmView.state.doc.length;
+    } else if (this._targetTextarea && this._targetTextarea.length) {
+      textLen = (this._targetTextarea.val() || "").length;
+    }
+    if (textLen >= term.length && textLen > 0) {
+      this._hideNoMatchHint();
+      return;
+    }
+    let hint = this._barEl.find(".ih-find-hint");
+    if (!hint.length) {
+      hint = $(
+        `<div class="ih-find-hint ih-hm-status"><i class="fa-solid fa-circle-info"></i><span>没找到匹配？先点一下要搜索的编辑框</span></div>`,
+      );
+      this._barEl.append(hint);
+      syncDialogTheme(this._barEl[0]);
+    }
+    hint.show();
+  },
+
+  _hideNoMatchHint() {
+    if (!this._barEl) return;
+    this._barEl.find(".ih-find-hint").hide();
   },
 
   _doReplace() {
@@ -1428,23 +2439,62 @@ const findReplaceController = {
     if (this._cmView) {
       this._cmView.dispatch({
         changes: { from: pos, to: pos + termLen, insert: replaceWith },
+        selection: { anchor: pos, head: pos + replaceWith.length },
+        scrollIntoView: true,
       });
-      toastr.info("已替换 1 处", "", { timeOut: 1000 });
-      this._doSearch();
+      this._cmView.focus();
+      toastr.info("已替换 1 处", "", { timeOut: 300 });
+      const _oldPosCM = pos;
+      this._rebuildMatchesWithoutHighlight();
+      let _newIdxCM = -1;
+      for (let i = 0; i < this._matches.length; i++) {
+        if (this._matches[i] < _oldPosCM) _newIdxCM = i;
+        else break;
+      }
+      this._currentMatchIndex = _newIdxCM;
+      this._updateCount();
       return;
+    }
+    if (this._madeReadonly) {
+      this._targetTextarea[0].removeAttribute("readonly");
+      this._madeReadonly = false;
     }
     const isSendTextarea = this._targetTextarea[0] === getMessageInput()[0];
     if (isSendTextarea) saveStateBeforeAction();
-    const text = this._targetTextarea.val();
+    else historyManager.pushState(this._targetTextarea);
+    const ta = this._targetTextarea[0];
+    const _savedScroll = ta.scrollTop;
+    const text = ta.value;
     const newText =
       text.substring(0, pos) + replaceWith + text.substring(pos + termLen);
-    this._targetTextarea.val(newText);
-    this._targetTextarea[0].dispatchEvent(
-      new Event("input", { bubbles: true }),
-    );
-    if (isSendTextarea) historyManager.pushState(this._targetTextarea);
-    toastr.info("已替换 1 处", "", { timeOut: 1000 });
-    this._doSearch();
+    this._isReplacing = true;
+    ta.value = newText;
+    ta.scrollTop = _savedScroll;
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    ta.scrollTop = _savedScroll;
+    historyManager.pushState(this._targetTextarea);
+    toastr.info("已替换 1 处", "", { timeOut: 300 });
+
+    const _oldPos = pos;
+    const _replaceLen = replaceWith.length;
+    this._rebuildMatchesWithoutHighlight();
+    let _newIdx = -1;
+    for (let i = 0; i < this._matches.length; i++) {
+      if (this._matches[i] < _oldPos) _newIdx = i;
+      else break;
+    }
+    this._currentMatchIndex = _newIdx;
+    this._updateCount();
+    try {
+      ta.focus();
+      ta.setSelectionRange(_oldPos, _oldPos + _replaceLen);
+    } catch (e) {}
+    this._scrollTextareaToPos(ta, _oldPos);
+    this._lastHighlightPos = _oldPos;
+    this._lastHighlightLen = _replaceLen;
+    setTimeout(() => {
+      this._isReplacing = false;
+    }, 0);
   },
 
   _doReplaceAll() {
@@ -1459,22 +2509,37 @@ const findReplaceController = {
         insert: replaceWith,
       }));
       this._cmView.dispatch({ changes });
-      toastr.success(`已替换 ${count} 处`, "", { timeOut: 1500 });
+      toastr.success(`已替换 ${count} 处`, "", { timeOut: 800 });
       this._doSearch();
+      if (this._matches.length > 0 && this._currentMatchIndex >= 0) {
+        this._highlightMatch(false);
+      }
       return;
+    }
+    if (this._madeReadonly) {
+      this._targetTextarea[0].removeAttribute("readonly");
+      this._madeReadonly = false;
     }
     const isSendTextarea = this._targetTextarea[0] === getMessageInput()[0];
     if (isSendTextarea) saveStateBeforeAction();
+    else historyManager.pushState(this._targetTextarea);
     const escaped = this._searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(escaped, "gi");
-    const newText = this._targetTextarea.val().replace(regex, replaceWith);
-    this._targetTextarea.val(newText);
-    this._targetTextarea[0].dispatchEvent(
-      new Event("input", { bubbles: true }),
-    );
-    if (isSendTextarea) historyManager.pushState(this._targetTextarea);
-    toastr.success(`已替换 ${count} 处`, "", { timeOut: 1500 });
-    this._doSearch();
+    const regex = new RegExp(escaped, this._caseSensitive ? "g" : "gi");
+    const safeReplaceWith = replaceWith.replace(/\$/g, "$$$$");
+    const ta = this._targetTextarea[0];
+    const _savedScroll = ta.scrollTop;
+    const newText = ta.value.replace(regex, safeReplaceWith);
+    this._isReplacing = true;
+    ta.value = newText;
+    ta.scrollTop = _savedScroll;
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    ta.scrollTop = _savedScroll;
+    historyManager.pushState(this._targetTextarea);
+    toastr.success(`已替换 ${count} 处`, "", { timeOut: 800 });
+    this._rebuildMatchesWithoutHighlight();
+    setTimeout(() => {
+      this._isReplacing = false;
+    }, 0);
   },
 };
 
@@ -1507,6 +2572,7 @@ const historyManager = {
   isPerformingUndoRedo: false,
   inputDebounceTimer: null,
   externalHistories: new WeakMap(),
+  _sharedHistoriesByKey: new Map(),
 
   init() {
     const textarea = getMessageInput();
@@ -1517,18 +2583,84 @@ const historyManager = {
     this.updateButtons();
   },
 
-  _getExternalHistory(el) {
+  _getExternalHistory(el, opts = {}) {
+    if (!el) return null;
+    const shareKey =
+      el.classList &&
+      el.classList.contains("maximized_textarea") &&
+      el.dataset &&
+      el.dataset.for
+        ? el.dataset.for
+        : el.id || "";
     let h = this.externalHistories.get(el);
+    if (!h && shareKey) {
+      h = this._sharedHistoriesByKey.get(shareKey);
+      if (h) this.externalHistories.set(el, h);
+    }
+    const currentText = el.value || "";
+    const cursorPos = el.selectionStart || 0;
+
     if (!h) {
       h = {
-        states: [{ text: el.value || "", cursorPos: el.selectionStart || 0 }],
+        states: [{ text: currentText, cursorPos }],
         pointer: 0,
         isPerformingUndoRedo: false,
         inputDebounceTimer: null,
+        lastInputAt: 0,
       };
       this.externalHistories.set(el, h);
+      if (shareKey) this._sharedHistoriesByKey.set(shareKey, h);
+      return h;
     }
+
+    const pointerState = h.states[h.pointer];
+    const pointerText = pointerState ? pointerState.text : "";
+    const recentlyTyped = Date.now() - (h.lastInputAt || 0) < 500;
+
+    if (
+      !opts.fromInput &&
+      !h.isPerformingUndoRedo &&
+      !recentlyTyped &&
+      pointerText !== currentText
+    ) {
+      clearTimeout(h.inputDebounceTimer);
+      h.states = [{ text: currentText, cursorPos }];
+      h.pointer = 0;
+      h.inputDebounceTimer = null;
+    }
+
     return h;
+  },
+
+  ensureExternalHistory(el) {
+    if (!el) return;
+    if (el === getMessageInput()[0]) return;
+    if (el.isContentEditable) {
+      const src = this._getLogicalSource(el);
+      if (src && src !== getMessageInput()[0]) {
+        this._getExternalHistory(src, { fromFocus: true });
+      }
+      return;
+    }
+    this._getExternalHistory(el, { fromFocus: true });
+  },
+
+  _getLogicalSource(el) {
+    if (!el) return null;
+    if (
+      el.classList &&
+      el.classList.contains("maximized_textarea") &&
+      el.dataset &&
+      el.dataset.for
+    ) {
+      return document.getElementById(el.dataset.for) || null;
+    }
+    if (!el.isContentEditable) return null;
+    const dialog = el.closest && el.closest("dialog");
+    if (!dialog) return null;
+    const ta = dialog.querySelector("textarea.maximized_textarea[data-for]");
+    if (!ta || !ta.dataset.for) return null;
+    return document.getElementById(ta.dataset.for) || null;
   },
 
   pushState(textarea) {
@@ -1547,7 +2679,7 @@ const historyManager = {
       this.pointer = this.states.length - 1;
       this.updateButtons();
     } else {
-      const h = this._getExternalHistory(el);
+      const h = this._getExternalHistory(el, { fromInput: true });
       if (h.isPerformingUndoRedo) return;
       const text = el.value || "";
       const cursorPos = el.selectionStart || 0;
@@ -1568,6 +2700,49 @@ const historyManager = {
     if (target.isContentEditable) {
       const cmView = getCodeMirrorView(target);
       if (cmView) {
+        const src = this._getLogicalSource(target);
+        const sharedH = src
+          ? this.externalHistories.get(src) ||
+            this._sharedHistoriesByKey.get(src.id || "")
+          : null;
+        if (sharedH && sharedH.states && sharedH.states.length > 0) {
+          clearTimeout(sharedH.inputDebounceTimer);
+          const curText = cmView.state.doc.toString();
+          if (
+            sharedH.pointer < 0 ||
+            sharedH.states[sharedH.pointer].text !== curText
+          ) {
+            if (sharedH.pointer < sharedH.states.length - 1) {
+              sharedH.states = sharedH.states.slice(0, sharedH.pointer + 1);
+            }
+            sharedH.states.push({ text: curText, cursorPos: 0 });
+            if (sharedH.states.length > this.maxHistory) sharedH.states.shift();
+            sharedH.pointer = sharedH.states.length - 1;
+          }
+          if (sharedH.pointer > 0) {
+            sharedH.isPerformingUndoRedo = true;
+            sharedH.pointer--;
+            const state = sharedH.states[sharedH.pointer];
+            cmView.dispatch({
+              changes: {
+                from: 0,
+                to: cmView.state.doc.length,
+                insert: state.text,
+              },
+              selection: {
+                anchor: Math.min(state.cursorPos, state.text.length),
+              },
+            });
+            cmView.focus();
+            setTimeout(() => {
+              sharedH.isPerformingUndoRedo = false;
+              this.updateButtons();
+            }, 50);
+            return;
+          }
+          this.updateButtons();
+          return;
+        }
         cmView.contentDOM.focus();
         const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
         cmView.contentDOM.dispatchEvent(
@@ -1591,23 +2766,41 @@ const historyManager = {
       return;
     }
     if (target === getMessageInput()[0]) {
-      if (this.pointer <= 0) return;
       const textarea = $(target);
-      if (this.states[this.pointer].text !== textarea.val())
+      clearTimeout(this.inputDebounceTimer);
+      if (
+        this.pointer < 0 ||
+        this.states[this.pointer].text !== textarea.val()
+      ) {
         this.pushState(textarea);
+      }
+      if (this.pointer <= 0) return;
       this.isPerformingUndoRedo = true;
       this.pointer--;
       const state = this.states[this.pointer];
       textarea.val(state.text);
+      target.dispatchEvent(new Event("input", { bubbles: true }));
       setTimeout(() => {
         textarea.prop("selectionStart", state.cursorPos);
         textarea.prop("selectionEnd", state.cursorPos);
         textarea.focus();
         this.isPerformingUndoRedo = false;
         this.updateButtons();
+        if (
+          typeof findReplaceController !== "undefined" &&
+          findReplaceController.active &&
+          findReplaceController._barEl &&
+          findReplaceController._liveSearchHandler
+        ) {
+          findReplaceController._liveSearchHandler();
+        }
       }, 0);
     } else {
       const h = this._getExternalHistory(target);
+      clearTimeout(h.inputDebounceTimer);
+      if (h.pointer < 0 || h.states[h.pointer].text !== target.value) {
+        this.pushState($(target));
+      }
       if (h.pointer <= 0) {
         target.focus();
         try {
@@ -1615,22 +2808,39 @@ const historyManager = {
         } catch (e) {}
         return;
       }
-      if (h.states[h.pointer].text !== target.value) {
-        this.pushState($(target));
-      }
       h.isPerformingUndoRedo = true;
       h.pointer--;
       const state = h.states[h.pointer];
+      const _savedScroll = target.scrollTop;
+      const _wasFocused = document.activeElement === target;
       target.value = state.text;
+      target.scrollTop = _savedScroll;
+      try {
+        target.selectionStart = state.cursorPos;
+        target.selectionEnd = state.cursorPos;
+      } catch (e) {}
+      target.scrollTop = _savedScroll;
       target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.scrollTop = _savedScroll;
+      requestAnimationFrame(() => {
+        target.scrollTop = _savedScroll;
+      });
       setTimeout(() => {
         try {
-          target.selectionStart = state.cursorPos;
-          target.selectionEnd = state.cursorPos;
-          target.focus();
+          if (_wasFocused) target.focus({ preventScroll: true });
+          target.scrollTop = _savedScroll;
         } catch (e) {}
         h.isPerformingUndoRedo = false;
         this.updateButtons();
+        if (
+          typeof findReplaceController !== "undefined" &&
+          findReplaceController.active &&
+          findReplaceController._barEl
+        ) {
+          try {
+            findReplaceController._rebuildMatchesWithoutHighlight();
+          } catch (e) {}
+        }
       }, 0);
     }
   },
@@ -1641,6 +2851,36 @@ const historyManager = {
     if (target.isContentEditable) {
       const cmView = getCodeMirrorView(target);
       if (cmView) {
+        const src = this._getLogicalSource(target);
+        const sharedH = src
+          ? this.externalHistories.get(src) ||
+            this._sharedHistoriesByKey.get(src.id || "")
+          : null;
+        if (
+          sharedH &&
+          sharedH.states &&
+          sharedH.states.length > 0 &&
+          sharedH.pointer < sharedH.states.length - 1
+        ) {
+          clearTimeout(sharedH.inputDebounceTimer);
+          sharedH.isPerformingUndoRedo = true;
+          sharedH.pointer++;
+          const state = sharedH.states[sharedH.pointer];
+          cmView.dispatch({
+            changes: {
+              from: 0,
+              to: cmView.state.doc.length,
+              insert: state.text,
+            },
+            selection: { anchor: Math.min(state.cursorPos, state.text.length) },
+          });
+          cmView.focus();
+          setTimeout(() => {
+            sharedH.isPerformingUndoRedo = false;
+            this.updateButtons();
+          }, 50);
+          return;
+        }
         cmView.contentDOM.focus();
         const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
         if (isMac) {
@@ -1678,21 +2918,41 @@ const historyManager = {
       return;
     }
     if (target === getMessageInput()[0]) {
+      const textarea = $(target);
+      clearTimeout(this.inputDebounceTimer);
+      if (
+        this.pointer >= 0 &&
+        this.states[this.pointer].text !== textarea.val()
+      ) {
+        this.pushState(textarea);
+      }
       if (this.pointer >= this.states.length - 1) return;
       this.isPerformingUndoRedo = true;
       this.pointer++;
       const state = this.states[this.pointer];
-      const textarea = $(target);
       textarea.val(state.text);
+      target.dispatchEvent(new Event("input", { bubbles: true }));
       setTimeout(() => {
         textarea.prop("selectionStart", state.cursorPos);
         textarea.prop("selectionEnd", state.cursorPos);
         textarea.focus();
         this.isPerformingUndoRedo = false;
         this.updateButtons();
+        if (
+          typeof findReplaceController !== "undefined" &&
+          findReplaceController.active &&
+          findReplaceController._barEl &&
+          findReplaceController._liveSearchHandler
+        ) {
+          findReplaceController._liveSearchHandler();
+        }
       }, 0);
     } else {
       const h = this._getExternalHistory(target);
+      clearTimeout(h.inputDebounceTimer);
+      if (h.pointer >= 0 && h.states[h.pointer].text !== target.value) {
+        this.pushState($(target));
+      }
       if (h.pointer >= h.states.length - 1) {
         target.focus();
         try {
@@ -1703,22 +2963,72 @@ const historyManager = {
       h.isPerformingUndoRedo = true;
       h.pointer++;
       const state = h.states[h.pointer];
+      const _savedScrollR = target.scrollTop;
+      const _wasFocusedR = document.activeElement === target;
       target.value = state.text;
+      target.scrollTop = _savedScrollR;
+      try {
+        target.selectionStart = state.cursorPos;
+        target.selectionEnd = state.cursorPos;
+      } catch (e) {}
+      target.scrollTop = _savedScrollR;
       target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.scrollTop = _savedScrollR;
+      requestAnimationFrame(() => {
+        target.scrollTop = _savedScrollR;
+      });
       setTimeout(() => {
         try {
-          target.selectionStart = state.cursorPos;
-          target.selectionEnd = state.cursorPos;
-          target.focus();
+          if (_wasFocusedR) target.focus({ preventScroll: true });
+          target.scrollTop = _savedScrollR;
         } catch (e) {}
         h.isPerformingUndoRedo = false;
         this.updateButtons();
+        if (
+          typeof findReplaceController !== "undefined" &&
+          findReplaceController.active &&
+          findReplaceController._barEl
+        ) {
+          try {
+            findReplaceController._rebuildMatchesWithoutHighlight();
+          } catch (e) {}
+        }
       }, 0);
+    }
+  },
+
+  onBeforeInput() {
+    if (this.isPerformingUndoRedo) return;
+    const el = getMessageInput()[0];
+    if (!el) return;
+    const text = el.value || "";
+    const cursorPos = el.selectionStart || 0;
+    if (this.pointer < 0 || !this.states.length) {
+      this.states = [{ text, cursorPos }];
+      this.pointer = 0;
+      this.updateButtons();
+      return;
+    }
+    if (this.states[this.pointer].text !== text) {
+      this.pushState($(el));
     }
   },
 
   onInput() {
     if (this.isPerformingUndoRedo) return;
+    const el = getMessageInput()[0];
+    if (!el) return;
+
+    const text = el.value || "";
+    if (
+      this.pointer >= 0 &&
+      this.states.length <= 1 &&
+      this.states[this.pointer].text !== text
+    ) {
+      this.pushState($(el));
+      return;
+    }
+
     clearTimeout(this.inputDebounceTimer);
     this.inputDebounceTimer = setTimeout(() => {
       try {
@@ -1726,29 +3036,63 @@ const historyManager = {
       } catch (e) {
         console.warn("快捷工具栏: 保存输入状态失败", e);
       }
-    }, 800);
+    }, 350);
+  },
+
+  onExternalBeforeInput(el) {
+    if (!el) return;
+    if (el === getMessageInput()[0]) return;
+    if (el.isContentEditable) return;
+
+    const h = this._getExternalHistory(el, { fromBeforeInput: true });
+    if (!h) return;
+    if (h.isPerformingUndoRedo) return;
+
+    const text = el.value || "";
+    const cursorPos = el.selectionStart || 0;
+
+    if (h.pointer < 0 || !h.states.length) {
+      h.states = [{ text, cursorPos }];
+      h.pointer = 0;
+      this.updateButtons();
+      return;
+    }
+
+    if (h.states[h.pointer].text !== text) {
+      this.pushState($(el));
+    }
   },
 
   onExternalInput(el) {
-    const h = this._getExternalHistory(el);
+    const h = this._getExternalHistory(el, { fromInput: true });
+    if (!h) return;
+    h.lastInputAt = Date.now();
     if (h.isPerformingUndoRedo) return;
+
+    const text = el.value || "";
+    if (
+      h.pointer >= 0 &&
+      h.states.length <= 1 &&
+      h.states[h.pointer].text !== text
+    ) {
+      this.pushState($(el));
+      return;
+    }
+
     clearTimeout(h.inputDebounceTimer);
     h.inputDebounceTimer = setTimeout(() => {
       try {
+        if (!el || !el.ownerDocument || !el.ownerDocument.contains(el)) return;
         this.pushState($(el));
       } catch (e) {
         console.warn("快捷工具栏: 保存外部输入状态失败", e);
       }
-    }, 800);
+    }, 350);
   },
 
   _updateButtonsRaf: null,
   updateButtons() {
-    if (this._updateButtonsRaf) return;
-    this._updateButtonsRaf = requestAnimationFrame(() => {
-      this._updateButtonsRaf = null;
-      this._doUpdateButtons();
-    });
+    this._doUpdateButtons();
   },
   _doUpdateButtons() {
     const target = getInsertionTarget();
@@ -1759,16 +3103,26 @@ const historyManager = {
         undoDisabled = this.pointer <= 0;
         redoDisabled = this.pointer >= this.states.length - 1;
       } else if (target.isContentEditable) {
-        undoDisabled = false;
-        redoDisabled = false;
+        const src = this._getLogicalSource(target);
+        const sharedH = src
+          ? this.externalHistories.get(src) ||
+            this._sharedHistoriesByKey.get(src.id || "")
+          : null;
+        if (sharedH && sharedH.states && sharedH.states.length > 0) {
+          undoDisabled = sharedH.pointer <= 0;
+          redoDisabled = sharedH.pointer >= sharedH.states.length - 1;
+        } else {
+          undoDisabled = false;
+          redoDisabled = false;
+        }
       } else {
         const h = this.externalHistories.get(target);
         if (h) {
           undoDisabled = h.pointer <= 0;
           redoDisabled = h.pointer >= h.states.length - 1;
         } else {
-          undoDisabled = false;
-          redoDisabled = false;
+          undoDisabled = true;
+          redoDisabled = true;
         }
       }
     }
@@ -1780,6 +3134,10 @@ const historyManager = {
     }
     this._undoBtnEl.toggleClass("input-helper-btn-disabled", undoDisabled);
     this._redoBtnEl.toggleClass("input-helper-btn-disabled", redoDisabled);
+    const hasPanels = document.querySelector(
+      ".ih-folder-dropdown-portal, .ih-floating-panel",
+    );
+    if (!hasPanels) return;
     $(
       ".ih-folder-dropdown-portal [data-button-key='undo'], .ih-floating-panel [data-button-key='undo']",
     ).toggleClass("input-helper-btn-disabled", undoDisabled);
@@ -1820,7 +3178,7 @@ const chatUndoManager = {
 
   async undo() {
     if (!this._snapshot) {
-      toastr.warning("没有可撤回的操作", "", { timeOut: 1500 });
+      toastr.warning("没有可撤回的操作", "", { timeOut: 1000 });
       return;
     }
     const snapshot = this._snapshot;
@@ -1836,10 +3194,10 @@ const chatUndoManager = {
     try {
       await executeSlashCommandsWithOptions("/forcesave");
       await executeSlashCommandsWithOptions("/chat-reload");
-      toastr.success("已撤回", "", { timeOut: 1500 });
+      toastr.success("已撤回", "", { timeOut: 500 });
     } catch (e) {
       console.error("快捷工具栏: 撤回失败", e);
-      toastr.error("撤回失败，请尝试手动恢复", "", { timeOut: 2500 });
+      toastr.error("撤回失败，请尝试手动恢复", "", { timeOut: 1000 });
     }
   },
 
@@ -1872,12 +3230,46 @@ const shiftMode = {
   _cmView: null,
   _anchorNode: null,
   _anchorOffset: 0,
+  _hintToast: null,
+  _touchStartHandler: null,
+  _touchMoveHandler: null,
+  _touchStartX: 0,
+  _touchStartY: 0,
+  _touchMoved: false,
 
   toggle() {
-    this.active ? this.deactivate() : this.activate();
+    if (this.active) {
+      this.deactivate();
+    } else {
+      this.activate();
+    }
+  },
+  _restoreTargetFocus() {
+    const target = this._cmView ? this._cmView.contentDOM : this._targetEl;
+    if (!target) return;
+
+    try {
+      const doc = target.ownerDocument || document;
+      if (!doc.contains(target)) return;
+
+      requestAnimationFrame(() => {
+        try {
+          if (!this.active) return;
+
+          if (this._cmView) {
+            this._cmView.focus();
+            return;
+          }
+
+          if (typeof target.focus === "function") {
+            target.focus({ preventScroll: true });
+          }
+        } catch (e) {}
+      });
+    } catch (e) {}
   },
 
-  activate() {
+  activate(silent = false) {
     const target = getInsertionTarget();
     if (!target) return;
     if (target.isContentEditable) {
@@ -1909,7 +3301,7 @@ const shiftMode = {
         const win = doc.defaultView || window;
         const sel = win.getSelection();
         if (!sel || sel.rangeCount === 0) {
-          toastr.warning("无法获取光标位置", "", { timeOut: 1500 });
+          toastr.warning("无法获取光标位置", "", { timeOut: 1000 });
           return;
         }
         this._targetEl = target;
@@ -1938,46 +3330,189 @@ const shiftMode = {
       this._targetEl = target;
       this.anchorPos = target.selectionStart || 0;
       this.active = true;
-      this._handler = () => {
+
+      this._touchMoved = false;
+      this._touchStartHandler = (evt) => {
+        if (!evt.touches || !evt.touches[0]) return;
+        this._touchMoved = false;
+        this._touchStartX = evt.touches[0].clientX;
+        this._touchStartY = evt.touches[0].clientY;
+      };
+
+      this._touchMoveHandler = (evt) => {
+        if (!evt.touches || !evt.touches[0]) return;
+        const dx = Math.abs(evt.touches[0].clientX - this._touchStartX);
+        const dy = Math.abs(evt.touches[0].clientY - this._touchStartY);
+
+        if (dx > 8 || dy > 8) {
+          this._touchMoved = true;
+        }
+      };
+
+      this._handler = (evt) => {
         if (!this.active || !this._targetEl) return;
+
+        if (evt && evt.type === "touchend" && this._touchMoved) {
+          this._touchMoved = false;
+          return;
+        }
+
+        const ta = this._targetEl;
+        const now = Date.now();
+        if (now - (this._lastHandlerAt || 0) < 60) {
+          return;
+        }
+        this._lastHandlerAt = now;
+
+        const beforeStart = ta.selectionStart;
+        const beforeEnd = ta.selectionEnd;
+        let pointerPos = null;
+
+        try {
+          let cx, cy;
+
+          if (evt && evt.changedTouches && evt.changedTouches[0]) {
+            cx = evt.changedTouches[0].clientX;
+            cy = evt.changedTouches[0].clientY;
+          } else if (evt) {
+            cx = evt.clientX;
+            cy = evt.clientY;
+          }
+
+          if (cx !== undefined && cy !== undefined) {
+            if (document.caretPositionFromPoint) {
+              const cp = document.caretPositionFromPoint(cx, cy);
+              if (cp && typeof cp.offset === "number") pointerPos = cp.offset;
+            } else if (document.caretRangeFromPoint) {
+              const r = document.caretRangeFromPoint(cx, cy);
+              if (r && typeof r.startOffset === "number")
+                pointerPos = r.startOffset;
+            }
+          }
+        } catch (e) {}
+
+        if (pointerPos !== null) {
+          try {
+            const anchor = this.anchorPos;
+            ta.selectionStart = Math.min(anchor, pointerPos);
+            ta.selectionEnd = Math.max(anchor, pointerPos);
+          } catch (e) {}
+        }
+
         setTimeout(() => {
-          const ta = this._targetEl;
           if (!ta) return;
+
           try {
             const start = ta.selectionStart;
             const end = ta.selectionEnd;
             const anchor = this.anchorPos;
-            const t =
-              Math.abs(end - anchor) >= Math.abs(start - anchor) ? end : start;
+            const selectionUnchanged =
+              start === beforeStart && end === beforeEnd && start !== end;
+
+            let t;
+
+            if (selectionUnchanged && pointerPos !== null) {
+              t = pointerPos;
+            } else {
+              t =
+                Math.abs(end - anchor) >= Math.abs(start - anchor)
+                  ? end
+                  : start;
+            }
+
             ta.selectionStart = Math.min(anchor, t);
             ta.selectionEnd = Math.max(anchor, t);
           } catch (e) {}
         }, 10);
       };
+
+      target.addEventListener("touchstart", this._touchStartHandler, {
+        passive: true,
+      });
+      target.addEventListener("touchmove", this._touchMoveHandler, {
+        passive: true,
+      });
       target.addEventListener("mouseup", this._handler);
       target.addEventListener("touchend", this._handler);
     }
     $(
       "#input_shift_btn, .ih-folder-dropdown-portal [data-button-key='shift'], .ih-floating-panel [data-button-key='shift']",
     ).addClass("input-helper-btn-active");
+    if (!silent) {
+      if (this._hintToast) {
+        toastr.clear(this._hintToast);
+        this._hintToast = null;
+      }
+
+      this._hintToast = toastr.info(
+        "点击文本中一个位置为起点，再点击另一个位置选中区间。",
+        "选中模式已开启",
+        {
+          timeOut: 0,
+          extendedTimeOut: 0,
+          closeButton: true,
+          tapToDismiss: false,
+          onHidden: () => {
+            this._hintToast = null;
+          },
+        },
+      );
+    }
   },
 
-  deactivate() {
+  deactivate(silent = false) {
     this.active = false;
-    if (this._handler && this._targetEl) {
+    if (this._targetEl) {
       try {
-        this._targetEl.removeEventListener("mouseup", this._handler);
-        this._targetEl.removeEventListener("touchend", this._handler);
+        if (this._handler) {
+          this._targetEl.removeEventListener("mouseup", this._handler);
+          this._targetEl.removeEventListener("touchend", this._handler);
+        }
+
+        if (this._touchStartHandler) {
+          this._targetEl.removeEventListener(
+            "touchstart",
+            this._touchStartHandler,
+          );
+        }
+
+        if (this._touchMoveHandler) {
+          this._targetEl.removeEventListener(
+            "touchmove",
+            this._touchMoveHandler,
+          );
+        }
       } catch (e) {}
     }
     this._handler = null;
+    this._touchStartHandler = null;
+    this._touchMoveHandler = null;
+    this._touchStartX = 0;
+    this._touchStartY = 0;
+    this._touchMoved = false;
     this._targetEl = null;
     this._cmView = null;
     this._anchorNode = null;
     this._anchorOffset = 0;
+    this._lastHandlerAt = 0;
     $(
       "#input_shift_btn, .ih-folder-dropdown-portal [data-button-key='shift'], .ih-floating-panel [data-button-key='shift']",
     ).removeClass("input-helper-btn-active");
+    if (!silent) {
+      const oldToast = this._hintToast;
+      this._hintToast = null;
+
+      const showClosedToast = () => {
+        toastr.info("选中模式已关闭", "", { timeOut: 800 });
+      };
+
+      if (oldToast) {
+        toastr.clear(oldToast);
+        setTimeout(showClosedToast, 0);
+      } else {
+        showClosedToast();
+      }
+    }
   },
 };
 
@@ -1994,6 +3529,11 @@ function updateToolbarMaxHeight() {
 function _doUpdateToolbarMaxHeight() {
   const toolbar = document.getElementById("input_helper_toolbar");
   if (!toolbar || toolbar.classList.contains("input-helper-hidden")) return;
+  const childCount = toolbar.children.length;
+  const twoRowActive = toolbar.classList.contains("ih-two-row-active");
+  const contentHash = `${childCount}_${twoRowActive}_${toolbar.scrollWidth}`;
+  if (toolbar._ihLastContentHash === contentHash) return;
+  toolbar._ihLastContentHash = contentHash;
   const sendForm = document.getElementById("send_form");
   if (!sendForm) return;
 
@@ -2001,18 +3541,22 @@ function _doUpdateToolbarMaxHeight() {
   const wasFocused = sendForm.classList.contains("textarea-focused");
   const addedClass = !wasPinned && !wasFocused;
 
+  const origToolbarTransition = toolbar.style.transition;
   toolbar.style.transition = "none";
   toolbar.style.maxHeight = "none";
   toolbar.style.visibility = "hidden";
-  if (addedClass) sendForm.classList.add("ih-toolbar-pinned");
+  if (addedClass) {
+    sendForm.classList.add("ih-toolbar-pinned");
+  }
 
   void toolbar.offsetHeight;
   const height = toolbar.scrollHeight;
 
-  toolbar.style.transition = "";
   toolbar.style.maxHeight = "";
   toolbar.style.visibility = "";
   if (addedClass) sendForm.classList.remove("ih-toolbar-pinned");
+  void toolbar.offsetHeight;
+  toolbar.style.transition = origToolbarTransition;
 
   void toolbar.offsetHeight;
 
@@ -2142,6 +3686,79 @@ ${css}`;
   }
 }
 
+function _hasUserBallCSS() {
+  try {
+    for (const sheet of document.styleSheets) {
+      try {
+        const href = sheet.href || "";
+        if (href.includes(extensionName) || href.includes("ST-QuickBar"))
+          continue;
+        for (const rule of sheet.cssRules) {
+          if (!rule.selectorText) continue;
+          if (!rule.selectorText.includes("ih-floating-ball")) continue;
+          if (
+            rule.selectorText.includes("ih-ball-custom") ||
+            rule.selectorText.includes("ih-ball-transparent") ||
+            rule.selectorText.includes("ih-ball-expanded")
+          )
+            continue;
+          if (
+            rule.selectorText.includes(":hover") ||
+            rule.selectorText.includes(":active")
+          )
+            continue;
+          if (rule.selectorText.includes("fa-")) continue;
+          const bgImg = rule.style.backgroundImage || "";
+          if (bgImg && bgImg !== "none" && bgImg !== "" && bgImg !== "(empty)")
+            return true;
+          const bg = rule.style.background || "";
+          if (bg && bg.includes("url(")) return true;
+          const bgColor = rule.style.backgroundColor || "";
+          const border = rule.style.border || "";
+          const boxShadow = rule.style.boxShadow || "";
+          if (
+            (bgColor &&
+              bgColor !== "transparent" &&
+              bgColor !== "rgba(0, 0, 0, 0)") ||
+            (border && border !== "none") ||
+            (boxShadow && boxShadow !== "none")
+          )
+            return true;
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+  return false;
+}
+
+function _hasUserBallBackgroundImage() {
+  try {
+    for (const sheet of document.styleSheets) {
+      try {
+        const href = sheet.href || "";
+        if (href.includes(extensionName) || href.includes("ST-QuickBar"))
+          continue;
+        for (const rule of sheet.cssRules) {
+          if (!rule.selectorText) continue;
+          if (!rule.selectorText.includes("ih-floating-ball")) continue;
+          if (
+            rule.selectorText.includes(":hover") ||
+            rule.selectorText.includes(":active") ||
+            rule.selectorText.includes("ih-ball-expanded")
+          )
+            continue;
+          if (rule.selectorText.includes("fa-")) continue;
+          const bgImg = rule.style.backgroundImage || "";
+          if (bgImg && bgImg !== "none" && bgImg.includes("url(")) return true;
+          const bg = rule.style.background || "";
+          if (bg && bg.includes("url(")) return true;
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+  return false;
+}
+
 let _cachedMessageInput = null;
 function getMessageInput() {
   if (
@@ -2203,8 +3820,10 @@ function getButtonIdFromKey(key) {
     switchPanelProfile: "input_switch_panel_profile_btn",
     bottomNavMode: "input_bottom_nav_mode_btn",
     enterDeleteMode: "input_enter_delete_mode_btn",
+    multiSelectDelete: "input_multi_select_delete_btn",
     copyText: "input_copy_text_btn",
     pasteText: "input_paste_text_btn",
+    wrapToggle: "input_wrap_toggle_btn",
   };
   return map[key] || "";
 }
@@ -2214,8 +3833,8 @@ function getButtonDisplayHtml(key) {
     const idx = parseInt(key.replace("custom_", ""));
     const sym = getSettings().customSymbols[idx];
     if (!sym) return "?";
-    if (sym.icon) return `<i class="${sym.icon}"></i>`;
-    return sym.display || sym.symbol || "?";
+    if (sym.icon) return `<i class="${ihEscapeAttr(sym.icon)}"></i>`;
+    return ihEscapeHtml(sym.display || sym.symbol || "?");
   }
   const def = BUTTON_DEFS[key];
   if (!def) return "?";
@@ -2241,14 +3860,6 @@ function insertPair(left, right, cursorOffset) {
   if (!getSettings().enabled) return;
   const target = getInsertionTarget();
   if (!target) return;
-  console.log("[输入助手调试]", {
-    target: target,
-    tagName: target.tagName,
-    isContentEditable: target.isContentEditable,
-    inIframe: target.ownerDocument !== document,
-    lastFocusedEditable: _lastFocusedEditable,
-    activeElement: document.activeElement,
-  });
   const isExternal = isExternalTarget(target);
 
   if (target.isContentEditable) {
@@ -2283,19 +3894,38 @@ function insertPair(left, right, cursorOffset) {
   const selected = text.substring(startPos, endPos);
   const insert = left + selected + right;
   const newText = text.substring(0, startPos) + insert + text.substring(endPos);
+  const _savedScrollTop = target.scrollTop;
+
   target.value = newText;
+  target.scrollTop = _savedScrollTop;
   target.dispatchEvent(new Event("input", { bubbles: true }));
+  target.scrollTop = _savedScrollTop;
+
+  requestAnimationFrame(() => {
+    try {
+      target.scrollTop = _savedScrollTop;
+    } catch (e) {}
+  });
 
   setTimeout(() => {
     try {
+      target.scrollTop = _savedScrollTop;
       target.selectionStart = startPos + cursorOffset;
       target.selectionEnd =
         selected.length > 0
           ? startPos + cursorOffset + selected.length
           : startPos + cursorOffset;
-      target.focus();
+      target.scrollTop = _savedScrollTop;
+      target.focus({ preventScroll: true });
+      target.scrollTop = _savedScrollTop;
     } catch (e) {}
     historyManager.pushState($(target));
+    target.scrollTop = _savedScrollTop;
+    requestAnimationFrame(() => {
+      try {
+        target.scrollTop = _savedScrollTop;
+      } catch (e) {}
+    });
   }, 0);
 }
 
@@ -2395,7 +4025,7 @@ function insertNewLine() {
     try {
       target.selectionStart = lineEnd + 1;
       target.selectionEnd = lineEnd + 1;
-      target.focus();
+      target.focus({ preventScroll: true });
     } catch (e) {}
     historyManager.pushState($(target));
   }, 0);
@@ -2440,13 +4070,15 @@ function insertTag(tag) {
   const endPos = target.selectionEnd || 0;
   const text = target.value || "";
   const newText = text.substring(0, startPos) + tag + text.substring(endPos);
+  const _savedScrollTop3 = target.scrollTop;
   target.value = newText;
   target.dispatchEvent(new Event("input", { bubbles: true }));
   setTimeout(() => {
     try {
       target.selectionStart = startPos + tag.length;
       target.selectionEnd = startPos + tag.length;
-      target.focus();
+      target.focus({ preventScroll: true });
+      target.scrollTop = _savedScrollTop3;
     } catch (e) {}
     historyManager.pushState($(target));
   }, 0);
@@ -2499,8 +4131,9 @@ async function doCopy() {
       document.execCommand("copy");
       document.body.removeChild(ta);
     }
+    toastr.info("已复制", "", { timeOut: 500 });
   } catch (e) {
-    toastr.error("复制失败", "", { timeOut: 1500 });
+    toastr.error("复制失败", "", { timeOut: 800 });
   }
 }
 
@@ -2513,18 +4146,18 @@ async function doPaste() {
     if (navigator.clipboard && navigator.clipboard.readText) {
       clipText = await navigator.clipboard.readText();
     } else {
-      toastr.warning("当前浏览器不支持剪贴板读取", "", { timeOut: 2000 });
+      toastr.warning("当前浏览器不支持剪贴板读取", "", { timeOut: 1500 });
       return;
     }
   } catch (e) {
     toastr.warning("无法读取剪贴板，请检查浏览器权限或使用 HTTPS", "", {
-      timeOut: 2500,
+      timeOut: 1500,
     });
     return;
   }
 
   if (!clipText) {
-    toastr.info("剪贴板为空", "", { timeOut: 1200 });
+    toastr.info("剪贴板为空", "", { timeOut: 1000 });
     return;
   }
 
@@ -2533,7 +4166,15 @@ async function doPaste() {
 
 function doScrollToTop() {
   const scrollEl = findActiveScrollContainer();
-  if (scrollEl) scrollEl.scrollTo({ top: 0, behavior: "smooth" });
+  if (!scrollEl) return;
+  const isTextLike =
+    scrollEl.tagName === "TEXTAREA" || scrollEl.tagName === "INPUT";
+  if (isTextLike) {
+    ihBlurToDismissKeyboard(scrollEl);
+    ihSmoothScrollTo(scrollEl, 0, 320);
+  } else {
+    scrollEl.scrollTo({ top: 0, behavior: "smooth" });
+  }
   if (scrollEl === document.getElementById("chat")) {
     messageNavigation._currentAiIndex = -1;
     messageNavigation._lastNavTime = Date.now();
@@ -2551,8 +4192,15 @@ function doScrollToLastAi() {
 
 function doScrollToBottom() {
   const scrollEl = findActiveScrollContainer();
-  if (scrollEl)
+  if (!scrollEl) return;
+  const isTextLike =
+    scrollEl.tagName === "TEXTAREA" || scrollEl.tagName === "INPUT";
+  if (isTextLike) {
+    ihBlurToDismissKeyboard(scrollEl);
+    ihSmoothScrollTo(scrollEl, scrollEl.scrollHeight, 320);
+  } else {
     scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "smooth" });
+  }
   if (scrollEl === document.getElementById("chat")) {
     const aiMessages = $("#chat .mes[is_user='false']:visible");
     messageNavigation._currentAiIndex = aiMessages.length;
@@ -2580,14 +4228,14 @@ function doDeleteLastMsg() {
   }
   chatUndoManager.save();
   executeSlashCommandsWithOptions("/del 1");
-  toastr.info("已删除最后一条消息（可点撤回按钮还原）", "", { timeOut: 1500 });
+  toastr.info("已删除最后一条消息（可点撤回按钮还原）", "", { timeOut: 1000 });
 }
 
 function doDeleteLastSwipe() {
   if (chat.length === 0) return;
   const lastMsg = chat[chat.length - 1];
   if (!lastMsg.swipes || lastMsg.swipes.length <= 1) {
-    toastr.warning("没有可删除的备选回复", "", { timeOut: 1500 });
+    toastr.warning("没有可删除的备选回复", "", { timeOut: 1000 });
     return;
   }
   if (getSettings().confirmDangerousActions) {
@@ -2600,7 +4248,7 @@ function doDeleteLastSwipe() {
   }
   chatUndoManager.save();
   executeSlashCommandsWithOptions("/delswipe");
-  toastr.info("已删除当前备选回复（可点撤回按钮还原）", "", { timeOut: 1500 });
+  toastr.info("已删除当前备选回复（可点撤回按钮还原）", "", { timeOut: 1000 });
 }
 
 function doContinueReply() {
@@ -2611,7 +4259,7 @@ function doContinueReply() {
 function doJumpToFloor() {
   const total = chat.length;
   if (total === 0) {
-    toastr.warning("当前没有聊天消息", "", { timeOut: 1500 });
+    toastr.warning("当前没有聊天消息", "", { timeOut: 1000 });
     return;
   }
   const { overlay, escHandler } = createDialogOverlay();
@@ -2661,11 +4309,13 @@ function doJumpToFloor() {
     if (!chatEl) return;
     const mesEl = chatEl.querySelector(`.mes[mesid="${floor}"]`);
     if (mesEl) {
-      scrollChatToElement(mesEl, "smooth", true);
+      const _r = mesEl.getBoundingClientRect();
+      const useCenter = _r.height < chatEl.clientHeight - 40;
+      scrollChatToElement(mesEl, "smooth", useCenter);
     } else {
       await executeSlashCommandsWithOptions(`/chat-jump ${floor}`);
     }
-    toastr.info(`已跳转到楼层 ${floor}`, "", { timeOut: 1500 });
+    toastr.info(`已跳转到楼层 ${floor}`, "", { timeOut: 1000 });
   };
   content.find("#ih_jump_confirm").on("click", doJump);
   content.find("#ih_jump_floor_input").on("keydown", (e) => {
@@ -2709,6 +4359,39 @@ function insertCustomSymbol(symbol) {
   if (!getSettings().enabled) return;
   const target = getInsertionTarget();
   if (!target) return;
+  function _calcCursorPos(sym) {
+    if (sym.cursorPos === "start") return 0;
+    if (sym.cursorPos === "end") return sym.symbol.length;
+    if (sym.cursorPos === "middle") return Math.floor(sym.symbol.length / 2);
+    return parseInt(sym.cursorPos) || 0;
+  }
+  const _splitPos = _calcCursorPos(symbol);
+  const _leftPart = symbol.symbol.substring(0, _splitPos);
+  const _rightPart = symbol.symbol.substring(_splitPos);
+  let _hasSelection = false;
+  if (target.isContentEditable) {
+    const cmView = getCodeMirrorView(target);
+    if (cmView) {
+      const sel = cmView.state.selection.main;
+      _hasSelection = sel.from !== sel.to;
+    } else {
+      const doc = target.ownerDocument || document;
+      const win = doc.defaultView || window;
+      const s = win.getSelection();
+      _hasSelection = s && s.toString().length > 0;
+    }
+  } else {
+    _hasSelection = (target.selectionStart || 0) !== (target.selectionEnd || 0);
+  }
+  if (
+    (symbol.wrapMode || wrapModeController.active) &&
+    _hasSelection &&
+    _leftPart.length > 0 &&
+    _rightPart.length > 0
+  ) {
+    insertPair(_leftPart, _rightPart, _leftPart.length);
+    return;
+  }
   const isExternal = isExternalTarget(target);
 
   if (target.isContentEditable) {
@@ -2751,6 +4434,7 @@ function insertCustomSymbol(symbol) {
   const text = target.value || "";
   const newText =
     text.substring(0, startPos) + symbol.symbol + text.substring(endPos);
+  const _savedScrollTop2 = target.scrollTop;
   target.value = newText;
   target.dispatchEvent(new Event("input", { bubbles: true }));
   setTimeout(() => {
@@ -2764,10 +4448,25 @@ function insertCustomSymbol(symbol) {
     try {
       target.selectionStart = cursorPos;
       target.selectionEnd = cursorPos;
-      target.focus();
+      target.focus({ preventScroll: true });
+      target.scrollTop = _savedScrollTop2;
     } catch (e) {}
     historyManager.pushState($(target));
   }, 0);
+}
+
+function ihEscapeHtml(value) {
+  if (value == null) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function ihEscapeAttr(value) {
+  return ihEscapeHtml(value);
 }
 
 function isMessageHidden(msg) {
@@ -2823,7 +4522,7 @@ async function doHideRange(from, to) {
   }
   await executeSlashCommandsWithOptions(`/hide ${f}-${t}`);
   await new Promise((r) => setTimeout(r, 300));
-  toastr.success(`已隐藏 ${f} ~ ${t}`, "", { timeOut: 1500 });
+  toastr.success(`已隐藏 ${f} ~ ${t}`, "", { timeOut: 1000 });
 }
 
 async function doUnhideRange(from, to) {
@@ -2839,7 +4538,7 @@ async function doUnhideRange(from, to) {
   }
   await executeSlashCommandsWithOptions(`/unhide ${f}-${t}`);
   await new Promise((r) => setTimeout(r, 300));
-  toastr.success(`已取消隐藏 ${f} ~ ${t}`, "", { timeOut: 1500 });
+  toastr.success(`已取消隐藏 ${f} ~ ${t}`, "", { timeOut: 1000 });
 }
 
 async function doHideOne(floor) {
@@ -2853,7 +4552,7 @@ async function doHideOne(floor) {
   }
   await executeSlashCommandsWithOptions(`/hide ${f}`);
   await new Promise((r) => setTimeout(r, 300));
-  toastr.success(`已隐藏楼层 ${f}`, "", { timeOut: 1500 });
+  toastr.success(`已隐藏楼层 ${f}`, "", { timeOut: 1000 });
 }
 
 async function doUnhideOne(floor) {
@@ -2867,20 +4566,20 @@ async function doUnhideOne(floor) {
   }
   await executeSlashCommandsWithOptions(`/unhide ${f}`);
   await new Promise((r) => setTimeout(r, 300));
-  toastr.success(`已取消隐藏楼层 ${f}`, "", { timeOut: 1500 });
+  toastr.success(`已取消隐藏楼层 ${f}`, "", { timeOut: 1000 });
 }
 
 async function doKeepRecent(count) {
   const total = chat.length;
   const n = parseInt(count);
   if (isNaN(n) || n <= 0) {
-    toastr.error("请输入正整数", "", { timeOut: 1500 });
+    toastr.error("请输入正整数", "", { timeOut: 1000 });
     return;
   }
   if (n >= total) {
     await executeSlashCommandsWithOptions(`/unhide 0-${total - 1}`);
     await new Promise((r) => setTimeout(r, 300));
-    toastr.info("消息总数不超过设定值，已显示全部", "", { timeOut: 1500 });
+    toastr.info("消息总数不超过设定值，已显示全部", "", { timeOut: 1000 });
     return;
   }
   const hideEnd = total - n - 1;
@@ -2898,7 +4597,7 @@ async function doHideAll() {
   if (total === 0) return;
   await executeSlashCommandsWithOptions(`/hide 0-${total - 1}`);
   await new Promise((r) => setTimeout(r, 300));
-  toastr.success("已隐藏全部消息", "", { timeOut: 1500 });
+  toastr.success("已隐藏全部消息", "", { timeOut: 1000 });
 }
 
 async function doUnhideAll() {
@@ -2906,7 +4605,7 @@ async function doUnhideAll() {
   if (total === 0) return;
   await executeSlashCommandsWithOptions(`/unhide 0-${total - 1}`);
   await new Promise((r) => setTimeout(r, 300));
-  toastr.success("已显示全部消息", "", { timeOut: 1500 });
+  toastr.success("已显示全部消息", "", { timeOut: 1000 });
 }
 
 function openBeautyPromptPanel() {
@@ -2947,6 +4646,21 @@ function openBeautyPromptPanel() {
 - 导航按钮悬停：.ih-find-bar .ih-find-nav-btn:hover
 - 操作按钮默认：.ih-find-bar .ih-find-action-btn
 - 操作按钮悬停：.ih-find-bar .ih-find-action-btn:hover
+- Aa 区分大小写按钮：.ih-find-bar .ih-find-case-btn
+- 折叠按钮：.ih-find-bar .ih-find-collapse-btn
+- 折叠按钮左/右图标：.ih-collapse-icon-left / .ih-collapse-icon-right
+- 计数三段：.ih-find-count-cur / .ih-find-count-sep / .ih-find-count-total
+
+### 查找替换栏折叠态（可选）
+当用户点击折叠按钮后，整个查找框会收成屏幕左侧的窄竖条，只显示
+展开按钮、上/下导航、计数三个元素。折叠按钮默认使用双左箭头/双右箭头图标表示收起和展开。
+如果你需要美化这个折叠态：
+- 折叠态容器：.ih-find-bar.ih-find-bar-collapsed
+- 折叠态里的按钮：.ih-find-bar.ih-find-bar-collapsed .ih-find-nav-btn
+- 折叠态里的计数（变成竖排）：.ih-find-bar.ih-find-bar-collapsed .ih-find-count
+
+注意：折叠态的容器位置（left/top/width/min-width）由插件控制，
+不要覆盖这些定位属性，只写视觉相关的 background/border/box-shadow 等。
 
 ### 文件夹下拉面板（可选）
 - 面板容器（只写视觉属性）：.ih-folder-dropdown-portal
@@ -2955,6 +4669,7 @@ function openBeautyPromptPanel() {
 
 ### 悬浮球（可选）
 - 默认：.ih-floating-ball
+- 展开状态：.ih-floating-ball.ih-ball-expanded
 - 悬停：.ih-floating-ball:hover
 - 按下：.ih-floating-ball:active
 
@@ -2963,6 +4678,11 @@ function openBeautyPromptPanel() {
 - 面板按钮默认：.ih-floating-panel .input-helper-btn
 - 面板按钮悬停：.ih-floating-panel .input-helper-btn:hover
 - 面板按钮按下：.ih-floating-panel .input-helper-btn:active
+
+悬浮面板有三种方向：
+- vertical：按钮竖向排列，面板优先向悬浮球左/右侧展开
+- vertical-down：按钮竖向排列，面板根据空间向下/向上展开
+- horizontal：按钮横向排列，面板根据空间向下/向上展开
 
 ### 双栏模式（可选）
 工具栏开启双栏模式后，\`#input_helper_toolbar\` 会自动获得 \`.ih-two-row-active\` class，
@@ -2978,6 +4698,8 @@ function openBeautyPromptPanel() {
    插件通过 JS 的 \`.toggle()\` / \`.hide()\` 控制按钮显示隐藏（设置 \`display: none\`）。
    如果你写了 \`display: inline-flex !important\`，会覆盖 JS 设置的 \`display: none\`，
    导致用户在插件设置里关闭的按钮仍然显示。
+   查找替换折叠按钮内部也有两个图标（收起图标和展开图标），同样依赖 display 切换显示，
+   不要用全局 CSS 强行覆盖 \`.ih-collapse-icon-left\` 或 \`.ih-collapse-icon-right\` 的 display。
    如果确实需要写 display，绝对不能加 !important。
 
 2. **容器样式只能写视觉属性**
@@ -3054,10 +4776,13 @@ function openBeautyPromptPanel() {
      否则会看到一圈"透明背景板"或光晕
    - background-size 用 contain 保持图片原比例不裁切，用 cover 会裁切两侧
    - 需要隐藏默认省略号图标：\`.ih-floating-ball > i { display: none !important; }\`
+   - 如果要给展开状态使用另一张图，请写 \`.ih-floating-ball.ih-ball-expanded { background-image: url("展开图") !important; }\`
+   - 如果当前美化不想区分展开状态，可以不要写 \`.ih-ball-expanded\`，插件会继续使用默认球图
 
-   注意：用户可以在插件设置里关闭「跟随美化」开关。
-   关闭后，插件会用更高优先级的 CSS 类覆盖你写的悬浮球样式，
-   这是正常行为，不需要处理。
+   注意：用户可以在插件设置里切换「跟随美化」开关。
+   - 开启「跟随美化」：全局 CSS 可以接管悬浮球外观；如果 CSS 给 \`.ih-floating-ball\` 写了 background-image，插件会优先使用 CSS 背景图，不再显示插件设置里的球图片
+   - 关闭「跟随美化」：插件自定义设置（图片、透明背景、形状等）优先，外部 CSS 对悬浮球的控制会被限制
+   - 如果只想给展开状态换图，请同时写默认态 \`.ih-floating-ball\`，再写展开态 \`.ih-floating-ball.ih-ball-expanded\`，避免收起状态没有图片
 
    如果悬浮球设置了自定义图片（走插件内置方式），球内部会有一个 <img> 元素，
    CSS 背景色/背景图会被图片遮住。美化有图片的球时，
@@ -3065,12 +4790,20 @@ function openBeautyPromptPanel() {
 
 10. **悬浮面板样式约束**
    如果你要给 \`.ih-floating-panel\` 写样式：
-   - ✅ 允许：background、background-color、border、border-color、border-radius、
-     box-shadow、opacity、backdrop-filter、filter、color、outline
+   - ✅ 允许：border、border-color、border-radius、box-shadow、opacity、
+     backdrop-filter、filter、outline
+   - ⚠️ 谨慎：background、background-color、background-image、color
    - ❌ 禁止：position、z-index、width、height、top、left、right、
      bottom、transform
    面板的位置由插件根据悬浮球位置自动计算，width/height 由内容撑开。
    border-radius 允许自由设置（与悬浮球不同）。
+
+   如果希望悬浮面板继续跟随插件 JS 读取到的酒馆主题背景/文字色，
+   不要在全局 CSS 里给 \`.ih-floating-panel\` 写：
+   \`background\`、\`background-color\`、\`background-image\`、\`color\`，
+   尤其不要加 \`!important\`。
+   推荐只美化边框、圆角、阴影、透明度、滤镜等装饰属性。
+   如果用户明确想让全局 CSS 完全接管面板外观，才可以写 background/color。
 
 ## 风格要求
 
@@ -3119,7 +4852,7 @@ function openBeautyPromptPanel() {
         navigator.clipboard
           .writeText(promptText)
           .then(() => {
-            toastr.success("已复制到剪贴板", "", { timeOut: 1500 });
+            toastr.success("已复制到剪贴板", "", { timeOut: 500 });
           })
           .catch(() => {
             fallbackCopy(promptText);
@@ -3139,9 +4872,9 @@ function openBeautyPromptPanel() {
     ta.select();
     try {
       document.execCommand("copy");
-      toastr.success("已复制到剪贴板", "", { timeOut: 1500 });
+      toastr.success("已复制到剪贴板", "", { timeOut: 500 });
     } catch (e2) {
-      toastr.error("复制失败，请手动选择复制", "", { timeOut: 2500 });
+      toastr.error("复制失败，请手动选择复制", "", { timeOut: 1000 });
     }
     document.body.removeChild(ta);
   }
@@ -3159,18 +4892,26 @@ function openHelpPanel() {
 <p>这意味着你可以在编辑角色卡定义、世界书条目、预设内容等场景中，也能使用撤回/重做、查找替换、shift选中模式、符号插入等功能。</p>
 <p>此外，当光标在设置面板、世界书编辑器等非聊天区域的输入框中时，回顶/回底/翻页等滚动功能会自动作用于光标所在的可滚动容器，而不是默认的聊天区。</p>
 <p>点击工具栏上的符号按钮（如 <b>**</b>、<b>""</b>、<b>()</b>、<b>「」</b> 等），会在输入框光标处插入对应符号，并自动将光标定位在符号中间，方便直接输入内容。</p>
+<p><i class="fa-solid fa-copy"></i> <b>复制</b>：复制当前输入框或编辑区域中选中的文本。<i class="fa-solid fa-paste"></i> <b>粘贴</b>：读取系统剪贴板内容并插入到当前光标位置。粘贴功能需要浏览器允许剪贴板权限，通常要求 HTTPS 或 localhost 环境。</p>
+<p style="opacity:0.7;font-size:11px;">💡 这两个按钮默认是关闭的，可以在「按钮管理」里勾上它们让它们出现在工具栏；也可以在按钮管理里给它们绑快捷键。</p>
 <p>如果先选中文本再点击符号按钮，选中的文本会被符号包裹。</p>
+<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-thumbtack"></i> 工具栏固定展开</h4>
+<p>开启设置面板顶部的「工具栏固定展开」开关后，工具栏会一直保持展开，不再随发送框聚焦/失焦自动收起。适合经常用工具栏按钮、不想反复点输入框的场景。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-rotate-left"></i> 撤回 / 重做</h4>
 <p>对输入框的编辑操作支持多步撤回和重做（最多 50 步历史），点击相应按钮或使用快捷键均可。</p>
+<p>外部编辑框也会单独记录历史，例如角色卡字段、世界书、预设编辑器、全局 CSS、自定义拓展渲染出的普通输入框等。插件会在聚焦时识别当前编辑框内容，如果同一个 textarea 被酒馆复用来编辑另一份内容，会自动重建历史，避免不同页面或不同美化方案之间撤回串台。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-up-down-left-right"></i> 选中模式</h4>
 <p>移动端文本选择辅助工具。开启后，先在输入框中点击一个位置作为起点，再点击另一个位置，插件会自动把这两点之间的文本全部选中，方便批量操作。再次点击按钮可关闭该模式。</p>
+<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-object-group"></i> 选中包裹模式（全局）</h4>
+<p>开启后，自定义按钮的"插入内容"会按照设置的"光标位置"切成左右两半，自动包裹住你已选中的文本。例如自定义内容是 <code>**粗体**</code>、光标位置=中间，开启此模式选中"abc"再点按钮，会变成 <code>**abc**</code>。原生的 **、""、() 等内置符号按钮本来就是包裹模式，不受这个开关影响。</p>
+<p>如果只想给个别按钮启用而不想全局开启，可以在编辑该自定义按钮时勾选下方的"选中包裹"选项。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-compass"></i> 导航功能</h4>
 <ul style="margin:4px 0;padding-left:18px;list-style:none;">
     <li><i class="fa-solid fa-angles-up"></i> <b>跳转聊天顶部</b>：一键滚动到聊天最顶端</li>
     <li><i class="fa-solid fa-arrow-down"></i> <b>跳转聊天底部</b>：一键滚动到聊天最底端</li>
     <li><i class="fa-solid fa-arrow-up"></i> <b>跳转AI消息顶部</b>：滚动到最新一条AI回复的顶部</li>
     <li><i class="fa-solid fa-chevron-up"></i>/<i class="fa-solid fa-chevron-down"></i> <b>上/下一条AI消息</b>：在AI消息之间快速跳转</li>
-    <li><i class="fa-solid fa-book-open"></i> <b>翻页模式</b>：开启后，上/下导航变为翻页（也支持音量键翻页，需安装Key Mapper）；双击音量上键跳到最新AI消息顶部，双击音量下键跳到聊天底部。移动端开启翻页模式后，点击聊天区域上半部分向上翻页，下半部分向下翻页</li>
+    <li><i class="fa-solid fa-book-open"></i> <b>翻页模式</b>：开启后，上/下导航变为翻页（也支持音量键翻页，需安装Key Mapper）；双击音量上键跳到最新AI消息顶部，双击音量下键跳到聊天底部。开启翻页模式后，点击聊天区域上半部分向上翻页，下半部分向下翻页。可以在设置里的「翻页滚动高度」调整每次翻页的距离，100% 约等于一屏高度，数值越小翻得越细，数值越大翻得越快。开启翻页模式时，如果悬浮球设置了"自动隐藏"会自动出现以方便操作，关闭翻页后再隐藏。</li>
     <li><i class="fa-solid fa-gauge-high"></i> <b>自动滚动</b>：以设定速度自动向下滚动，适合阅读长文；用户手动滚动时暂停，2秒后恢复</li>
     <li><i class="fa-solid fa-location-dot"></i> <b>跳转指定楼层</b>：输入楼层号直接跳转</li>
     <li><i class="fa-solid fa-angle-double-down"></i> <b>底部跳转模式</b>：开启后，上/下一条AI消息跳转改为对齐消息底部，而不是顶部。适合从底部往上浏览的阅读习惯</li>
@@ -3184,7 +4925,8 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-shuffle"></i> <b>生成备选回复</b>：为最后一条AI消息生成一条新的备选回复（Swipe）</li>
     <li><i class="fa-solid fa-trash-arrow-up"></i> <b>撤回删除</b>：在执行删除消息或删除备选等操作后，点击此按钮可以撤回到操作前的状态。快照保留 5 分钟，过期或切换聊天后自动清除</li>
     <li><i class="fa-solid fa-trash-can"></i> <b>进入删除模式</b>：一键进入/退出酒馆原生的消息多选删除模式。进入后可以勾选多条消息批量删除</li>
-    <li><i class="fa-solid fa-magnifying-glass"></i> <b>查找替换</b>：在输入框、正在编辑中的消息、以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）里查找和替换文本，支持 Enter 跳转下一个、Shift+Enter 跳转上一个、Esc 关闭</li>
+    <li><i class="fa-solid fa-list-check"></i> <b>多选删除</b>：打开插件内置的消息列表弹窗，可以勾选任意多条消息，包括不连续楼层，然后一次性删除。删除前会自动保存快照，5 分钟内可用「撤回删除」恢复</li>
+    <li><i class="fa-solid fa-magnifying-glass"></i> <b>查找替换</b>：在输入框、正在编辑中的消息、以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）里查找和替换文本，支持 Enter 跳转下一个、Shift+Enter 跳转上一个、Esc 关闭；点击 Aa 可以切换是否区分大小写。普通 textarea 中查找到的当前匹配会显示可视高亮，即使点击「替换为」输入框，当前匹配位置也会继续标出，方便确认替换目标。<br>移动端嫌占地方？点击替换行最右侧的折叠按钮（双左箭头），可以把整个查找框收成屏幕左侧的一条窄竖条，只保留展开按钮、上/下导航、当前/总数；点击展开按钮（双右箭头）即可恢复完整面板，搜索状态、匹配位置、跨弹窗跟随等行为完全保留。切换酒馆主题时查找框的颜色也会自动同步更新，跟悬浮面板一样跟着主题走。</li>
 </ul>
 <p style="opacity:0.7;font-size:11px;">⚠️ 删除类操作可在设置中开启"删除操作前弹窗确认"来防止误操作。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-ghost"></i> 消息隐藏管理</h4>
@@ -3200,15 +4942,34 @@ function openHelpPanel() {
 </ul>
 <p>插入长段落时，建议给「按钮显示」填简短文字或选择 Font Awesome 图标，避免按钮过宽。</p>
 <p><b>光标位置</b>可设为开头/中间/结尾/自定义偏移。对模板文本来说，自定义偏移能让光标自动定位到需要补充内容的位置，非常方便～</p>
+<p><b>选中包裹</b>勾选后：当输入框已经选中文本时点这个按钮，会按"光标位置"把插入内容切成左右两段包裹选区。例如内容是 <code>**符号**</code>、光标位置=中间，选中"hello"点按钮 → 变成 <code>**hello**</code>。没选中文本时则按正常方式插入。这是这个按钮专属的设置，不需要打开全局的"选中包裹模式"。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-folder"></i> 按钮分组</h4>
 <p>可以将按钮收纳到文件夹中，工具栏只显示一个折叠按钮。在设置中拖动按钮到文件夹上方可放入文件夹，从文件夹中的按钮拖出则会移回主工具栏。也可以使用"移出文件夹"的小按钮快速移回。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-table-columns"></i> 双栏模式</h4>
 <p>开启后，工具栏分为上下两行：一行是符号输入按钮，一行是功能按钮。两行各自可以左右滚动，方便快速找到常用按钮。可在设置中切换两行的上下顺序。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-circle-dot"></i> 悬浮面板</h4>
-<p>开启后会出现一个可拖拽的悬浮球或固定面板。可以把导航跳转等功能按钮放进去。悬浮球模式下点击展开面板，点击其他区域自动收起；固定面板模式下常驻显示。支持自定义悬浮球样式（包括GIF）、面板方向（横向/竖向）。放进悬浮面板的按钮不会在主工具栏中重复显示。面板中的按钮可拖拽排序。</p>
+<p>开启后会出现一个可拖拽的悬浮球或固定面板。可以把导航跳转等功能按钮放进去。悬浮球模式下点击展开面板，点击其他区域自动收起；固定面板模式下常驻显示。支持自定义悬浮球样式（包括GIF）、面板方向（竖向侧边展开 / 竖向上下展开 / 横向上下展开）。放进悬浮面板的按钮不会在主工具栏中重复显示。面板中的按钮可拖拽排序。</p>
 <p><b>透明背景</b>选项仅在上传了自定义图片时生效，开启后悬浮球的默认边框、阴影、背景色都会隐藏，只显示图片本身。</p>
 <p><b>面板方案</b>：可以创建多套面板按钮配置（比如"全屏模式"用翻页按钮、"编辑模式"用符号按钮），通过设置面板里的方案管理器切换，或者把「切换面板方案」按钮放进悬浮面板，一键循环切换不同布局。</p>
-<p>开启「自动隐藏」后，悬浮球/面板平时隐藏，点击聊天区域显示，再次点击聊天区域或点击其他区域自动隐藏。翻页模式开启时会自动显示悬浮球，关闭翻页后自动隐藏回去。</p>
+<p><b>面板方案保存内容</b>：每个面板方案保存五项设置——<b>面板按钮列表</b>（哪些按钮、排列顺序）、<b>面板方向</b>（竖向/横向）、<b>面板按钮大小</b>、<b>面板宽度</b>、<b>面板最大高度</b>。切换方案时会立即应用这些设置。注意：悬浮球的图片/大小/形状等外观设置由单独的「图片方案」管理，不包含在面板方案内。</p>
+<p><b>图片方案保存内容</b>：每个图片方案保存六项设置——悬浮球图片 URL、展开状态图片 URL、球大小、球形状（圆形/方形）、透明背景开关、跟随美化开关。</p>
+<p>开启「自动隐藏」后，悬浮球/面板平时隐藏，点击屏幕任意空白位置即可切换显示/隐藏（包括聊天区域、抽屉空白处等）。点击悬浮球/面板自身、输入框、按钮、链接、弹窗等交互元素时不会触发切换。翻页模式开启时会自动显示悬浮球，关闭翻页后自动隐藏回去。</p>
+<p><b>移动端使用提示</b>：</p>
+<ul style="margin:4px 0;padding-left:18px;">
+    <li>悬浮球可以自由拖到屏幕任意位置，下次会记住</li>
+    <li>设置面板顶部"重置位置"按钮（图钉图标）可以把悬浮球/面板拉回默认位置，遇到拖到屏幕外找不回来时使用</li>
+    <li>面板会自动避开手机软键盘，键盘弹起时如果面板太长，会自动加上滚动条而不是被裁切</li>
+    <li>展开后的面板会自动选择有空间的方向（左/右/上/下），如果上下空间都不够，会限制最大高度并加滚动条</li>
+    <li>悬浮球与展开后的面板默认会自动绑定到当前打开的弹窗内，关闭弹窗后会回到主界面</li>
+    <li>开启「自动隐藏」时，翻页模式自动让球出现；切换聊天 / 切换角色等操作会保持当前的隐藏/显示状态</li>
+</ul>
+<p><b>常见问题</b>：</p>
+<ul style="margin:4px 0;padding-left:18px;">
+    <li>球点了之后面板闪一下就消失？这是移动端 touchend+click 双重触发导致的，插件已自带 400ms 防抖，正常情况下不会出现</li>
+    <li>键盘弹起或收起时面板意外关闭？插件会忽略键盘动画期间（600ms 内）的关闭操作，避免误触</li>
+    <li>面板看不见但球还在？检查是不是开了自动隐藏，再点一下聊天区域即可显示</li>
+    <li>美化 CSS 控制不了悬浮球？开启设置里的"跟随美化"开关</li>
+</ul>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-bolt"></i> 自动跳转</h4>
 <p>开启"非流自动跳转至AI消息顶部"后，非流式模式下 AI 生成回复完毕会自动滚动到该条消息的顶部，方便从头阅读长回复。流式输出时不受影响。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-lock"></i> 续写时锁定滚动</h4>
@@ -3218,7 +4979,7 @@ function openHelpPanel() {
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-palette"></i> 美化指南</h4>
 <p>在设置面板底部点击「美化指南」按钮，可以获取一段提示词。将提示词复制给 AI 并填写你的配色风格描述，即可生成匹配你主题的快捷工具栏美化 CSS。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-keyboard"></i> 快捷键</h4>
-<p>在按钮管理中，点击每个按钮右边的快捷键输入框，按下想要的组合键即可绑定。快捷键需要至少包含一个修饰键（Ctrl / Alt / Shift）+ 一个普通键，单独的字母键不能作为快捷键。按 Esc 清除。</p>
+<p>在按钮管理中，点击每个按钮右边的快捷键输入框，按下想要的组合键即可绑定。按 Esc 清除。</p>
 <p><b>生效范围</b>：符号插入、撤回重做等输入类快捷键仅在发送输入框聚焦时生效；翻页、滚动、删除等导航/操作类快捷键在聊天界面全局生效（在设置面板等其他输入框中打字时不会误触）。移动端不显示快捷键设置。</p>
 </div>
 `;
@@ -3246,7 +5007,7 @@ function openHelpPanel() {
 
 function openHideManagerPanel() {
   if (chat.length === 0) {
-    toastr.warning("当前没有聊天消息", "", { timeOut: 1500 });
+    toastr.warning("当前没有聊天消息", "", { timeOut: 1000 });
     return;
   }
   const { overlay, escHandler } = createDialogOverlay();
@@ -3319,7 +5080,7 @@ function openHideManagerPanel() {
   content.find("#ih_do_hide_one").on("click", async () => {
     const val = content.find("#ih_specific_floor").val();
     if (val === "") {
-      toastr.warning("请输入楼层号", "", { timeOut: 1500 });
+      toastr.warning("请输入楼层号", "", { timeOut: 1000 });
       return;
     }
     await doHideOne(val);
@@ -3328,7 +5089,7 @@ function openHideManagerPanel() {
   content.find("#ih_do_unhide_one").on("click", async () => {
     const val = content.find("#ih_specific_floor").val();
     if (val === "") {
-      toastr.warning("请输入楼层号", "", { timeOut: 1500 });
+      toastr.warning("请输入楼层号", "", { timeOut: 1000 });
       return;
     }
     await doUnhideOne(val);
@@ -3373,6 +5134,10 @@ const floatingPanelController = {
   _dialogDebounceTimer: null,
   _currentDialogHost: null,
   _autoHideVisible: true,
+  _lastViewportChangeTime: 0,
+  _ahLastToggleTime: 0,
+  _lastToggleTime: 0,
+  _maxSeenViewportHeight: 0,
   _ahTouchStart: null,
   _ahTouchMove: null,
   _ahTouchEnd: null,
@@ -3381,7 +5146,7 @@ const floatingPanelController = {
   _ahTextareaFocus: null,
 
   init() {
-    this.destroy();
+    if (this._panelEl || this._ballEl) this.destroy();
     if (!getSettings().enabled) return;
     const fp = getSettings().floatingPanel;
     if (!fp || !fp.enabled) return;
@@ -3402,6 +5167,8 @@ const floatingPanelController = {
     this._removeDialogDetection();
     this._removeKeyboardAdaptation();
     this._removeWindowResize();
+    this._lastBallOnlyKey = null;
+    this._lastRepositionKey = null;
     if (this._panelEl) {
       this._panelEl.remove();
       this._panelEl = null;
@@ -3418,22 +5185,38 @@ const floatingPanelController = {
     const size = fp.ballSize || 48;
     const isSquare = fp.ballShape === "square";
     const ballRadius = isSquare ? "10px" : "50%";
-    const imgRadius = isSquare ? "8px" : "50%";
     let innerHtml;
-    if (fp.ballImage) {
+    let _ballUseCustomClass = false;
+    const _hasThemeCSS = _hasUserBallCSS();
+    const _userHasBgImage = _hasUserBallBackgroundImage();
+    const _shouldUseCssOnly = !!(fp.followTheme && _userHasBgImage);
+
+    if (fp.ballImage && !_shouldUseCssOnly) {
       const imgSizePercent = isSquare ? 100 : 71;
-      innerHtml = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:${ballRadius};"><img src="${fp.ballImage}" draggable="false" ondragstart="return false;" style="width:${imgSizePercent}%;height:${imgSizePercent}%;object-fit:contain;pointer-events:none;-webkit-user-drag:none;user-drag:none;" /></div>`;
+      const safeBallImage = ihEscapeAttr(fp.ballImage);
+      innerHtml = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:${ballRadius};"><img src="${safeBallImage}" draggable="false" ondragstart="return false;" style="width:${imgSizePercent}%;height:${imgSizePercent}%;object-fit:contain;pointer-events:none;-webkit-user-drag:none;user-drag:none;" /></div>`;
+      _ballUseCustomClass = true;
+    } else if (_shouldUseCssOnly) {
+      innerHtml = `<i class="fa-solid fa-ellipsis" style="font-size:${Math.max(14, size / 3)}px;"></i>`;
+      _ballUseCustomClass = false;
+    } else if (fp.followTheme && _hasThemeCSS) {
+      innerHtml = `<i class="fa-solid fa-ellipsis" style="font-size:${Math.max(14, size / 3)}px;"></i>`;
+      _ballUseCustomClass = false;
     } else {
       innerHtml = `<i class="fa-solid fa-ellipsis" style="font-size:${Math.max(14, size / 3)}px;"></i>`;
+      _ballUseCustomClass = !fp.followTheme || !_hasThemeCSS;
     }
     const ball = $(
       `<div class="ih-floating-ball" style="width:${size}px;height:${size}px;border-radius:${ballRadius};">${innerHtml}</div>`,
     );
-    if (!fp.followTheme) {
+    if (_ballUseCustomClass) {
       ball.addClass("ih-ball-custom");
+      if (fp.transparentBall && fp.ballImage) {
+        ball.addClass("ih-ball-transparent");
+      }
     }
-    if (fp.transparentBall && fp.ballImage) {
-      ball.addClass("ih-ball-custom ih-ball-transparent");
+    if (_ballUseCustomClass && fp.ballImage) {
+      ball.addClass("ih-ball-image-only");
     }
     $("body").append(ball);
     [
@@ -3490,6 +5273,23 @@ const floatingPanelController = {
     const panel = $(
       `<div class="ih-floating-panel ${panelLayoutClass} ${fp.displayMode === "fixed" ? "ih-fp-fixed" : "ih-fp-collapsible"}"></div>`,
     );
+    if (fp.orientation === "horizontal") {
+      panel[0].style.setProperty("overflow-x", "auto", "important");
+      panel[0].style.setProperty("overflow-y", "hidden", "important");
+    } else {
+      panel[0].style.setProperty("overflow-y", "auto", "important");
+      panel[0].style.setProperty("overflow-x", "hidden", "important");
+    }
+    panel[0].style.setProperty(
+      "-webkit-overflow-scrolling",
+      "touch",
+      "important",
+    );
+    panel[0].style.setProperty(
+      "transition",
+      "top 0.1s ease-out, left 0.1s ease-out, max-height 0.1s ease-out",
+      "important",
+    );
     const buttons = fp.buttons || [];
     if (buttons.length === 0) {
       panel.append(
@@ -3500,7 +5300,7 @@ const floatingPanelController = {
       const displayHtml = getButtonDisplayHtml(bKey);
       const label = getButtonLabel(bKey);
       const btn = $(
-        `<button class="input-helper-btn ih-fp-btn" data-button-key="${bKey}" title="${label}">${displayHtml}</button>`,
+        `<button class="input-helper-btn ih-fp-btn" data-button-key="${ihEscapeAttr(bKey)}" title="${ihEscapeAttr(label)}">${displayHtml}</button>`,
       );
       bindButtonAction(btn, bKey);
       this._applyButtonSize(btn[0], fp.buttonSize || 12);
@@ -3520,6 +5320,23 @@ const floatingPanelController = {
       }
     }
     $("body").append(panel);
+    if (fp.panelWidth && fp.panelWidth > 0) {
+      panel.css("width", fp.panelWidth + "px");
+    }
+    if (fp.displayMode === "fixed") {
+      requestAnimationFrame(() => {
+        if (panel && panel[0]) {
+          const _initVh =
+            (window.visualViewport && window.visualViewport.height) ||
+            window.innerHeight;
+          const _initTop = panel[0].getBoundingClientRect().top;
+          panel.css(
+            "max-height",
+            this._clampMaxH(_initVh - _initTop - 10) + "px",
+          );
+        }
+      });
+    }
     [
       "click",
       "mousedown",
@@ -3559,6 +5376,9 @@ const floatingPanelController = {
       e.preventDefault();
       el.addClass("ih-dragging");
       void el[0].offsetHeight;
+      const _origTransition = el[0].style.transition;
+      el[0].style.setProperty("transition", "none", "important");
+      el.data("ih-orig-transition", _origTransition);
       const ev = e.touches ? e.touches[0] : e;
       const parsedLeft = parseFloat(el[0].style.left);
       const parsedTop = parseFloat(el[0].style.top);
@@ -3585,11 +5405,17 @@ const floatingPanelController = {
           moved = true;
           this._isDragging = true;
           if (isBall && this._expanded) {
+            if (
+              this._lastViewportChangeTime &&
+              Date.now() - this._lastViewportChangeTime < 600
+            ) {
+              return;
+            }
             this._expanded = false;
             if (this._panelEl) this._panelEl.stop(true).hide();
+            if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
             this._updateBallImage();
             this._removeOutsideClose();
-            if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
           }
         }
         e2.preventDefault();
@@ -3616,6 +5442,20 @@ const floatingPanelController = {
         document.removeEventListener("touchmove", onMove, true);
         document.removeEventListener("touchend", onEnd, true);
         el.removeClass("ih-dragging");
+        const _orig = el.data("ih-orig-transition") || "";
+        if (_orig) {
+          el[0].style.setProperty("transition", _orig, "important");
+        } else {
+          el[0].style.removeProperty("transition");
+          if (el.hasClass("ih-floating-panel")) {
+            el[0].style.setProperty(
+              "transition",
+              "top 0.1s ease-out, left 0.1s ease-out, max-height 0.1s ease-out",
+              "important",
+            );
+          }
+        }
+        el.removeData("ih-orig-transition");
         if (moved) {
           const rect2 = el[0].getBoundingClientRect();
           const fp = getSettings().floatingPanel;
@@ -3651,6 +5491,11 @@ const floatingPanelController = {
   },
 
   toggleExpand() {
+    const now = Date.now();
+    if (now - (this._lastToggleTime || 0) < 400) {
+      return;
+    }
+    this._lastToggleTime = now;
     this._expanded = !this._expanded;
     if (!this._panelEl || !this._ballEl) return;
     if (this._expanded) {
@@ -3684,19 +5529,25 @@ const floatingPanelController = {
       const availableHeight = effectiveMaxBottom - effectiveMinTop;
 
       let panelLeft, panelTop;
-      if (fp.orientation === "vertical") {
-        panelLeft = ballRect.left - panelWidth - 8;
-        if (panelLeft < 4) {
-          panelLeft = ballRect.right + 8;
-        }
+      const spaceLeftBall = ballRect.left - 8;
+      const spaceRightBall = window.innerWidth - ballRect.right - 8;
+      const canFitLeft = spaceLeftBall >= panelWidth + 4;
+      const canFitRight = spaceRightBall >= panelWidth + 4;
+      if (fp.orientation === "vertical" && (canFitLeft || canFitRight)) {
+        panelLeft = canFitLeft
+          ? ballRect.left - panelWidth - 8
+          : ballRect.right + 8;
         panelTop = ballRect.top;
         if (panelTop + panelHeight > effectiveMaxBottom) {
           panelTop = ballRect.bottom - panelHeight;
         }
       } else {
         panelLeft = ballRect.left + ballRect.width / 2 - panelWidth / 2;
-        panelTop = ballRect.bottom + 8;
-        if (panelTop + panelHeight > effectiveMaxBottom) {
+        const spaceBelow = effectiveMaxBottom - ballRect.bottom - 8;
+        const spaceAbove = ballRect.top - effectiveMinTop - 8;
+        if (spaceBelow >= panelHeight || spaceBelow >= spaceAbove) {
+          panelTop = ballRect.bottom + 8;
+        } else {
           panelTop = ballRect.top - panelHeight - 8;
         }
       }
@@ -3708,7 +5559,10 @@ const floatingPanelController = {
 
       if (panelHeight >= availableHeight) {
         panelTop = effectiveMinTop;
-        this._panelEl.css("max-height", availableHeight + "px");
+        this._panelEl.css(
+          "max-height",
+          this._clampMaxH(availableHeight) + "px",
+        );
       } else {
         panelTop = Math.max(
           effectiveMinTop,
@@ -3716,15 +5570,76 @@ const floatingPanelController = {
         );
       }
 
+      const panelR = panelLeft + panelWidth;
+      const panelB = panelTop + Math.min(panelHeight, availableHeight);
+      const overlapsBall = !(
+        panelR <= ballRect.left - 2 ||
+        panelLeft >= ballRect.right + 2 ||
+        panelB <= ballRect.top - 2 ||
+        panelTop >= ballRect.bottom + 2
+      );
+      if (overlapsBall) {
+        const spaceBelowBall = effectiveMaxBottom - ballRect.bottom - 8;
+        const spaceAboveBall = ballRect.top - effectiveMinTop - 8;
+        panelLeft = Math.max(
+          4,
+          Math.min(
+            window.innerWidth - panelWidth - 4,
+            ballRect.left + ballRect.width / 2 - panelWidth / 2,
+          ),
+        );
+        if (spaceBelowBall >= spaceAboveBall && spaceBelowBall > 60) {
+          panelTop = ballRect.bottom + 8;
+          if (panelHeight > spaceBelowBall) {
+            this._panelEl.css(
+              "max-height",
+              this._clampMaxH(spaceBelowBall) + "px",
+            );
+          }
+        } else if (spaceAboveBall > 60) {
+          if (panelHeight > spaceAboveBall) {
+            this._panelEl.css(
+              "max-height",
+              this._clampMaxH(spaceAboveBall) + "px",
+            );
+            panelTop = effectiveMinTop;
+          } else {
+            panelTop = ballRect.top - panelHeight - 8;
+          }
+        } else {
+          panelTop = ballRect.bottom + 8;
+          const remaining = effectiveMaxBottom - panelTop;
+          if (remaining > 0 && panelHeight > remaining) {
+            this._panelEl.css("max-height", this._clampMaxH(remaining) + "px");
+          }
+        }
+      }
+
+      this._panelEl[0].style.setProperty("transition", "none", "important");
       this._panelEl.css({
         left: panelLeft + "px",
         top: panelTop + "px",
         right: "auto",
       });
-      this._panelEl.stop(true).fadeIn(150);
-      this._adjustForKeyboard();
+      if (
+        !this._panelEl[0].style.maxHeight ||
+        this._panelEl[0].style.maxHeight === ""
+      ) {
+        this._panelEl.css(
+          "max-height",
+          this._clampMaxH(availableHeight) + "px",
+        );
+      }
+      this._panelEl.stop(true).fadeIn(60);
+      const _selfPanel = this._panelEl[0];
+      setTimeout(() => {
+        _selfPanel.style.setProperty(
+          "transition",
+          "top 0.1s ease-out, left 0.1s ease-out, max-height 0.1s ease-out",
+          "important",
+        );
+      }, 80);
       if (this._ballEl) this._ballEl.addClass("ih-ball-expanded");
-      this._setupOutsideClose();
       this._panelEl
         .find(".ih-fp-btn")
         .toggleClass("input-helper-btn-active", false);
@@ -3735,11 +5650,16 @@ const floatingPanelController = {
         .find("[data-button-key='autoScroll']")
         .toggleClass("input-helper-btn-active", autoScrollController.active);
     } else {
-      this._panelEl.stop(true).fadeOut(100);
+      this._panelEl.stop(true).fadeOut(50);
       this._removeOutsideClose();
       if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
     }
     this._updateBallImage();
+  },
+  _clampMaxH(h) {
+    const userH = getSettings().floatingPanel.panelMaxHeight;
+    const clamped = Math.max(60, h);
+    return userH && userH > 0 ? Math.min(clamped, userH) : clamped;
   },
   _applyButtonSize(el, size) {
     const pv = Math.max(2, Math.round(size * 0.25));
@@ -3754,17 +5674,39 @@ const floatingPanelController = {
     }
 
     el.style.setProperty("font-size", `${size}px`, "important");
-    el.style.setProperty("padding", `${pv}px ${ph}px`, "important");
+    var _hasIcon = el.querySelector("i");
+    var _hasText = Array.from(el.childNodes).some(function (n) {
+      return n.nodeType === 3 && n.textContent.trim().length > 0;
+    });
+    var _isIconOnly = _hasIcon && !_hasText;
+    if (_isIconOnly) {
+      var pvIcon = Math.max(3, Math.round(size * 0.38));
+      var phIcon = Math.max(6, Math.round(size * 0.65));
+      el.style.setProperty("padding", `${pvIcon}px ${phIcon}px`, "important");
+    } else {
+      el.style.setProperty("padding", `${pv}px ${ph}px`, "important");
+    }
+    el.querySelectorAll("i").forEach(function (icon) {
+      icon.style.setProperty("font-size", size + "px", "important");
+    });
   },
   _updateBallImage() {
     if (!this._ballEl) return;
     const fp = getSettings().floatingPanel;
+
+    if (fp.followTheme && _hasUserBallBackgroundImage()) {
+      return;
+    }
+
     if (!fp.ballImage) return;
     const img = this._ballEl.find("img");
     if (!img.length) return;
     const expandedImg = fp.ballImageExpanded && fp.ballImageExpanded.trim();
     if (expandedImg) {
-      img.attr("src", this._expanded ? expandedImg : fp.ballImage);
+      img.attr(
+        "src",
+        ihEscapeAttr(this._expanded ? expandedImg : fp.ballImage),
+      );
     } else {
       img.attr("src", fp.ballImage);
     }
@@ -3792,8 +5734,29 @@ const floatingPanelController = {
         )
           return;
         if (isEditableElement(e.target)) return;
-        const toolbar = document.getElementById("input_helper_toolbar");
-        if (toolbar && toolbar.contains(e.target)) return;
+        if (
+          self._lastViewportChangeTime &&
+          Date.now() - self._lastViewportChangeTime < 600
+        )
+          return;
+        const _delBtn = document.getElementById("dialogue_del_mes_cancel");
+        if (_delBtn && $(_delBtn).is(":visible")) return;
+        if ($(e.target).closest(".mes, #chat").length) {
+          const _delBtn2 = document.getElementById("dialogue_del_mes_cancel");
+          if (_delBtn2 && $(_delBtn2).is(":visible")) return;
+        }
+        if (
+          $(e.target).closest(
+            "dialog[open], .drawer-content, .inline-drawer-content, " +
+              "#extensions_settings, #extensions_settings2, " +
+              "#top-settings-holder, #WorldInfo, .world_entry, " +
+              ".popup, #shadow_popup, .mes_edit_buttons, " +
+              "#input_helper_toolbar, .ih-find-bar, " +
+              ".ih-folder-dropdown-portal, .ih-dialog-overlay, " +
+              ".input-helper-settings, .range-block",
+          ).length
+        )
+          return;
         self.toggleExpand();
       };
       document.addEventListener("click", self._outsideCloseHandler, true);
@@ -3876,10 +5839,12 @@ const floatingPanelController = {
       ) {
         return;
       }
+      if (Date.now() - (self._ahLastToggleTime || 0) < 350) return;
       ahTouchHandled = true;
       setTimeout(() => {
         ahTouchHandled = false;
       }, 350);
+      self._ahLastToggleTime = Date.now();
       if (self._autoHideVisible) {
         self._hideAutoHide();
       } else {
@@ -3887,6 +5852,7 @@ const floatingPanelController = {
       }
     };
     this._ahChatClick = function (e) {
+      if (Date.now() - (self._ahLastToggleTime || 0) < 350) return;
       if (ahTouchHandled) return;
       if (pagingController.active) return;
       const $target = $(e.target);
@@ -3924,6 +5890,8 @@ const floatingPanelController = {
       ) {
         return;
       }
+      if (floatingPanelController._expanded) return;
+      self._ahLastToggleTime = Date.now();
       if (self._autoHideVisible) {
         self._hideAutoHide();
       } else {
@@ -3931,14 +5899,35 @@ const floatingPanelController = {
       }
     };
     this._ahDocClick = function (e) {
-      if (!self._autoHideVisible) return;
+      if (Date.now() - (self._ahLastToggleTime || 0) < 350) return;
+      const $target = $(e.target);
       if (
-        $(e.target).closest(
-          ".ih-floating-ball, .ih-floating-panel, #chat, #send_form, #form_sheld",
+        $target.closest(
+          ".ih-floating-ball, .ih-floating-panel, #chat, #send_form, #form_sheld, " +
+            "dialog[open], .popup, #shadow_popup, " +
+            ".ih-folder-dropdown-portal, .ih-dialog-overlay, " +
+            ".input-helper-settings, #extensions_settings, #extensions_settings2, " +
+            ".ih-find-bar",
         ).length
       )
         return;
-      self._hideAutoHide();
+      if (
+        $target.is(
+          "a, button, input, textarea, select, label, video, audio, iframe",
+        ) ||
+        $target.is(
+          "[onclick], [contenteditable], [role='button'], [tabindex]:not([tabindex='-1'])",
+        )
+      ) {
+        return;
+      }
+      if (floatingPanelController._expanded) return;
+      self._ahLastToggleTime = Date.now();
+      if (self._autoHideVisible) {
+        self._hideAutoHide();
+      } else {
+        self._showAutoHide();
+      }
     };
     chatEl.addEventListener("touchstart", this._ahTouchStart, {
       passive: true,
@@ -4021,9 +6010,9 @@ const floatingPanelController = {
     if (this._expanded) {
       this._expanded = false;
       if (this._panelEl) this._panelEl.stop(true).hide();
+      if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
       this._updateBallImage();
       this._removeOutsideClose();
-      if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
     }
     const target = this._ballEl || this._panelEl;
     if (target) {
@@ -4041,8 +6030,30 @@ const floatingPanelController = {
   _setupKeyboardAdaptation() {
     if (!window.visualViewport) return;
     const self = this;
+    let debounceTimer = null;
+    let lastAdjustTime = 0;
+    this._maxSeenViewportHeight = Math.max(
+      window.visualViewport.height,
+      window.innerHeight,
+      screen.height || 0,
+    );
     this._vvResizeHandler = function () {
-      self._adjustForKeyboard();
+      self._lastViewportChangeTime = Date.now();
+      const now = Date.now();
+      if (!lastAdjustTime || now - lastAdjustTime > 200) {
+        lastAdjustTime = now;
+        clearTimeout(debounceTimer);
+        self._adjustForKeyboard();
+        debounceTimer = setTimeout(() => {
+          self._adjustForKeyboard();
+        }, 30);
+      } else {
+        lastAdjustTime = now;
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          self._adjustForKeyboard();
+        }, 30);
+      }
     };
     window.visualViewport.addEventListener("resize", this._vvResizeHandler);
   },
@@ -4054,51 +6065,49 @@ const floatingPanelController = {
     this._winResizeHandler = function () {
       self._clampToViewport();
     };
+    this._orientationHandler = function () {
+      self._maxSeenViewportHeight = null;
+      self._clampToViewport();
+    };
     window.addEventListener("resize", this._winResizeHandler);
-    window.addEventListener("orientationchange", this._winResizeHandler);
+    window.addEventListener("orientationchange", this._orientationHandler);
   },
 
   _removeWindowResize() {
     if (this._winResizeHandler) {
       window.removeEventListener("resize", this._winResizeHandler);
-      window.removeEventListener("orientationchange", this._winResizeHandler);
       this._winResizeHandler = null;
+    }
+    if (this._orientationHandler) {
+      window.removeEventListener("orientationchange", this._orientationHandler);
+      this._orientationHandler = null;
     }
   },
 
   _clampToViewport() {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const targets = [];
-    if (this._ballEl && this._ballEl.length) targets.push(this._ballEl);
-    if (this._panelEl && this._panelEl.length && !this._ballEl)
-      targets.push(this._panelEl);
-    let saved = false;
-    targets.forEach((t) => {
-      const el = t[0];
+    const vv = window.visualViewport;
+    const vw = (vv && vv.width) || window.innerWidth;
+    const vh = (vv && vv.height) || window.innerHeight;
+    const target = this._ballEl || this._panelEl;
+    if (target && target.length) {
+      const el = target[0];
       const w = el.offsetWidth || 0;
       const h = el.offsetHeight || 0;
-      if (!w || !h) return;
-      let left = parseFloat(el.style.left);
-      let top = parseFloat(el.style.top);
-      if (isNaN(left) || isNaN(top)) return;
-      const newLeft = Math.max(0, Math.min(vw - w, left));
-      const newTop = Math.max(0, Math.min(vh - h, top));
-      if (newLeft !== left || newTop !== top) {
-        el.style.left = newLeft + "px";
-        el.style.top = newTop + "px";
-        if (t === this._ballEl || (t === this._panelEl && !this._ballEl)) {
-          if (!saved) {
+      if (w && h) {
+        let left = parseFloat(el.style.left);
+        let top = parseFloat(el.style.top);
+        if (!isNaN(left) && !isNaN(top)) {
+          const newLeft = Math.max(0, Math.min(vw - w, left));
+          const newTop = Math.max(0, Math.min(vh - h, top));
+          if (newLeft !== left || newTop !== top) {
+            el.style.left = newLeft + "px";
+            el.style.top = newTop + "px";
             const fp = getSettings().floatingPanel;
             fp.position = { x: Math.round(newLeft), y: Math.round(newTop) };
             saveSettingsDebounced();
-            saved = true;
           }
         }
       }
-    });
-    if (this._expanded && this._ballEl && this._panelEl) {
-      this._repositionPanel();
     }
   },
 
@@ -4116,6 +6125,42 @@ const floatingPanelController = {
   _repositionPanel() {
     if (!this._panelEl || !this._ballEl || !this._expanded) return;
     if (!this._panelEl.is(":visible")) return;
+    const ballRectQuick = this._ballEl[0].getBoundingClientRect();
+    if (ballRectQuick.width < 10 || ballRectQuick.height < 10) {
+      return;
+    }
+    const posKey = `${ballRectQuick.top.toFixed(0)}_${ballRectQuick.left.toFixed(0)}_${window.innerWidth}_${(window.visualViewport && window.visualViewport.height) || window.innerHeight}`;
+    if (this._lastRepositionKey === posKey) return;
+    this._lastRepositionKey = posKey;
+    const ballOnlyKey = `${ballRectQuick.top.toFixed(0)}_${ballRectQuick.left.toFixed(0)}_${ballRectQuick.width.toFixed(0)}`;
+    const prevBallOnlyKey = this._lastBallOnlyKey;
+    this._lastBallOnlyKey = ballOnlyKey;
+    const currentTopParsed = parseFloat(this._panelEl[0].style.top);
+    if (prevBallOnlyKey === ballOnlyKey && !isNaN(currentTopParsed)) {
+      let _minTopFast = 4;
+      const _topBarFast =
+        document.getElementById("top-bar") ||
+        document.getElementById("top-settings-holder");
+      if (_topBarFast) {
+        const _r = _topBarFast.getBoundingClientRect();
+        if (_r.bottom > 0) _minTopFast = _r.bottom + 10;
+      }
+      const _vvFast = window.visualViewport;
+      const _vTopFast = _vvFast ? _vvFast.offsetTop : 0;
+      const _vBottomFast = _vvFast
+        ? _vvFast.offsetTop + _vvFast.height
+        : window.innerHeight;
+      const _effMinTopFast = Math.max(_minTopFast, _vTopFast + 4);
+      const _effMaxBottomFast = _vBottomFast - 4;
+      if (
+        currentTopParsed >= _effMinTopFast &&
+        currentTopParsed < _effMaxBottomFast - 60
+      ) {
+        const _allowedH = _effMaxBottomFast - currentTopParsed;
+        this._panelEl.css("max-height", this._clampMaxH(_allowedH) + "px");
+        return;
+      }
+    }
 
     const fp = getSettings().floatingPanel;
     const ballRect = this._ballEl[0].getBoundingClientRect();
@@ -4139,12 +6184,21 @@ const floatingPanelController = {
     const availableHeight = effectiveMaxBottom - effectiveMinTop;
 
     let panelLeft, panelTop;
-    if (fp.orientation === "vertical") {
-      panelLeft = ballRect.left - panelWidth - 8;
-      if (panelLeft < 4) panelLeft = ballRect.right + 8;
+    const spaceLeft = ballRect.left;
+    const spaceRight = window.innerWidth - ballRect.right;
+
+    if (
+      fp.orientation === "vertical" &&
+      (spaceLeft >= panelWidth + 12 || spaceRight >= panelWidth + 12)
+    ) {
+      if (spaceLeft >= panelWidth + 12) {
+        panelLeft = ballRect.left - panelWidth - 8;
+      } else {
+        panelLeft = ballRect.right + 8;
+      }
       panelTop = ballRect.top;
       if (panelTop + panelHeight > effectiveMaxBottom) {
-        panelTop = ballRect.bottom - panelHeight;
+        panelTop = effectiveMaxBottom - panelHeight;
       }
     } else {
       panelLeft = ballRect.left + ballRect.width / 2 - panelWidth / 2;
@@ -4159,14 +6213,76 @@ const floatingPanelController = {
       Math.min(window.innerWidth - panelWidth - 4, panelLeft),
     );
 
-    if (panelHeight >= availableHeight) {
-      panelTop = effectiveMinTop;
-      this._panelEl.css("max-height", availableHeight + "px");
+    const _kbOpen =
+      vv &&
+      this._maxSeenViewportHeight &&
+      vv.height < this._maxSeenViewportHeight - 50;
+    if (panelHeight >= availableHeight || _kbOpen) {
+      this._panelEl.css("max-height", this._clampMaxH(availableHeight) + "px");
+      panelTop = Math.max(
+        effectiveMinTop,
+        Math.min(
+          effectiveMaxBottom - Math.min(panelHeight, availableHeight),
+          panelTop,
+        ),
+      );
     } else {
       panelTop = Math.max(
         effectiveMinTop,
         Math.min(effectiveMaxBottom - panelHeight, panelTop),
       );
+      const naturalHeight = this._panelEl[0].scrollHeight;
+      if (naturalHeight && naturalHeight <= availableHeight - 20) {
+        this._panelEl.css(
+          "max-height",
+          this._clampMaxH(availableHeight) + "px",
+        );
+      }
+    }
+
+    const panelR = panelLeft + panelWidth;
+    const panelB = panelTop + Math.min(panelHeight, availableHeight);
+    const overlapsBall = !(
+      panelR <= ballRect.left - 2 ||
+      panelLeft >= ballRect.right + 2 ||
+      panelB <= ballRect.top - 2 ||
+      panelTop >= ballRect.bottom + 2
+    );
+    if (overlapsBall) {
+      const spaceBelowBall = effectiveMaxBottom - ballRect.bottom - 8;
+      const spaceAboveBall = ballRect.top - effectiveMinTop - 8;
+      panelLeft = Math.max(
+        4,
+        Math.min(
+          window.innerWidth - panelWidth - 4,
+          ballRect.left + ballRect.width / 2 - panelWidth / 2,
+        ),
+      );
+      if (spaceBelowBall >= spaceAboveBall && spaceBelowBall > 60) {
+        panelTop = ballRect.bottom + 8;
+        if (panelHeight > spaceBelowBall) {
+          this._panelEl.css(
+            "max-height",
+            this._clampMaxH(spaceBelowBall) + "px",
+          );
+        }
+      } else if (spaceAboveBall > 60) {
+        if (panelHeight > spaceAboveBall) {
+          this._panelEl.css(
+            "max-height",
+            this._clampMaxH(spaceAboveBall) + "px",
+          );
+          panelTop = effectiveMinTop;
+        } else {
+          panelTop = ballRect.top - panelHeight - 8;
+        }
+      } else {
+        panelTop = ballRect.bottom + 8;
+        const remaining = effectiveMaxBottom - panelTop;
+        if (remaining > 0 && panelHeight > remaining) {
+          this._panelEl.css("max-height", this._clampMaxH(remaining) + "px");
+        }
+      }
     }
 
     this._panelEl.css({
@@ -4174,15 +6290,44 @@ const floatingPanelController = {
       top: panelTop + "px",
       right: "auto",
     });
+
+    void this._panelEl[0].offsetHeight;
+    const finalRealH = this._panelEl[0].offsetHeight;
+    const finalRealT = parseFloat(this._panelEl[0].style.top) || 0;
+    if (finalRealT + finalRealH > effectiveMaxBottom + 1) {
+      const overflow = finalRealT + finalRealH - effectiveMaxBottom;
+      let fixedTop = finalRealT;
+      let fixedMaxH = finalRealH - overflow;
+      if (fixedMaxH < 60) {
+        fixedTop = effectiveMinTop;
+        fixedMaxH = effectiveMaxBottom - effectiveMinTop;
+      } else if (fixedTop < effectiveMinTop) {
+        fixedTop = effectiveMinTop;
+        fixedMaxH = effectiveMaxBottom - effectiveMinTop;
+      }
+      this._panelEl.css({
+        top: fixedTop + "px",
+        "max-height": this._clampMaxH(fixedMaxH) + "px",
+      });
+    }
   },
 
   _adjustForKeyboard() {
     if (!window.visualViewport) return;
-
+    this._lastViewportChangeTime = Date.now();
     const vv = window.visualViewport;
     const vvBottom = vv.offsetTop + vv.height;
-    const fullHeight = window.innerHeight;
-    const keyboardVisible = vv.height < fullHeight * 0.85;
+    const fullHeight = Math.max(window.innerHeight, screen.height || 0);
+    const keyboardVisible =
+      vv.height < fullHeight * 0.7 ||
+      (this._maxSeenViewportHeight &&
+        vv.height < this._maxSeenViewportHeight * 0.85);
+    if (
+      !this._maxSeenViewportHeight ||
+      vv.height > this._maxSeenViewportHeight
+    ) {
+      this._maxSeenViewportHeight = vv.height;
+    }
 
     const target = this._ballEl || this._panelEl;
     if (target && target.length) {
@@ -4216,22 +6361,29 @@ const floatingPanelController = {
 
     if (this._panelEl && this._panelEl.length) {
       if (keyboardVisible) {
-        const maxH = Math.max(120, vv.height - 24);
         this._panelEl.css({
-          "max-height": maxH + "px",
           "overflow-y": "auto",
           "overflow-x": "hidden",
         });
       } else {
         this._panelEl.css({
-          "max-height": "",
           "overflow-y": "",
           "overflow-x": "",
         });
       }
+      if (!this._ballEl) {
+        const _fpTop = parseFloat(this._panelEl[0].style.top);
+        if (!isNaN(_fpTop)) {
+          const _fpMaxH = vvBottom - _fpTop - 10;
+          if (_fpMaxH > 0) {
+            this._panelEl.css("max-height", this._clampMaxH(_fpMaxH) + "px");
+          }
+        }
+      }
     }
 
     if (this._expanded && this._ballEl && this._panelEl) {
+      this._lastRepositionKey = null;
       this._repositionPanel();
     }
   },
@@ -4240,14 +6392,25 @@ const floatingPanelController = {
     if (this._dialogObserver) return;
     const self = this;
     this._dialogObserver = new MutationObserver(() => {
-      clearTimeout(self._dialogDebounceTimer);
-      self._dialogDebounceTimer = setTimeout(() => {
+      if (self._dialogDebounceTimer) return;
+      self._dialogDebounceTimer = true;
+
+      const run = () => {
+        self._dialogDebounceTimer = null;
         self._updateDialogHost();
-      }, 100);
+      };
+
+      if (typeof queueMicrotask === "function") {
+        queueMicrotask(run);
+      } else {
+        Promise.resolve().then(run);
+      }
     });
     this._dialogObserver.observe(document.body, {
       childList: true,
-      subtree: false,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["open"],
     });
     this._updateDialogHost();
   },
@@ -4293,24 +6456,33 @@ const floatingPanelController = {
     ) {
       dialog.appendChild(this._panelEl[0]);
     }
-    dialog.addEventListener(
-      "close",
-      function () {
-        if (self._currentDialogHost === dialog) {
-          self._currentDialogHost = undefined;
-        }
-        self._moveElementsToBody();
-        const remaining = document.querySelectorAll("dialog[open]");
-        if (remaining.length > 0) {
-          const next = remaining[remaining.length - 1];
-          self._currentDialogHost = next;
-          self._moveElementsToDialog(next);
-        } else {
-          self._currentDialogHost = null;
-        }
-      },
-      { once: true },
-    );
+    if (dialog._ihCloseHandler) {
+      dialog.removeEventListener("close", dialog._ihCloseHandler);
+    }
+    dialog._ihCloseHandler = function () {
+      if (self._currentDialogHost === dialog) {
+        self._currentDialogHost = undefined;
+      }
+      self._moveElementsToBody();
+      const remaining = document.querySelectorAll("dialog[open]");
+      if (remaining.length > 0) {
+        const next = remaining[remaining.length - 1];
+        self._currentDialogHost = next;
+        self._moveElementsToDialog(next);
+      } else {
+        self._currentDialogHost = null;
+      }
+    };
+    dialog.addEventListener("close", dialog._ihCloseHandler);
+    setTimeout(() => {
+      if (self._currentDialogHost !== dialog) return;
+      self._clampToViewport();
+      if (self._expanded) {
+        self._lastRepositionKey = null;
+        self._lastBallOnlyKey = null;
+        self._repositionPanel();
+      }
+    }, 350);
   },
 
   _moveElementsToBody() {
@@ -4328,6 +6500,16 @@ const floatingPanelController = {
     ) {
       document.body.appendChild(this._panelEl[0]);
     }
+    const self = this;
+    requestAnimationFrame(() => {
+      if (self._currentDialogHost) return;
+      self._clampToViewport();
+      if (self._expanded) {
+        self._lastRepositionKey = null;
+        self._lastBallOnlyKey = null;
+        self._repositionPanel();
+      }
+    });
   },
 
   _applyAutoHideState() {
@@ -4348,6 +6530,7 @@ const floatingPanelController = {
       if (this._expanded) {
         this._expanded = false;
         if (this._panelEl) this._panelEl.stop(true).hide();
+        if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
         this._updateBallImage();
       }
     }
@@ -4361,14 +6544,77 @@ const floatingPanelController = {
 
   refresh() {
     const fp = getSettings().floatingPanel;
+    const _now = Date.now();
+    if (this._lastRefreshTime && _now - this._lastRefreshTime < 200) {
+      clearTimeout(this._refreshDebounceTimer);
+      this._refreshDebounceTimer = setTimeout(() => this.refresh(), 200);
+      return;
+    }
+    this._lastRefreshTime = _now;
     if (!fp || !fp.enabled || !getSettings().enabled) {
       this.destroy();
       return;
     }
+    const wasExpanded = this._expanded;
     if (this._ballEl || this._panelEl) {
       this.destroy();
     }
     this.init();
+    if (wasExpanded) {
+      const self = this;
+      setTimeout(() => {
+        self._lastToggleTime = 0;
+        self.toggleExpand();
+      }, 60);
+    }
+  },
+  syncTheme() {
+    try {
+      _cachedToolbarStyles = null;
+      _cachedToolbarStylesTime = 0;
+      if (this._panelEl && this._panelEl[0]) {
+        const pEl = this._panelEl[0];
+        pEl.style.removeProperty("backdrop-filter");
+        pEl.style.removeProperty("-webkit-backdrop-filter");
+        pEl.style.removeProperty("box-shadow");
+        pEl.style.removeProperty("border-color");
+      }
+      if (this._ballEl && this._ballEl[0]) {
+        const fp = getSettings().floatingPanel;
+        const currentClasses = this._ballEl[0].className;
+        const _hasThemeCSS = _hasUserBallCSS();
+        const _userHasBgImage = _hasUserBallBackgroundImage();
+        const _shouldUseCssOnly = !!(fp.followTheme && _userHasBgImage);
+        let expectedCustom = false;
+        if (fp.ballImage && !_shouldUseCssOnly) {
+          expectedCustom = true;
+        } else if (!_shouldUseCssOnly && (!fp.followTheme || !_hasThemeCSS)) {
+          expectedCustom = true;
+        }
+        const hasCustomNow = currentClasses.includes("ih-ball-custom");
+        if (expectedCustom !== hasCustomNow) {
+          this.refresh();
+          return;
+        }
+      }
+
+      if (this._panelEl && this._panelEl[0]) {
+        syncDialogTheme(this._panelEl[0]);
+        syncToolbarButtonStyles(this._panelEl);
+        this._panelEl
+          .find("[data-button-key='pagingMode']")
+          .toggleClass("input-helper-btn-active", pagingController.active);
+        this._panelEl
+          .find("[data-button-key='autoScroll']")
+          .toggleClass("input-helper-btn-active", autoScrollController.active);
+        this._panelEl
+          .find("[data-button-key='findReplace']")
+          .toggleClass("input-helper-btn-active", findReplaceController.active);
+        historyManager.updateButtons();
+      }
+    } catch (e) {
+      console.warn("快捷工具栏: 同步面板主题失败", e);
+    }
   },
   refreshPanelOnly() {
     const fp = getSettings().floatingPanel;
@@ -4427,8 +6673,41 @@ function bindButtonAction(btn, key) {
         const dy = Math.abs(touch.clientY - $(this).data("touchStartY"));
         if (dx > 10 || dy > 10) return;
         e.preventDefault();
+        const scrollKeys = new Set([
+          "scrollToTop",
+          "scrollToBottom",
+          "scrollToLastAi",
+          "prevAiMsg",
+          "nextAiMsg",
+          "pagingMode",
+          "autoScroll",
+          "jumpToFloor",
+          "bottomNavMode",
+        ]);
+
+        const isScrollKey = scrollKeys.has(key);
+        const refocusTarget = getInsertionTarget();
+
+        if (isScrollKey) {
+          ihBlurIfKeyboardAlreadyDismissed();
+        }
+
         action();
-        setTimeout(() => getMessageInput().focus(), 10);
+
+        if (!isScrollKey && isInputButton(key)) {
+          setTimeout(() => {
+            try {
+              if (
+                refocusTarget &&
+                refocusTarget.ownerDocument &&
+                refocusTarget.ownerDocument.contains(refocusTarget) &&
+                !shouldIgnoreFocusedElement(refocusTarget)
+              ) {
+                refocusTarget.focus({ preventScroll: true });
+              }
+            } catch (e) {}
+          }, 10);
+        }
       });
   } else {
     btn.on("click", action);
@@ -4437,7 +6716,7 @@ function bindButtonAction(btn, key) {
 
 let _cachedThemeSample = null;
 let _cachedThemeSampleTime = 0;
-const _THEME_SAMPLE_TTL = 15000;
+const _THEME_SAMPLE_TTL = 60000;
 
 function _getThemeSample() {
   const now = Date.now();
@@ -4530,6 +6809,24 @@ function syncDialogTheme(contentEl, options) {
   const skipBg = options.skipBg === true;
   const s = _getThemeSample();
   if (!s) return;
+  try {
+    if (!skipBg) {
+      contentEl.style.removeProperty("background-color");
+      contentEl.style.removeProperty("color");
+      contentEl.style.removeProperty("background-image");
+      contentEl.style.removeProperty("background-size");
+      contentEl.style.removeProperty("background-position");
+      contentEl.style.removeProperty("background-repeat");
+    }
+    contentEl
+      .querySelectorAll(
+        "input, textarea, select, button, .menu_button, .ih-folder-chip, .input-helper-btn, .button-preview, .ih-hm-status, .ih-beauty-prompt-box, .shortcut-input",
+      )
+      .forEach(function (el) {
+        el.style.removeProperty("color");
+        el.style.removeProperty("background-color");
+      });
+  } catch (e) {}
   try {
     if (!skipBg) {
       if (s.bgImage) {
@@ -4642,31 +6939,39 @@ function updateButtonVisibilityDebounced() {
 let _cachedToolbarStyles = null;
 let _cachedToolbarStylesTime = 0;
 
+const _SYNCED_BTN_PROPS = [
+  "backgroundImage",
+  "backgroundSize",
+  "backgroundPosition",
+  "backgroundRepeat",
+  "boxShadow",
+  "textShadow",
+  "borderStyle",
+  "borderWidth",
+  "borderImage",
+  "fontFamily",
+  "fontWeight",
+  "letterSpacing",
+  "backdropFilter",
+  "webkitBackdropFilter",
+];
+
 function syncToolbarButtonStyles(targetContainer) {
+  targetContainer.find(".input-helper-btn").each(function () {
+    const el = this;
+    for (const prop of _SYNCED_BTN_PROPS) {
+      el.style[prop] = "";
+    }
+  });
+
   const now = Date.now();
-  const CACHE_TTL = 15000;
+  const CACHE_TTL = 5000;
   if (!_cachedToolbarStyles || now - _cachedToolbarStylesTime > CACHE_TTL) {
     const referenceBtn = $("#input_helper_toolbar .input-helper-btn:visible")
       .not(".ih-folder-btn")
       .first();
     if (!referenceBtn.length) return;
     const refStyle = window.getComputedStyle(referenceBtn[0]);
-    const propsToSync = [
-      "backgroundImage",
-      "backgroundSize",
-      "backgroundPosition",
-      "backgroundRepeat",
-      "boxShadow",
-      "textShadow",
-      "borderStyle",
-      "borderWidth",
-      "borderImage",
-      "fontFamily",
-      "fontWeight",
-      "letterSpacing",
-      "backdropFilter",
-      "webkitBackdropFilter",
-    ];
     const hasCustomBg =
       refStyle.backgroundImage && refStyle.backgroundImage !== "none";
     const hasCustomShadow = refStyle.boxShadow && refStyle.boxShadow !== "none";
@@ -4678,7 +6983,7 @@ function syncToolbarButtonStyles(targetContainer) {
       return;
     }
     const styleMap = {};
-    propsToSync.forEach((prop) => {
+    _SYNCED_BTN_PROPS.forEach((prop) => {
       const val = refStyle.getPropertyValue(
         prop.replace(/([A-Z])/g, "-$1").toLowerCase(),
       );
@@ -4720,7 +7025,7 @@ function openFolderDropdown(folderBtn, fi) {
     const displayHtml = getButtonDisplayHtml(bKey);
     const label = getButtonLabel(bKey);
     const btn = $(
-      `<button class="input-helper-btn" data-button-key="${bKey}" title="${label}" data-norefocus="true">${displayHtml}</button>`,
+      `<button class="input-helper-btn" data-button-key="${ihEscapeAttr(bKey)}" title="${ihEscapeAttr(label)}" data-norefocus="true">${displayHtml}</button>`,
     );
     bindButtonAction(btn, bKey);
     btn.on("mousedown", function (e) {
@@ -4818,13 +7123,16 @@ function buildToolbar() {
     if (visibleButtonsInFolder.length === 0) return;
 
     let iconHtml;
-    if (folder.icon) iconHtml = `<i class="${folder.icon}"></i>`;
-    else if (folder.display) iconHtml = `<span>${folder.display}</span>`;
+    if (folder.icon) iconHtml = `<i class="${ihEscapeAttr(folder.icon)}"></i>`;
+    else if (folder.display)
+      iconHtml = `<span>${ihEscapeHtml(folder.display)}</span>`;
     else iconHtml = `<i class="fa-solid fa-folder"></i>`;
     const labelText = folder.name || "文件夹";
+    const safeLabelText = ihEscapeHtml(labelText);
+    const safeLabelAttr = ihEscapeAttr(labelText);
     const folderBtn = $(`
-            <button id="input_folder_${fi}_btn" class="input-helper-btn ih-folder-btn" title="${labelText}" data-norefocus="true" data-folder-index="${fi}">
-                ${iconHtml}<span class="ih-folder-label">${labelText}</span><i class="fa-solid fa-ellipsis-vertical ih-folder-dots"></i>
+            <button id="input_folder_${fi}_btn" class="input-helper-btn ih-folder-btn" title="${safeLabelAttr}" data-norefocus="true" data-folder-index="${fi}">
+                ${iconHtml}<span class="ih-folder-label">${safeLabelText}</span><i class="fa-solid fa-ellipsis-vertical ih-folder-dots"></i>
             </button>
         `);
     toolbar.append(folderBtn);
@@ -4907,6 +7215,10 @@ function buildToolbar() {
   generateFaIconProtectionCSS();
   applyCJKNarrowToToolbar();
   updateToolbarMaxHeight();
+  $("#input_bottom_nav_mode_btn").toggleClass(
+    "input-helper-btn-active",
+    bottomNavController.active,
+  );
 }
 
 function toggleFolderCollapse(fi) {
@@ -5009,8 +7321,11 @@ function renderSettingsPanel() {
       if (!folder) return;
       const isChecked = settings.buttons[key] !== false ? "checked" : "";
       const iconDisplay = folder.icon
-        ? `<i class="${folder.icon}"></i>`
-        : folder.display || '<i class="fa-solid fa-folder"></i>';
+        ? `<i class="${ihEscapeAttr(folder.icon)}"></i>`
+        : folder.display
+          ? ihEscapeHtml(folder.display)
+          : '<i class="fa-solid fa-folder"></i>';
+      const safeFolderNameText = ihEscapeHtml(folder.name || "文件夹");
       const isCollapsed = folder.collapsed === true;
       const chevronIcon = isCollapsed ? "fa-chevron-right" : "fa-chevron-down";
       const folderRow = $(`
@@ -5018,7 +7333,7 @@ function renderSettingsPanel() {
                     <span class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></span>
                     <input id="enable_${key}_btn" type="checkbox" ${isChecked} />
                     <div class="button-preview">${iconDisplay}</div>
-                    <span class="ih-folder-label-text" data-folder-index="${fi}"><i class="fa-solid fa-folder" style="margin-right:4px;opacity:0.5;"></i>${folder.name || "文件夹"}</span>
+                    <span class="ih-folder-label-text" data-folder-index="${fi}"><i class="fa-solid fa-folder" style="margin-right:4px;opacity:0.5;"></i>${safeFolderNameText}</span>
                     <button class="ih-folder-chevron" data-folder-index="${fi}" title="展开/收起">
                         <i class="fa-solid ${chevronIcon}"></i>
                     </button>
@@ -5102,14 +7417,24 @@ function applyBallProfileData(data) {
 function createBallProfile(name) {
   const fp = getSettings().floatingPanel;
   if (!fp.ballProfiles) fp.ballProfiles = [];
-  const data = getBallProfileData();
-  data.name = name;
+  const data = {
+    name: name,
+    ballImage: "",
+    ballImageExpanded: "",
+    ballSize: 48,
+    ballShape: "circle",
+    transparentBall: false,
+    followTheme: true,
+  };
   fp.ballProfiles.push(data);
   fp.currentProfileIndex = fp.ballProfiles.length - 1;
+  applyBallProfileData(data);
   saveSettingsDebounced();
   renderFloatingPanelSettings();
   floatingPanelController.refresh();
-  toastr.success(`已创建方案"${name}"`, "", { timeOut: 1500 });
+  toastr.success(`已创建空白方案"${name}"，请自定义后保存`, "", {
+    timeOut: 1800,
+  });
 }
 
 function saveBallProfile(index) {
@@ -5120,18 +7445,37 @@ function saveBallProfile(index) {
   data.name = name;
   fp.ballProfiles[index] = data;
   saveSettingsDebounced();
-  toastr.success(`已保存方案"${name}"`, "", { timeOut: 1500 });
+  toastr.success(`已保存方案"${name}"`, "", { timeOut: 1000 });
+}
+
+function _isBallProfileDirty() {
+  const fp = getSettings().floatingPanel;
+  const idx = fp.currentProfileIndex;
+  if (idx < 0 || !fp.ballProfiles || !fp.ballProfiles[idx]) return false;
+  const saved = fp.ballProfiles[idx];
+  const cur = getBallProfileData();
+  if ((saved.ballImage || "") !== (cur.ballImage || "")) return true;
+  if ((saved.ballImageExpanded || "") !== (cur.ballImageExpanded || ""))
+    return true;
+  if ((saved.ballSize || 48) !== (cur.ballSize || 48)) return true;
+  if ((saved.ballShape || "circle") !== (cur.ballShape || "circle"))
+    return true;
+  if (!!saved.transparentBall !== !!cur.transparentBall) return true;
+  if ((saved.followTheme !== false) !== (cur.followTheme !== false))
+    return true;
+  return false;
 }
 
 function loadBallProfile(index) {
   const fp = getSettings().floatingPanel;
   if (!fp.ballProfiles || !fp.ballProfiles[index]) return;
   const data = fp.ballProfiles[index];
+  fp.currentProfileIndex = index;
   applyBallProfileData(data);
   saveSettingsDebounced();
   renderFloatingPanelSettings();
   floatingPanelController.refresh();
-  toastr.info(`已切换到方案"${data.name}"`, "", { timeOut: 1500 });
+  toastr.info(`已切换到方案"${data.name}"`, "", { timeOut: 1000 });
 }
 
 function renameBallProfile(index, newName) {
@@ -5140,7 +7484,7 @@ function renameBallProfile(index, newName) {
   fp.ballProfiles[index].name = newName;
   saveSettingsDebounced();
   renderFloatingPanelSettings();
-  toastr.success(`已重命名为"${newName}"`, "", { timeOut: 1500 });
+  toastr.success(`已重命名为"${newName}"`, "", { timeOut: 1000 });
 }
 
 function deleteBallProfile(index) {
@@ -5152,6 +7496,14 @@ function deleteBallProfile(index) {
 
   if (fp.ballProfiles.length === 0) {
     fp.currentProfileIndex = -1;
+    applyBallProfileData({
+      ballImage: "",
+      ballImageExpanded: "",
+      ballSize: 48,
+      ballShape: "circle",
+      transparentBall: false,
+      followTheme: true,
+    });
   } else if (wasCurrent) {
     const newIndex = Math.min(index, fp.ballProfiles.length - 1);
     fp.currentProfileIndex = newIndex;
@@ -5174,6 +7526,8 @@ function getPanelProfileData() {
     buttons: [...(fp.buttons || [])],
     orientation: fp.orientation || "vertical",
     buttonSize: fp.buttonSize || 12,
+    panelWidth: fp.panelWidth || 0,
+    panelMaxHeight: fp.panelMaxHeight || 0,
   };
 }
 
@@ -5191,6 +7545,8 @@ function _isPanelProfileDirty() {
   }
   if ((saved.orientation || "vertical") !== cur.orientation) return true;
   if ((saved.buttonSize || 12) !== cur.buttonSize) return true;
+  if ((saved.panelWidth || 0) !== cur.panelWidth) return true;
+  if ((saved.panelMaxHeight || 0) !== cur.panelMaxHeight) return true;
   return false;
 }
 
@@ -5199,6 +7555,8 @@ function applyPanelProfileData(data) {
   fp.buttons = [...(data.buttons || [])];
   fp.orientation = data.orientation || "vertical";
   fp.buttonSize = data.buttonSize || 12;
+  fp.panelWidth = data.panelWidth || 0;
+  fp.panelMaxHeight = data.panelMaxHeight || 0;
 }
 
 function createPanelProfile(name) {
@@ -5209,6 +7567,8 @@ function createPanelProfile(name) {
     buttons: [],
     orientation: fp.orientation || "vertical",
     buttonSize: 12,
+    panelWidth: 0,
+    panelMaxHeight: 0,
   };
   fp.panelProfiles.push(data);
   fp.currentPanelProfileIndex = fp.panelProfiles.length - 1;
@@ -5229,22 +7589,18 @@ function savePanelProfile(index) {
   data.name = name;
   fp.panelProfiles[index] = data;
   saveSettingsDebounced();
-  toastr.success(`已保存面板方案"${name}"`, "", { timeOut: 1500 });
+  toastr.success(`已保存面板方案"${name}"`, "", { timeOut: 1000 });
 }
 
 function loadPanelProfile(index) {
   const fp = getSettings().floatingPanel;
   if (!fp.panelProfiles || !fp.panelProfiles[index]) return;
   if (_isPanelProfileDirty()) {
-    const curName =
-      fp.panelProfiles[fp.currentPanelProfileIndex]?.name || "当前";
-    if (
-      !confirm(
-        `方案"${curName}"有未保存的修改，切换后会丢失。\n确定继续吗？\n（取消可以先点"保存"按钮）`,
-      )
-    ) {
-      $("#ih_fp_panel_profile_select").val(fp.currentPanelProfileIndex);
-      return;
+    const curIdx = fp.currentPanelProfileIndex;
+    if (curIdx >= 0 && fp.panelProfiles[curIdx]) {
+      const curData = getPanelProfileData();
+      curData.name = fp.panelProfiles[curIdx].name;
+      fp.panelProfiles[curIdx] = curData;
     }
   }
   const data = fp.panelProfiles[index];
@@ -5263,7 +7619,7 @@ function renamePanelProfile(index, newName) {
   fp.panelProfiles[index].name = newName;
   saveSettingsDebounced();
   renderFloatingPanelSettings();
-  toastr.success(`已重命名为"${newName}"`, "", { timeOut: 1500 });
+  toastr.success(`已重命名为"${newName}"`, "", { timeOut: 1000 });
 }
 
 function deletePanelProfile(index) {
@@ -5279,6 +7635,8 @@ function deletePanelProfile(index) {
       buttons: [],
       orientation: fp.orientation || "vertical",
       buttonSize: 12,
+      panelWidth: 0,
+      panelMaxHeight: 0,
     });
     fp.currentPanelProfileIndex = 0;
     fp.buttons = [];
@@ -5329,9 +7687,9 @@ function renderFloatingPanelSettings() {
                     <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
                         <div style="font-size:11px;opacity:0.75;">方向</div>
                         <select id="ih_fp_orientation" style="padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
-                            <option value="vertical" ${fp.orientation === "vertical" ? "selected" : ""}>竖向（左侧展开）</option>
-                            <option value="vertical-down" ${fp.orientation === "vertical-down" ? "selected" : ""}>竖向（下方展开）</option>
-                            <option value="horizontal" ${fp.orientation === "horizontal" ? "selected" : ""}>横向（下方展开）</option>
+                            <option value="vertical" ${fp.orientation === "vertical" ? "selected" : ""}>竖向（侧边展开）</option>
+                            <option value="vertical-down" ${fp.orientation === "vertical-down" ? "selected" : ""}>竖向（上下展开）</option>
+                            <option value="horizontal" ${fp.orientation === "horizontal" ? "selected" : ""}>横向（上下展开）</option>
                         </select>
                     </div>
                     <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
@@ -5347,8 +7705,7 @@ function renderFloatingPanelSettings() {
                 <div class="ih-hm-group-label">图片方案</div>
                 <div class="ih-hm-row" style="gap:4px;flex-wrap:wrap;">
                     <select id="ih_fp_profile_select" style="flex:1;min-width:100px;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
-                        <option value="-1" ${(fp.currentProfileIndex ?? -1) === -1 ? "selected" : ""}>自定义</option>
-                        ${(fp.ballProfiles || []).map((p, i) => `<option value="${i}" ${fp.currentProfileIndex === i ? "selected" : ""}>${p.name}</option>`).join("")}
+                        ${(fp.ballProfiles || []).length === 0 ? `<option value="-1" selected>（还没有方案，点 + 新建一个）</option>` : (fp.ballProfiles || []).map((p, i) => `<option value="${i}" ${fp.currentProfileIndex === i ? "selected" : ""}>${ihEscapeHtml(p.name)}</option>`).join("")}
                     </select>
                     <button class="ih-hm-btn" id="ih_fp_profile_new" title="新建方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-plus"></i></button>
                     <button class="ih-hm-btn" id="ih_fp_profile_save" title="保存到当前方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-floppy-disk"></i></button>
@@ -5426,10 +7783,26 @@ function renderFloatingPanelSettings() {
                 </div>
             </div>
             <div class="ih-hm-group" style="padding-top:0;margin-top:-4px;">
+                <div class="ih-hm-group-label">面板尺寸</div>
+                <div class="ih-hm-row" style="gap:6px;align-items:center;">
+                    <label style="font-size:11px;flex-shrink:0;">宽度</label>
+                    <input type="range" id="ih_fp_panel_width" min="0" max="500" value="${fp.panelWidth || 0}" style="flex:1;min-width:60px;accent-color:var(--SmartThemeQuoteColor,cornflowerblue);" />
+                    <input type="number" id="ih_fp_panel_width_input" min="0" max="500" value="${fp.panelWidth || 0}" style="width:48px;padding:3px 4px;border:1px solid var(--SmartThemeBorderColor);border-radius:4px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;text-align:center;" />
+                    <span style="font-size:11px;flex-shrink:0;opacity:0.6;">px</span>
+                </div>
+                <div class="ih-hm-row" style="gap:6px;align-items:center;margin-top:4px;">
+                    <label style="font-size:11px;flex-shrink:0;">高度</label>
+                    <input type="range" id="ih_fp_panel_max_height" min="0" max="800" value="${fp.panelMaxHeight || 0}" style="flex:1;min-width:60px;accent-color:var(--SmartThemeQuoteColor,cornflowerblue);" />
+                    <input type="number" id="ih_fp_panel_max_height_input" min="0" max="800" value="${fp.panelMaxHeight || 0}" style="width:48px;padding:3px 4px;border:1px solid var(--SmartThemeBorderColor);border-radius:4px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;text-align:center;" />
+                    <span style="font-size:11px;flex-shrink:0;opacity:0.6;">px</span>
+                </div>
+                <div style="font-size:10px;opacity:0.5;margin-top:4px;line-height:1.5;">0 = 自动（由内容撑开）。设了高度后内容超出会上下滚动</div>
+            </div>
+            <div class="ih-hm-group" style="padding-top:0;margin-top:-4px;">
                 <div class="ih-hm-group-label">面板方案</div>
                 <div class="ih-hm-row" style="gap:4px;flex-wrap:wrap;">
                     <select id="ih_fp_panel_profile_select" style="flex:1;min-width:100px;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
-                        ${(fp.panelProfiles || []).map((p, i) => `<option value="${i}" ${fp.currentPanelProfileIndex === i ? "selected" : ""}>${p.name}</option>`).join("")}
+                        ${(fp.panelProfiles || []).map((p, i) => `<option value="${i}" ${fp.currentPanelProfileIndex === i ? "selected" : ""}>${ihEscapeHtml(p.name)}</option>`).join("")}
                     </select>
                     <button class="ih-hm-btn" id="ih_fp_panel_profile_new" title="新建方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-plus"></i></button>
                     <button class="ih-hm-btn" id="ih_fp_panel_profile_save" title="保存到当前方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-floppy-disk"></i></button>
@@ -5543,6 +7916,52 @@ function renderFloatingPanelSettings() {
   container.on("input change", "#ih_fp_btn_size_input", function () {
     _applyBtnSizeLive($(this).val());
   });
+  function _applyPanelWidthLive(rawVal) {
+    let val = parseInt(rawVal);
+    if (isNaN(val)) val = 0;
+    val = Math.max(0, Math.min(500, val));
+    getSettings().floatingPanel.panelWidth = val;
+    $("#ih_fp_panel_width").val(val);
+    $("#ih_fp_panel_width_input").val(val);
+    saveSettingsDebounced();
+    const panel = floatingPanelController._panelEl;
+    if (panel && panel.length) {
+      if (val > 0) {
+        panel.css("width", val + "px");
+      } else {
+        panel.css("width", "");
+      }
+    }
+  }
+  function _applyPanelMaxHeightLive(rawVal) {
+    let val = parseInt(rawVal);
+    if (isNaN(val)) val = 0;
+    val = Math.max(0, Math.min(800, val));
+    getSettings().floatingPanel.panelMaxHeight = val;
+    $("#ih_fp_panel_max_height").val(val);
+    $("#ih_fp_panel_max_height_input").val(val);
+    saveSettingsDebounced();
+    const panel = floatingPanelController._panelEl;
+    if (panel && panel.length) {
+      if (val > 0) {
+        panel.css("max-height", val + "px");
+      } else {
+        panel.css("max-height", "");
+      }
+    }
+  }
+  container.on("input", "#ih_fp_panel_width", function () {
+    _applyPanelWidthLive($(this).val());
+  });
+  container.on("input change", "#ih_fp_panel_width_input", function () {
+    _applyPanelWidthLive($(this).val());
+  });
+  container.on("input", "#ih_fp_panel_max_height", function () {
+    _applyPanelMaxHeightLive($(this).val());
+  });
+  container.on("input change", "#ih_fp_panel_max_height_input", function () {
+    _applyPanelMaxHeightLive($(this).val());
+  });
   container.on("change", "#ih_fp_ball_shape", function () {
     getSettings().floatingPanel.ballShape = $(this).val();
     saveSettingsDebounced();
@@ -5551,6 +7970,15 @@ function renderFloatingPanelSettings() {
   container.on("change", "#ih_fp_profile_select", function () {
     const idx = parseInt($(this).val());
     if (idx >= 0) {
+      const fp = getSettings().floatingPanel;
+      if (_isBallProfileDirty()) {
+        const curIdx = fp.currentProfileIndex;
+        if (curIdx >= 0 && fp.ballProfiles[curIdx]) {
+          const curData = getBallProfileData();
+          curData.name = fp.ballProfiles[curIdx].name;
+          fp.ballProfiles[curIdx] = curData;
+        }
+      }
       loadBallProfile(idx);
     } else {
       getSettings().floatingPanel.currentProfileIndex = -1;
@@ -5565,7 +7993,7 @@ function renderFloatingPanelSettings() {
   container.on("click", "#ih_fp_profile_save", function () {
     const idx = getSettings().floatingPanel.currentProfileIndex;
     if (idx < 0) {
-      toastr.warning("请先选择或新建一个方案", "", { timeOut: 1500 });
+      toastr.warning("请先选择或新建一个方案", "", { timeOut: 1000 });
       return;
     }
     saveBallProfile(idx);
@@ -5573,7 +8001,7 @@ function renderFloatingPanelSettings() {
   container.on("click", "#ih_fp_profile_rename", function () {
     const idx = getSettings().floatingPanel.currentProfileIndex;
     if (idx < 0) {
-      toastr.warning("请先选择一个方案", "", { timeOut: 1500 });
+      toastr.warning("请先选择一个方案", "", { timeOut: 1000 });
       return;
     }
     const current = getSettings().floatingPanel.ballProfiles[idx];
@@ -5584,7 +8012,7 @@ function renderFloatingPanelSettings() {
   container.on("click", "#ih_fp_profile_delete", function () {
     const idx = getSettings().floatingPanel.currentProfileIndex;
     if (idx < 0) {
-      toastr.warning("请先选择一个方案", "", { timeOut: 1500 });
+      toastr.warning("请先选择一个方案", "", { timeOut: 1000 });
       return;
     }
     if (
@@ -5602,13 +8030,18 @@ function renderFloatingPanelSettings() {
     floatingPanelController._imageRefreshTimer = setTimeout(() => {
       const ball = floatingPanelController._ballEl;
       const fp = getSettings().floatingPanel;
-      if (ball && ball.length && fp.ballImage) {
+      const shouldUseCssOnly = !!(
+        fp.followTheme && _hasUserBallBackgroundImage()
+      );
+
+      if (ball && ball.length && fp.ballImage && !shouldUseCssOnly) {
         const img = ball.find("img");
         if (img.length) {
-          img.attr("src", fp.ballImage);
+          img.attr("src", ihEscapeAttr(fp.ballImage));
           return;
         }
       }
+
       floatingPanelController.refresh();
     }, 600);
   });
@@ -5735,7 +8168,7 @@ function renderFloatingPanelSettings() {
   container.on("click", "#ih_fp_panel_profile_save", function () {
     const idx = getSettings().floatingPanel.currentPanelProfileIndex;
     if (idx < 0) {
-      toastr.warning("请先选择或新建一个方案", "", { timeOut: 1500 });
+      toastr.warning("请先选择或新建一个方案", "", { timeOut: 1000 });
       return;
     }
     savePanelProfile(idx);
@@ -5743,7 +8176,7 @@ function renderFloatingPanelSettings() {
   container.on("click", "#ih_fp_panel_profile_rename", function () {
     const idx = getSettings().floatingPanel.currentPanelProfileIndex;
     if (idx < 0) {
-      toastr.warning("请先选择一个方案", "", { timeOut: 1500 });
+      toastr.warning("请先选择一个方案", "", { timeOut: 1000 });
       return;
     }
     const current = getSettings().floatingPanel.panelProfiles[idx];
@@ -5754,7 +8187,7 @@ function renderFloatingPanelSettings() {
   container.on("click", "#ih_fp_panel_profile_delete", function () {
     const idx = getSettings().floatingPanel.currentPanelProfileIndex;
     if (idx < 0) {
-      toastr.warning("请先选择一个方案", "", { timeOut: 1500 });
+      toastr.warning("请先选择一个方案", "", { timeOut: 1000 });
       return;
     }
     if (
@@ -5779,13 +8212,14 @@ function renderFolderSettings() {
   const folders = getSettings().folders || [];
   folders.forEach((folder, fi) => {
     const iconDisplay = folder.icon
-      ? `<i class="${folder.icon}"></i>`
-      : folder.display || "📁";
+      ? `<i class="${ihEscapeAttr(folder.icon)}"></i>`
+      : ihEscapeHtml(folder.display || "📁");
+    const safeFolderName = ihEscapeAttr(folder.name || "");
     const card = $(`
             <div class="ih-folder-setting-card" data-folder-index="${fi}">
                 <div class="ih-folder-setting-header">
                     <button class="ih-folder-icon-btn" data-folder-index="${fi}" title="选择图标">${iconDisplay}</button>
-                    <input type="text" class="ih-folder-name-input" value="${folder.name || ""}" placeholder="文件夹名称" data-folder-index="${fi}" />
+                    <input type="text" class="ih-folder-name-input" value="${safeFolderName}" placeholder="文件夹名称" data-folder-index="${fi}" />
                     <button class="ih-folder-delete-btn" data-folder-index="${fi}" title="删除文件夹"><i class="fa-solid fa-trash"></i></button>
                 </div>
                 <div class="ih-folder-button-list" data-folder-index="${fi}">
@@ -6083,11 +8517,10 @@ function loadCustomSymbolButtons() {
   customSymbols.forEach((symbol, index) => {
     const buttonId = `input_custom_${index}_btn`;
     $(`#${buttonId}`).remove();
-    let displayContent;
-    if (symbol.icon) displayContent = `<i class="${symbol.icon}"></i>`;
-    else displayContent = symbol.display || symbol.symbol;
+    const displayContent = getButtonDisplayHtml(`custom_${index}`);
+    const safeTitle = ihEscapeAttr(symbol.name || "自定义");
     const button = $(
-      `<button id="${buttonId}" class="input-helper-btn custom-symbol-button" title="${symbol.name}" data-norefocus="true" data-index="${index}">${displayContent}</button>`,
+      `<button id="${buttonId}" class="input-helper-btn custom-symbol-button" title="${safeTitle}" data-norefocus="true" data-index="${index}">${displayContent}</button>`,
     );
     $("#input_helper_toolbar").append(button);
     bindButtonAction(button, `custom_${index}`);
@@ -6101,7 +8534,11 @@ function loadCustomSymbolButtons() {
       insertCustomSymbol(customSymbols[index]);
   });
   renderSettingsPanel();
+  renderFloatingPanelSettings();
   buildToolbar();
+  if (floatingPanelController._panelEl && getSettings().floatingPanel.enabled) {
+    floatingPanelController.refreshPanelOnly();
+  }
 }
 
 function editCustomSymbol(index) {
@@ -6180,9 +8617,11 @@ function deleteCustomSymbol(index) {
     }
   }
   for (const k of Object.keys(getSettings().buttons)) {
+    if (/^custom_\d+$/.test(k)) continue;
     if (newButtons[k] === undefined) newButtons[k] = getSettings().buttons[k];
   }
   for (const k of Object.keys(getSettings().shortcuts)) {
+    if (/^custom_\d+$/.test(k)) continue;
     if (newShortcuts[k] === undefined)
       newShortcuts[k] = getSettings().shortcuts[k];
   }
@@ -6199,6 +8638,12 @@ function deleteCustomSymbol(index) {
 
 function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
   const currentIcon = existingSymbol?.icon || "";
+  const safeName = ihEscapeAttr(existingSymbol ? existingSymbol.name : "");
+  const safeSymbol = ihEscapeHtml(existingSymbol ? existingSymbol.symbol : "");
+  const safeDisplay = ihEscapeAttr(
+    existingSymbol ? existingSymbol.display : "",
+  );
+  const safeCurrentIcon = ihEscapeAttr(currentIcon);
   const { overlay, escHandler } = createDialogOverlay();
   const content = $(`
         <div class="custom-symbol-dialog-content">
@@ -6209,21 +8654,28 @@ function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
             <div class="custom-symbol-form">
                 <div class="form-group">
                     <label>名称</label>
-                    <input type="text" id="custom_symbol_name" value="${existingSymbol ? existingSymbol.name : ""}" placeholder="设置面板标签和悬停提示">
+                    <input type="text" id="custom_symbol_name" value="${safeName}" placeholder="设置面板标签和悬停提示">
                 </div>
                 <div class="form-group form-group-textarea">
                     <label>插入内容</label>
-                    <textarea id="custom_symbol_symbol" rows="4" placeholder="点击后实际插入的文本，支持多行段落">${existingSymbol ? existingSymbol.symbol : ""}</textarea>
+                    <textarea id="custom_symbol_symbol" rows="4" placeholder="点击后实际插入的文本，支持多行段落">${safeSymbol}</textarea>
                 </div>
                 <div class="form-group">
                     <label>按钮显示</label>
-                    <input type="text" id="custom_symbol_display" value="${existingSymbol ? existingSymbol.display : ""}" placeholder="按钮上显示的文字（推荐简短）">
+                    <input type="text" id="custom_symbol_display" value="${safeDisplay}" placeholder="按钮上显示的文字（推荐简短）">
                     <button class="ih-icon-picker-btn" id="custom_symbol_pick_icon" title="选择 FA 图标">
-                        ${currentIcon ? `<i class="${currentIcon}"></i>` : '<i class="fa-solid fa-icons"></i>'} 图标
+                        ${currentIcon ? `<i class="${safeCurrentIcon}"></i>` : '<i class="fa-solid fa-icons"></i>'} 图标
                     </button>
                 </div>
 
-                <input type="hidden" id="custom_symbol_icon" value="${currentIcon}" />
+                <input type="hidden" id="custom_symbol_icon" value="${safeCurrentIcon}" />
+                <div class="form-group">
+                    <label>选中包裹</label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;flex:1;">
+                        <input type="checkbox" id="custom_symbol_wrap_mode" ${existingSymbol?.wrapMode ? "checked" : ""} />
+                        <span style="opacity:0.8;">选中文本时按光标位置切成左右两半包裹</span>
+                    </label>
+                </div>
                 <div class="form-group">
                     <label>光标位置</label>
                     <select id="custom_symbol_cursor">
@@ -6279,7 +8731,8 @@ function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
       alert("请输入名称和插入内容！");
       return;
     }
-    const symbolObj = { name, symbol, display, icon, cursorPos };
+    const wrapMode = $("#custom_symbol_wrap_mode").prop("checked");
+    const symbolObj = { name, symbol, display, icon, cursorPos, wrapMode };
     if (editIndex >= 0) getSettings().customSymbols[editIndex] = symbolObj;
     else {
       if (!getSettings().customSymbols) getSettings().customSymbols = [];
@@ -6323,6 +8776,7 @@ function setupShortcutInputs() {
       e.preventDefault();
       let keys = [];
       if (e.ctrlKey) keys.push("Ctrl");
+      if (e.metaKey) keys.push("Meta");
       if (e.altKey) keys.push("Alt");
       if (e.shiftKey) keys.push("Shift");
       if (!["Control", "Alt", "Shift", "Meta", "Escape"].includes(e.key)) {
@@ -6347,7 +8801,7 @@ function setupShortcutInputs() {
           toastr.info(
             `快捷键 ${shortcutString} 已从"${getButtonLabel(key)}"改绑到"${getButtonLabel(sk)}"`,
             "",
-            { timeOut: 2000 },
+            { timeOut: 1500 },
           );
         }
       }
@@ -6373,6 +8827,7 @@ function handleGlobalShortcuts(e) {
     return;
   let keys = [];
   if (e.ctrlKey) keys.push("Ctrl");
+  if (e.metaKey) keys.push("Meta");
   if (e.altKey) keys.push("Alt");
   if (e.shiftKey) keys.push("Shift");
   if (e.key && !["Control", "Alt", "Shift", "Meta"].includes(e.key)) {
@@ -6583,10 +9038,18 @@ async function loadSettings() {
     s.confirmDangerousActions = false;
   if (s.toolbarPinned === undefined) s.toolbarPinned = false;
   if (s.autoScrollSpeed === undefined) s.autoScrollSpeed = 50;
+  if (s.pagingScrollRatio === undefined) s.pagingScrollRatio = 0.93;
   if (s.autoScrollToAiOnStream === undefined) s.autoScrollToAiOnStream = false;
   if (s.lockScrollOnGeneration === undefined) s.lockScrollOnGeneration = false;
   if (s.twoRowMode === undefined) s.twoRowMode = false;
   if (s.twoRowOrder === undefined) s.twoRowOrder = "input-first";
+  if (s.bottomNavMode === undefined) s.bottomNavMode = false;
+  bottomNavController.active = !!s.bottomNavMode;
+  $(
+    "#input_bottom_nav_mode_btn, " +
+      ".ih-folder-dropdown-portal [data-button-key='bottomNavMode'], " +
+      ".ih-floating-panel [data-button-key='bottomNavMode']",
+  ).toggleClass("input-helper-btn-active", bottomNavController.active);
   if (!s.floatingPanel) s.floatingPanel = { ...defaultSettings.floatingPanel };
   if (s.floatingPanel.enabled === undefined) s.floatingPanel.enabled = false;
   if (s.floatingPanel.orientation === undefined)
@@ -6607,6 +9070,9 @@ async function loadSettings() {
   if (s.floatingPanel.followTheme === undefined)
     s.floatingPanel.followTheme = true;
   if (s.floatingPanel.buttonSize === undefined) s.floatingPanel.buttonSize = 12;
+  if (s.floatingPanel.panelWidth === undefined) s.floatingPanel.panelWidth = 0;
+  if (s.floatingPanel.panelMaxHeight === undefined)
+    s.floatingPanel.panelMaxHeight = 0;
   if (!s.floatingPanel.ballProfiles) s.floatingPanel.ballProfiles = [];
   if (s.floatingPanel.currentProfileIndex === undefined)
     s.floatingPanel.currentProfileIndex = -1;
@@ -6619,9 +9085,18 @@ async function loadSettings() {
       buttons: [...(s.floatingPanel.buttons || [])],
       orientation: s.floatingPanel.orientation || "vertical",
       buttonSize: s.floatingPanel.buttonSize || 12,
+      panelWidth: s.floatingPanel.panelWidth || 0,
+      panelMaxHeight: s.floatingPanel.panelMaxHeight || 0,
     });
     s.floatingPanel.currentPanelProfileIndex = 0;
   }
+  s.floatingPanel.panelProfiles.forEach((profile) => {
+    if (profile.panelWidth === undefined) profile.panelWidth = 0;
+    if (profile.panelMaxHeight === undefined) profile.panelMaxHeight = 0;
+    if (profile.buttonSize === undefined) profile.buttonSize = 12;
+    if (profile.orientation === undefined) profile.orientation = "vertical";
+    if (!Array.isArray(profile.buttons)) profile.buttons = [];
+  });
   if (s.floatingPanel.collapsed === undefined) s.floatingPanel.collapsed = true;
   if (s.floatingPanel.autoHide === undefined) s.floatingPanel.autoHide = false;
   s.folders.forEach((folder) => {
@@ -6635,7 +9110,13 @@ async function loadSettings() {
   $("#enable_confirm_dangerous").prop("checked", s.confirmDangerousActions);
   $("#enable_toolbar_pinned").prop("checked", s.toolbarPinned);
   $("#auto_scroll_speed").val(s.autoScrollSpeed);
-  $("#auto_scroll_speed_val").text(s.autoScrollSpeed);
+  $("#auto_scroll_speed_input").val(s.autoScrollSpeed);
+  $("#paging_scroll_ratio").val(
+    Math.round((s.pagingScrollRatio || 0.93) * 100),
+  );
+  $("#paging_scroll_ratio_input").val(
+    Math.round((s.pagingScrollRatio || 0.93) * 100),
+  );
   $("#enable_auto_scroll_ai_stream").prop("checked", s.autoScrollToAiOnStream);
   $("#enable_lock_scroll_generation").prop("checked", s.lockScrollOnGeneration);
   $("#enable_two_row_mode").prop("checked", s.twoRowMode);
@@ -6663,6 +9144,8 @@ function setupTextareaFocusTracking() {
   });
   textarea.addEventListener("touchstart", function () {
     userInitiatedFocus = true;
+    if (!$("#send_form").hasClass("textarea-focused"))
+      $("#send_form").addClass("textarea-focused");
   });
   textarea.addEventListener("focus", function () {
     if (userInitiatedFocus) $("#send_form").addClass("textarea-focused");
@@ -6676,10 +9159,6 @@ function setupTextareaFocusTracking() {
       if (getSettings().toolbarPinned) return;
       $("#send_form").removeClass("textarea-focused");
     }, 150);
-  });
-  textarea.addEventListener("touchstart", function () {
-    if (!$("#send_form").hasClass("textarea-focused"))
-      $("#send_form").addClass("textarea-focused");
   });
   textarea.addEventListener("click", function () {
     if (!$("#send_form").hasClass("textarea-focused"))
@@ -6708,13 +9187,28 @@ function setupTextareaFocusTracking() {
 }
 
 function setupInputTracking() {
-  const textarea = getMessageInput();
-  if (!textarea.length) return;
-  textarea.off("input.inputHelper");
-  textarea.on("input.inputHelper", function () {
-    historyManager.onInput();
-    if (shiftMode.active) shiftMode.deactivate();
-  });
+  $(document).off(
+    "beforeinput.inputHelper",
+    "#send_textarea, #prompt_textarea",
+  );
+  $(document).off("input.inputHelper", "#send_textarea, #prompt_textarea");
+
+  $(document).on(
+    "beforeinput.inputHelper",
+    "#send_textarea, #prompt_textarea",
+    function () {
+      historyManager.onBeforeInput();
+    },
+  );
+
+  $(document).on(
+    "input.inputHelper",
+    "#send_textarea, #prompt_textarea",
+    function () {
+      historyManager.onInput();
+      if (shiftMode.active) shiftMode.deactivate();
+    },
+  );
 }
 
 function setupGlobalDropdownClose() {
@@ -6794,6 +9288,47 @@ function setupGlobalFocusTracking() {
       }
       _lastFocusedEditable = el;
       markExternalFocused();
+      historyManager.ensureExternalHistory(el);
+      historyManager.updateButtons();
+      if (shiftMode.active) {
+        const cmView = getCodeMirrorView(el);
+        const nextTarget = cmView ? cmView.contentDOM : el;
+        if (shiftMode._targetEl && shiftMode._targetEl !== nextTarget) {
+          shiftMode.deactivate(true);
+          setTimeout(() => {
+            if (
+              el.ownerDocument &&
+              el.ownerDocument.contains(el) &&
+              !shouldIgnoreFocusedElement(el)
+            ) {
+              _lastFocusedEditable = el;
+              shiftMode.activate(true);
+            }
+          }, 0);
+        }
+      }
+      if (findReplaceController.active && findReplaceController._barEl) {
+        setTimeout(() => {
+          try {
+            if (!findReplaceController.active) return;
+            if (!el.ownerDocument || !el.ownerDocument.contains(el)) return;
+            if (shouldIgnoreFocusedElement(el)) return;
+            findReplaceController._doSearch();
+          } catch (e) {}
+        }, 0);
+      }
+    },
+    true,
+  );
+  document.addEventListener(
+    "beforeinput",
+    function (e) {
+      const el = e.target;
+      if (!isEditableElement(el)) return;
+      if (shouldIgnoreFocusedElement(el)) return;
+      if (el === sendTextarea) return;
+      if (el.isContentEditable) return;
+      historyManager.onExternalBeforeInput(el);
     },
     true,
   );
@@ -6829,6 +9364,18 @@ function setupGlobalFocusTracking() {
           if (!isEditableElement(el)) return;
           _lastFocusedEditable = el;
           markExternalFocused();
+          historyManager.ensureExternalHistory(el);
+          historyManager.updateButtons();
+        },
+        true,
+      );
+      doc.addEventListener(
+        "beforeinput",
+        function (e) {
+          const el = e.target;
+          if (!isEditableElement(el)) return;
+          if (el.isContentEditable) return;
+          historyManager.onExternalBeforeInput(el);
         },
         true,
       );
@@ -6994,21 +9541,63 @@ function setupNavFlagClearOnUserScroll() {
 
 function setupAutoScrollPauseOnUserScroll() {
   let userScrollTimeout = null;
-  const pauseAndScheduleResume = () => {
+  let pausedEl = null;
+  let pausedTop = 0;
+
+  const pauseAndScheduleResume = (e) => {
     if (!autoScrollController.active) return;
+
+    const currentEl =
+      autoScrollController._chatEl || findActiveScrollContainer();
+    if (!currentEl) return;
+
+    if (
+      e &&
+      e.target &&
+      currentEl !== e.target &&
+      !currentEl.contains(e.target)
+    ) {
+      return;
+    }
+
+    pausedEl = currentEl;
+    pausedTop = currentEl.scrollTop;
+
     autoScrollController.pause();
+
     clearTimeout(userScrollTimeout);
     userScrollTimeout = setTimeout(() => {
+      if (
+        pausedEl &&
+        pausedEl.ownerDocument &&
+        pausedEl.ownerDocument.contains(pausedEl)
+      ) {
+        autoScrollController._chatEl = pausedEl;
+
+        if (pausedEl.scrollTop === 0 && pausedTop > 20) {
+          pausedEl.scrollTop = pausedTop;
+        }
+
+        autoScrollController._lastKnownScrollEl = pausedEl;
+        autoScrollController._lastKnownScrollTop = Math.max(
+          pausedEl.scrollTop,
+          pausedTop,
+        );
+      }
+
       autoScrollController.resume();
     }, 2000);
   };
-  $(document).on("wheel", "#chat", pauseAndScheduleResume);
-  const chatEl = document.getElementById("chat");
-  if (chatEl) {
-    chatEl.addEventListener("touchmove", pauseAndScheduleResume, {
-      passive: true,
-    });
-  }
+
+  document.addEventListener("wheel", pauseAndScheduleResume, {
+    passive: true,
+    capture: true,
+  });
+
+  document.addEventListener("touchmove", pauseAndScheduleResume, {
+    passive: true,
+    capture: true,
+  });
 }
 
 jQuery(async () => {
@@ -7103,6 +9692,12 @@ jQuery(async () => {
     );
     $("#input_helper_toolbar").append(enterDelBtn);
   }
+  if (!$("#input_multi_select_delete_btn").length) {
+    const multiDelBtn = $(
+      '<button id="input_multi_select_delete_btn" class="input-helper-btn" title="多选删除" data-norefocus="true"><i class="fa-solid fa-list-check"></i></button>',
+    );
+    $("#input_helper_toolbar").append(multiDelBtn);
+  }
   if (!$("#input_copy_text_btn").length) {
     const copyBtn = $(
       '<button id="input_copy_text_btn" class="input-helper-btn" title="复制" data-norefocus="true"><i class="fa-solid fa-copy"></i></button>',
@@ -7114,6 +9709,12 @@ jQuery(async () => {
       '<button id="input_paste_text_btn" class="input-helper-btn" title="粘贴" data-norefocus="true"><i class="fa-solid fa-paste"></i></button>',
     );
     $("#input_helper_toolbar").append(pasteBtn);
+  }
+  if (!$("#input_wrap_toggle_btn").length) {
+    const wrapBtn = $(
+      '<button id="input_wrap_toggle_btn" class="input-helper-btn" title="选中包裹模式" data-norefocus="true"><i class="fa-solid fa-object-group"></i></button>',
+    );
+    $("#input_helper_toolbar").append(wrapBtn);
   }
   if (!$("#input_chat_undo_btn").length) {
     const chatUndoBtn = $(
@@ -7251,16 +9852,45 @@ jQuery(async () => {
     getSettings().floatingPanel.position = { x: null, y: null };
     saveSettingsDebounced();
     floatingPanelController.refresh();
-    toastr.info("悬浮面板位置已重置", "", { timeOut: 1500 });
+    toastr.info("悬浮面板位置已重置", "", { timeOut: 1000 });
   });
   $(document).on("input", "#auto_scroll_speed", function () {
     const val = parseInt($(this).val());
     getSettings().autoScrollSpeed = val;
-    $("#auto_scroll_speed_val").text(val);
+    $("#auto_scroll_speed_input").val(val);
     saveSettingsDebounced();
     autoScrollController._speed = val;
   });
 
+  $(document).on("input change", "#auto_scroll_speed_input", function () {
+    let val = parseInt($(this).val());
+    if (isNaN(val)) val = 50;
+    val = Math.max(1, Math.min(500, val));
+    $(this).val(val);
+    getSettings().autoScrollSpeed = val;
+    $("#auto_scroll_speed").val(val);
+    saveSettingsDebounced();
+    autoScrollController._speed = val;
+  });
+
+  $(document).on("input", "#paging_scroll_ratio", function () {
+    let val = parseInt($(this).val());
+    if (isNaN(val)) val = 93;
+    val = Math.max(10, Math.min(200, val));
+    getSettings().pagingScrollRatio = val / 100;
+    $("#paging_scroll_ratio_input").val(val);
+    saveSettingsDebounced();
+  });
+
+  $(document).on("input change", "#paging_scroll_ratio_input", function () {
+    let val = parseInt($(this).val());
+    if (isNaN(val)) val = 93;
+    val = Math.max(10, Math.min(200, val));
+    $(this).val(val);
+    getSettings().pagingScrollRatio = val / 100;
+    $("#paging_scroll_ratio").val(Math.max(30, Math.min(120, val)));
+    saveSettingsDebounced();
+  });
   $("#add_custom_symbol_btn").on("click", function () {
     showCustomSymbolDialog();
   });
@@ -7307,23 +9937,55 @@ jQuery(async () => {
 
   try {
     let _themeChangeTimer = null;
-    const themeObserver = new MutationObserver(() => {
+    let _lastThemeRefreshTime = 0;
+    const themeObserver = new MutationObserver((mutations) => {
+      const relevant = mutations.some((m) => {
+        if (m.type === "attributes" && m.attributeName === "style") {
+          const tag = m.target.tagName;
+          if (tag === "HTML" || tag === "BODY") return true;
+          return false;
+        }
+        if (m.type === "childList") {
+          const isThemeRelated = (n) => {
+            if (!n.tagName) return false;
+            if (n.id === "ih-fa-icon-protection") return false;
+            if (n.tagName === "SCRIPT") return false;
+            if (n.tagName !== "STYLE" && n.tagName !== "LINK") return false;
+            if (n.id === "dynamic-styles") return true;
+            if (n.id === "dynamic-extension-styles") return true;
+            if (n.id === "custom-style") return true;
+            return false;
+          };
+          for (const n of m.addedNodes) if (isThemeRelated(n)) return true;
+          for (const n of m.removedNodes) if (isThemeRelated(n)) return true;
+        }
+        return false;
+      });
+      if (!relevant) return;
       clearTimeout(_themeChangeTimer);
       _themeChangeTimer = setTimeout(() => {
+        _lastThemeRefreshTime = Date.now();
+        _invalidateThemeSample();
         _cachedToolbarStyles = null;
         _cachedToolbarStylesTime = 0;
-        _invalidateThemeSample();
-        floatingPanelController.refresh();
+        if (floatingPanelController._isDragging) return;
+        floatingPanelController.syncTheme();
+        findReplaceController.syncTheme();
         updateToolbarMaxHeight();
         try {
           const _sp = document.querySelector(".input-helper-settings");
           if (_sp) syncDialogTheme(_sp, { skipBg: true });
         } catch (e) {}
-      }, 300);
+      }, 600);
     });
     themeObserver.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["style"],
+    });
+    themeObserver.observe(document.head, {
+      childList: true,
+      subtree: true,
+      characterData: true,
     });
   } catch (e) {
     console.warn("快捷工具栏: 主题监听初始化失败", e);
@@ -7364,7 +10026,10 @@ jQuery(async () => {
   }
   setupVolumeKeyPaging();
   try {
-    if (typeof eventOn === "function" && typeof iframe_events !== "undefined") {
+    if (
+      typeof window.eventOn === "function" &&
+      typeof window.iframe_events !== "undefined"
+    ) {
       eventOn(
         iframe_events.MESSAGE_IFRAME_RENDER_ENDED,
         function (iframe_name) {
@@ -7385,6 +10050,18 @@ jQuery(async () => {
                         .getElementById("send_form")
                         .classList.add("ih-external-focused");
                     }
+                    historyManager.ensureExternalHistory(el);
+                    historyManager.updateButtons();
+                  },
+                  true,
+                );
+                doc.addEventListener(
+                  "beforeinput",
+                  function (e) {
+                    const el = e.target;
+                    if (!isEditableElement(el)) return;
+                    if (el.isContentEditable) return;
+                    historyManager.onExternalBeforeInput(el);
                   },
                   true,
                 );
@@ -7460,9 +10137,16 @@ jQuery(async () => {
   });
 
   try {
+    if (event_types.CHARACTER_EDITED) {
+      eventSource.on(event_types.CHARACTER_EDITED, function () {
+        historyManager._sharedHistoriesByKey.clear();
+      });
+    }
     eventSource.on(event_types.CHAT_CHANGED, function () {
       historyManager.clear();
+      historyManager._sharedHistoriesByKey.clear();
       chatUndoManager.clear();
+
       if (shiftMode.active) shiftMode.deactivate();
       if (autoScrollController.active) autoScrollController.stop();
       if (findReplaceController.active) findReplaceController.close();
@@ -7472,12 +10156,19 @@ jQuery(async () => {
       messageNavigation._lastNavTime = 0;
       messageNavigation._pendingJump = null;
       setupInputTracking();
+      _lastFocusedEditable = null;
+      _lastFocusedForScroll = null;
+      _savedRange = null;
       floatingPanelController.refresh();
+      _cachedMessageInput = null;
+      setTimeout(() => {
+        historyManager.init();
+      }, 200);
     });
 
     eventSource.on(event_types.GENERATION_STARTED, function (type) {
       autoScrollController.setStreaming(true);
-      streamScrollController.onStreamStart();
+      streamScrollController.onStreamStart(type);
       scrollLockController.onGenerationStart(type);
     });
 
@@ -7498,15 +10189,11 @@ jQuery(async () => {
       streamScrollController.onMessageRendered();
     });
 
-    ["STREAM_TOKEN_RECEIVED", "SMOOTH_STREAM_TOKEN_RECEIVED"].forEach(
-      (evtName) => {
-        if (event_types[evtName]) {
-          eventSource.on(event_types[evtName], function () {
-            streamScrollController.onStreamToken();
-          });
-        }
-      },
-    );
+    if (event_types.STREAM_TOKEN_RECEIVED) {
+      eventSource.on(event_types.STREAM_TOKEN_RECEIVED, function () {
+        streamScrollController.onStreamToken();
+      });
+    }
   } catch (e) {
     console.warn("快捷工具栏: 无法监听事件", e);
   }

@@ -1,156 +1,253 @@
 <div class="input-helper-settings">
-    <div class="inline-drawer">
-        <div class="inline-drawer-toggle inline-drawer-header">
-            <b>快捷工具栏</b>
-            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-        </div>
-        <div class="inline-drawer-content">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <button id="ih_open_help_btn" class="ih-hm-btn" style="padding:3px 10px;font-size:11px;" title="使用说明">
-                    <i class="fa-solid fa-circle-question"></i> 帮助
-                </button>
-            </div>
-
-            <div class="ih-section ih-section-main">
-                <div class="ih-switch-row">
-                    <label class="ih-switch-label" for="enable_input_helper">
-                        <i class="fa-solid fa-keyboard"></i>
-                        启用快捷工具栏
-                    </label>
-                    <label class="ih-toggle">
-                        <input id="enable_input_helper" type="checkbox" />
-                        <span class="ih-toggle-slider"></span>
-                    </label>
-                </div>
-                <div class="ih-switch-row">
-                    <label class="ih-switch-label" for="enable_confirm_dangerous">
-                        <i class="fa-solid fa-triangle-exclamation"></i>
-                        删除操作前弹窗确认
-                    </label>
-                    <label class="ih-toggle">
-                        <input id="enable_confirm_dangerous" type="checkbox" />
-                        <span class="ih-toggle-slider"></span>
-                    </label>
-                </div>
-                <div class="ih-switch-row">
-                    <label class="ih-switch-label" for="enable_toolbar_pinned">
-                        <i class="fa-solid fa-thumbtack"></i>
-                        工具栏固定展开
-                    </label>
-                    <label class="ih-toggle">
-                        <input id="enable_toolbar_pinned" type="checkbox" />
-                        <span class="ih-toggle-slider"></span>
-                    </label>
-                </div>
-                <div class="ih-switch-row">
-                    <label class="ih-switch-label" for="enable_auto_scroll_ai_stream">
-                        <i class="fa-solid fa-bolt"></i>
-                        非流自动跳转至AI消息顶部
-                    </label>
-                    <label class="ih-toggle">
-                        <input id="enable_auto_scroll_ai_stream" type="checkbox" />
-                        <span class="ih-toggle-slider"></span>
-                    </label>
-                </div>
-                <div class="ih-switch-row">
-                    <label class="ih-switch-label" for="enable_two_row_mode">
-                        <i class="fa-solid fa-table-columns"></i>
-                        双栏模式
-                    </label>
-                    <label class="ih-toggle">
-                        <input id="enable_two_row_mode" type="checkbox" />
-                        <span class="ih-toggle-slider"></span>
-                    </label>
-                </div>
-                <div class="ih-switch-row ih-speed-row">
-                    <label class="ih-switch-label">
-                        <i class="fa-solid fa-gauge-high"></i>
-                        自动滚动速度
-                    </label>
-                    <div class="ih-speed-control">
-                        <input id="auto_scroll_speed" type="range" min="10" max="200" step="5" value="50" />
-                        <span id="auto_scroll_speed_val">50</span><span class="ih-speed-unit">px/s</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="ih-section">
-                <div class="ih-section-header ih-collapsible" data-target="button_management_body">
-                    <i class="fa-solid fa-sliders"></i>
-                    按钮管理
-                    <i class="fa-solid fa-chevron-down ih-collapse-icon"></i>
-                </div>
-                <div class="ih-section-desc">
-                    拖动 调整顺序 · 勾选控制显示 · 点击快捷键输入框设置热键
-                </div>
-                <div id="button_management_body" class="ih-collapsible-body">
-                    <div id="integrated_button_settings"></div>
-                </div>
-            </div>
-
-            <div class="ih-section">
-                <div class="ih-section-header">
-                    <i class="fa-solid fa-ghost"></i>
-                    消息隐藏管理
-                    <button id="open_hide_manager_btn" class="ih-hm-btn" style="margin-left:auto;padding:3px 10px;font-size:11px;">
-                        <i class="fa-solid fa-ghost"></i> 打开
-                    </button>
-                </div>
-                <div class="ih-section-desc">
-                    管理聊天消息在 AI 提示词中的隐藏/显示状态，隐藏的消息不会发送给 AI
-                </div>
-            </div>
-
-            <div class="ih-section">
-                <div class="ih-section-header">
-                    <i class="fa-solid fa-puzzle-piece"></i>
-                    自定义内容
-                    <button id="add_custom_symbol_btn" class="ih-hm-btn" style="margin-left:auto;padding:3px 10px;font-size:11px;">
-                        <i class="fa-solid fa-plus"></i> 添加
-                    </button>
-                </div>
-                <div class="ih-section-desc">
-                    添加自己需要的符号按钮，支持自定义插入内容、显示文字和 FA 图标
-                </div>
-            </div>
-
-            <div class="ih-section">
-                <div class="ih-section-header ih-collapsible" data-target="folder_settings_body">
-                    <i class="fa-solid fa-folder"></i>
-                    按钮分组
-                    <i class="fa-solid fa-chevron-down ih-collapse-icon"></i>
-                </div>
-                <div class="ih-section-desc">
-                    将按钮收纳到文件夹中，工具栏只显示一个折叠按钮，点击展开
-                </div>
-                <div id="folder_settings_body" class="ih-collapsible-body">
-                    <div id="folder_settings_list"></div>
-                    <button id="add_folder_btn" class="input-helper-btn ih-add-btn">
-                        <i class="fa-solid fa-folder-plus"></i> 新建文件夹
-                    </button>
-                </div>
-            </div>
-
-            <div class="ih-section">
-                <div class="ih-section-header ih-collapsible" data-target="ih_floating_panel_body">
-                    <i class="fa-solid fa-circle-dot"></i>
-                    悬浮面板
-                    <button id="ih_fp_reset_pos_header" class="ih-hm-btn ih-header-toggle" style="margin-left:auto;padding:3px 8px;font-size:11px;" title="重置悬浮球/面板位置">
-                        <i class="fa-solid fa-arrows-to-dot"></i>
-                    </button>
-                    <label class="ih-toggle ih-header-toggle" style="margin-left:6px;">
-                        <input id="enable_floating_panel" type="checkbox" />
-                        <span class="ih-toggle-slider"></span>
-                    </label>
-                    <i class="fa-solid fa-chevron-down ih-collapse-icon" style="margin-left:8px;"></i>
-                </div>
-                <div class="ih-section-desc">
-                    启用悬浮球/面板，放置常用的导航和功能按钮。面板中的按钮不会在主工具栏重复显示。支持自定义悬浮球样式（GIF等）。
-                </div>
-                <div id="ih_floating_panel_body" class="ih-collapsible-body">
-                    <div id="ih_floating_panel_settings"></div>
-                </div>
-            </div>
-        </div>
+  <div class="inline-drawer">
+    <div class="inline-drawer-toggle inline-drawer-header">
+      <b>快捷工具栏</b>
+      <div
+        class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
+      ></div>
     </div>
+    <div class="inline-drawer-content">
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 6px;
+        "
+      >
+        <button
+          id="ih_open_help_btn"
+          class="ih-hm-btn"
+          style="padding: 3px 10px; font-size: 11px"
+          title="使用说明"
+        >
+          <i class="fa-solid fa-circle-question"></i> 帮助
+        </button>
+      </div>
+
+      <div class="ih-section ih-section-main">
+        <div class="ih-switch-row">
+          <label class="ih-switch-label" for="enable_input_helper">
+            <i class="fa-solid fa-keyboard"></i>
+            启用快捷工具栏
+          </label>
+          <label class="ih-toggle">
+            <input id="enable_input_helper" type="checkbox" />
+            <span class="ih-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="ih-switch-row">
+          <label class="ih-switch-label" for="enable_confirm_dangerous">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            删除操作前弹窗确认
+          </label>
+          <label class="ih-toggle">
+            <input id="enable_confirm_dangerous" type="checkbox" />
+            <span class="ih-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="ih-switch-row">
+          <label class="ih-switch-label" for="enable_toolbar_pinned">
+            <i class="fa-solid fa-thumbtack"></i>
+            工具栏固定展开
+          </label>
+          <label class="ih-toggle">
+            <input id="enable_toolbar_pinned" type="checkbox" />
+            <span class="ih-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="ih-switch-row">
+          <label class="ih-switch-label" for="enable_auto_scroll_ai_stream">
+            <i class="fa-solid fa-bolt"></i>
+            非流自动跳转至AI消息顶部
+          </label>
+          <label class="ih-toggle">
+            <input id="enable_auto_scroll_ai_stream" type="checkbox" />
+            <span class="ih-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="ih-switch-row">
+          <label class="ih-switch-label" for="enable_two_row_mode">
+            <i class="fa-solid fa-table-columns"></i>
+            双栏模式
+          </label>
+          <label class="ih-toggle">
+            <input id="enable_two_row_mode" type="checkbox" />
+            <span class="ih-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="ih-switch-row ih-speed-row">
+          <label class="ih-switch-label">
+            <i class="fa-solid fa-book-open"></i>
+            翻页滚动高度
+          </label>
+          <div class="ih-speed-control">
+            <input
+              id="paging_scroll_ratio"
+              type="range"
+              min="30"
+              max="120"
+              step="5"
+              value="93"
+            />
+            <input
+              type="number"
+              id="paging_scroll_ratio_input"
+              min="10"
+              max="200"
+              value="93"
+              style="
+                width: 54px;
+                padding: 3px 4px;
+                border: 1px solid var(--SmartThemeBorderColor);
+                border-radius: 4px;
+                background: var(--SmartThemeBlurTintColor);
+                color: var(--SmartThemeBodyColor);
+                font-size: 11px;
+                text-align: center;
+                margin-left: 4px;
+              "
+            /><span class="ih-speed-unit">%</span>
+          </div>
+        </div>
+        <div class="ih-switch-row ih-speed-row">
+          <label class="ih-switch-label">
+            <i class="fa-solid fa-gauge-high"></i>
+            自动滚动速度
+          </label>
+          <div class="ih-speed-control">
+            <input
+              id="auto_scroll_speed"
+              type="range"
+              min="10"
+              max="200"
+              step="5"
+              value="50"
+            />
+            <input
+              type="number"
+              id="auto_scroll_speed_input"
+              min="1"
+              max="500"
+              value="50"
+              style="
+                width: 54px;
+                padding: 3px 4px;
+                border: 1px solid var(--SmartThemeBorderColor);
+                border-radius: 4px;
+                background: var(--SmartThemeBlurTintColor);
+                color: var(--SmartThemeBodyColor);
+                font-size: 11px;
+                text-align: center;
+                margin-left: 4px;
+              "
+            /><span class="ih-speed-unit">px/s</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ih-section">
+        <div
+          class="ih-section-header ih-collapsible"
+          data-target="button_management_body"
+        >
+          <i class="fa-solid fa-sliders"></i>
+          按钮管理
+          <i class="fa-solid fa-chevron-down ih-collapse-icon"></i>
+        </div>
+        <div class="ih-section-desc">
+          拖动 调整顺序 · 勾选控制显示 · 点击快捷键输入框设置热键
+        </div>
+        <div id="button_management_body" class="ih-collapsible-body">
+          <div id="integrated_button_settings"></div>
+        </div>
+      </div>
+
+      <div class="ih-section">
+        <div class="ih-section-header">
+          <i class="fa-solid fa-ghost"></i>
+          消息隐藏管理
+          <button
+            id="open_hide_manager_btn"
+            class="ih-hm-btn"
+            style="margin-left: auto; padding: 3px 10px; font-size: 11px"
+          >
+            <i class="fa-solid fa-ghost"></i> 打开
+          </button>
+        </div>
+        <div class="ih-section-desc">
+          管理聊天消息在 AI 提示词中的隐藏/显示状态，隐藏的消息不会发送给 AI
+        </div>
+      </div>
+
+      <div class="ih-section">
+        <div class="ih-section-header">
+          <i class="fa-solid fa-puzzle-piece"></i>
+          自定义内容
+          <button
+            id="add_custom_symbol_btn"
+            class="ih-hm-btn"
+            style="margin-left: auto; padding: 3px 10px; font-size: 11px"
+          >
+            <i class="fa-solid fa-plus"></i> 添加
+          </button>
+        </div>
+        <div class="ih-section-desc">
+          添加自己需要的符号按钮，支持自定义插入内容、显示文字和 FA 图标
+        </div>
+      </div>
+
+      <div class="ih-section">
+        <div
+          class="ih-section-header ih-collapsible"
+          data-target="folder_settings_body"
+        >
+          <i class="fa-solid fa-folder"></i>
+          按钮分组
+          <i class="fa-solid fa-chevron-down ih-collapse-icon"></i>
+        </div>
+        <div class="ih-section-desc">
+          将按钮收纳到文件夹中，工具栏只显示一个折叠按钮，点击展开
+        </div>
+        <div id="folder_settings_body" class="ih-collapsible-body">
+          <div id="folder_settings_list"></div>
+          <button id="add_folder_btn" class="input-helper-btn ih-add-btn">
+            <i class="fa-solid fa-folder-plus"></i> 新建文件夹
+          </button>
+        </div>
+      </div>
+
+      <div class="ih-section">
+        <div
+          class="ih-section-header ih-collapsible"
+          data-target="ih_floating_panel_body"
+        >
+          <i class="fa-solid fa-circle-dot"></i>
+          悬浮面板
+          <button
+            id="ih_fp_reset_pos_header"
+            class="ih-hm-btn ih-header-toggle"
+            style="margin-left: auto; padding: 3px 8px; font-size: 11px"
+            title="重置悬浮球/面板位置"
+          >
+            <i class="fa-solid fa-arrows-to-dot"></i>
+          </button>
+          <label class="ih-toggle ih-header-toggle" style="margin-left: 6px">
+            <input id="enable_floating_panel" type="checkbox" />
+            <span class="ih-toggle-slider"></span>
+          </label>
+          <i
+            class="fa-solid fa-chevron-down ih-collapse-icon"
+            style="margin-left: 8px"
+          ></i>
+        </div>
+        <div class="ih-section-desc">
+          启用悬浮球/面板，放置常用的导航和功能按钮。面板中的按钮不会在主工具栏重复显示。支持自定义悬浮球样式（GIF等）。
+        </div>
+        <div id="ih_floating_panel_body" class="ih-collapsible-body">
+          <div id="ih_floating_panel_settings"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>

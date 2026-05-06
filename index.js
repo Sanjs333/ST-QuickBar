@@ -121,7 +121,7 @@ const BUTTON_DEFS = {
     text: null,
   },
   multiSelectDelete: {
-    label: "多选删除",
+    label: "消息管理",
     icon: "fa-solid fa-list-check",
     text: null,
   },
@@ -881,10 +881,20 @@ function doMultiSelectDelete() {
 
   const content = $(`
     <div class="ih-hide-manager-content" style="width:520px;max-width:94%;">
-      <h3><i class="fa-solid fa-trash-can"></i> 多选删除消息</h3>
+      <h3><i class="fa-solid fa-list-check"></i> 消息管理</h3>
       <div class="ih-hm-status">
         <i class="fa-solid fa-circle-info"></i>
-        <span>勾选要删除的消息（可任意选不连续的楼层），共 ${chat.length} 条</span>
+        <span>勾选要删除消息，或在下方输入楼层进行移动，共 ${chat.length} 条</span>
+      </div>
+      <div class="ih-hm-group" style="padding:6px 0;border-bottom:1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 35%, transparent);margin-bottom:8px;">
+        <div class="ih-hm-group-label">移动楼层</div>
+        <div class="ih-hm-row">
+          <input type="number" id="ih_msd_move_from" class="ih-hm-input" placeholder="从" min="0" max="${chat.length - 1}" />
+          <span class="ih-hm-sep">→</span>
+          <input type="number" id="ih_msd_move_to" class="ih-hm-input" placeholder="到" min="0" max="${chat.length - 1}" />
+          <button class="ih-hm-btn ih-hm-btn-ok" id="ih_msd_move_confirm"><i class="fa-solid fa-arrows-up-down"></i> 移动</button>
+          <span class="ih-hm-hint" style="font-size:10px;opacity:0.55;">把"从"楼层移到"到"楼层位置</span>
+        </div>
       </div>
       <div class="ih-hm-row" style="margin-bottom:8px;">
         <button class="ih-hm-btn" id="ih_msd_select_all"><i class="fa-solid fa-check-double"></i> 全选</button>
@@ -937,6 +947,50 @@ function doMultiSelectDelete() {
     updateCount();
   });
   content.on("change", ".ih-msd-list input[type='checkbox']", updateCount);
+  content.find("#ih_msd_move_confirm").on("click", async () => {
+    const fromVal = content.find("#ih_msd_move_from").val();
+    const toVal = content.find("#ih_msd_move_to").val();
+    if (fromVal === "" || toVal === "") {
+      toastr.warning("请输入起始和目标楼层", "", { timeOut: 1200 });
+      return;
+    }
+    const from = parseInt(fromVal);
+    const to = parseInt(toVal);
+    if (
+      isNaN(from) ||
+      isNaN(to) ||
+      from < 0 ||
+      to < 0 ||
+      from >= chat.length ||
+      to >= chat.length
+    ) {
+      toastr.error(`无效楼层（范围 0~${chat.length - 1}）`, "", {
+        timeOut: 1800,
+      });
+      return;
+    }
+    if (from === to) {
+      toastr.info("起始和目标是同一楼层哦", "", { timeOut: 1000 });
+      return;
+    }
+    if (getSettings().confirmDangerousActions) {
+      if (!confirm(`确定把楼层 ${from} 移动到楼层 ${to} 的位置吗？`)) return;
+    }
+    chatUndoManager.save();
+    const msg = chat.splice(from, 1)[0];
+    chat.splice(to, 0, msg);
+    closeDialog();
+    try {
+      await executeSlashCommandsWithOptions("/forcesave");
+      await executeSlashCommandsWithOptions("/chat-reload");
+      toastr.success(`已将楼层 ${from} 移动到 ${to}（可点撤回按钮还原）`, "", {
+        timeOut: 2000,
+      });
+    } catch (e) {
+      console.error("快捷工具栏: 移动楼层失败", e);
+      toastr.error("移动失败，请尝试撤回", "", { timeOut: 1500 });
+    }
+  });
 
   content.find("#ih_msd_confirm").on("click", async () => {
     const selected = [];
@@ -1990,20 +2044,30 @@ const findReplaceController = {
       this._liveSearchHandler = function () {
         if (!self2.active) return;
         if (self2._isReplacing) return;
-        const oldIdx = self2._currentMatchIndex;
+        const oldPos = self2._lastHighlightPos;
         self2._rebuildMatchesWithoutHighlight();
         if (self2._matches.length <= 0) {
           self2._currentMatchIndex = -1;
           self2._updateCount();
           return;
         }
-        if (oldIdx >= 0 && oldIdx < self2._matches.length) {
-          self2._currentMatchIndex = oldIdx;
+        if (oldPos !== null && oldPos !== undefined) {
+          let foundIdx = -1;
+          for (let i = 0; i < self2._matches.length; i++) {
+            if (self2._matches[i] >= oldPos) {
+              foundIdx = i;
+              break;
+            }
+          }
+          if (foundIdx === -1) {
+            self2._currentMatchIndex = self2._matches.length - 1;
+          } else {
+            self2._currentMatchIndex = foundIdx;
+          }
         } else {
-          self2._currentMatchIndex = 0;
+          self2._currentMatchIndex = -1;
         }
         self2._updateCount();
-        self2._highlightMatch(false);
       };
       this._targetTextarea[0].addEventListener(
         "input",
@@ -2015,20 +2079,30 @@ const findReplaceController = {
       this._cmInputHandler = function () {
         if (!self3.active) return;
         if (self3._isReplacing) return;
-        const oldIdx = self3._currentMatchIndex;
+        const oldPos = self3._lastHighlightPos;
         self3._rebuildMatchesWithoutHighlight();
         if (self3._matches.length <= 0) {
           self3._currentMatchIndex = -1;
           self3._updateCount();
           return;
         }
-        if (oldIdx >= 0 && oldIdx < self3._matches.length) {
-          self3._currentMatchIndex = oldIdx;
+        if (oldPos !== null && oldPos !== undefined) {
+          let foundIdx = -1;
+          for (let i = 0; i < self3._matches.length; i++) {
+            if (self3._matches[i] >= oldPos) {
+              foundIdx = i;
+              break;
+            }
+          }
+          if (foundIdx === -1) {
+            self3._currentMatchIndex = self3._matches.length - 1;
+          } else {
+            self3._currentMatchIndex = foundIdx;
+          }
         } else {
-          self3._currentMatchIndex = 0;
+          self3._currentMatchIndex = -1;
         }
         self3._updateCount();
-        self3._highlightMatch(false);
       };
       this._cmView.contentDOM.addEventListener("input", this._cmInputHandler);
     }
@@ -2238,6 +2312,7 @@ const findReplaceController = {
     } else if (!term && this._barEl) {
       this._hideNoMatchHint();
     }
+    this._hideSelectHint();
     this._updateCount();
   },
 
@@ -2343,7 +2418,14 @@ const findReplaceController = {
     }
     let _findBarH = 0;
     if (this._barEl && this._barEl[0]) {
-      _findBarH = this._barEl[0].offsetHeight || 0;
+      const _isCollapsed = this._barEl[0].classList.contains(
+        "ih-find-bar-collapsed",
+      );
+      if (_isCollapsed) {
+        _findBarH = 0;
+      } else {
+        _findBarH = this._barEl[0].offsetHeight || 0;
+      }
     }
     const desiredScroll =
       targetPixelTop - Math.max(textarea.clientHeight * 0.4, _findBarH + 20);
@@ -2357,6 +2439,7 @@ const findReplaceController = {
   _highlightMatch(shouldFocus) {
     if (shouldFocus === undefined) shouldFocus = true;
     if (this._currentMatchIndex < 0) return;
+    this._hideSelectHint();
     const pos = this._matches[this._currentMatchIndex];
     const len = this._searchTerm.length;
     if (this._cmView) {
@@ -2429,9 +2512,29 @@ const findReplaceController = {
     if (!this._barEl) return;
     this._barEl.find(".ih-find-hint").hide();
   },
+  _showSelectHint() {
+    if (!this._barEl) return;
+    let hint = this._barEl.find(".ih-find-select-hint");
+    if (!hint.length) {
+      hint = $(
+        `<div class="ih-find-select-hint ih-hm-status"><i class="fa-solid fa-circle-info"></i><span>当前未选中匹配项，按一下"下一个"按钮（↓）选中后再替换</span></div>`,
+      );
+      this._barEl.append(hint);
+      syncDialogTheme(this._barEl[0]);
+    }
+    hint.show();
+  },
 
+  _hideSelectHint() {
+    if (!this._barEl) return;
+    this._barEl.find(".ih-find-select-hint").hide();
+  },
   _doReplace() {
-    if (this._matches.length === 0 || this._currentMatchIndex < 0) return;
+    if (this._matches.length === 0) return;
+    if (this._currentMatchIndex < 0) {
+      this._showSelectHint();
+      return;
+    }
     if (!this._checkTarget()) return;
     const replaceWith = this._barEl.find(".ih-replace-input").val();
     const pos = this._matches[this._currentMatchIndex];
@@ -4340,6 +4443,7 @@ function doOpenQRAssistant() {
 
 function doRegenerateReply() {
   if (chat.length === 0) return;
+  chatUndoManager.save();
   Generate("regenerate");
 }
 

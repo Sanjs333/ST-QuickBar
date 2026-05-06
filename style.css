@@ -2324,3 +2324,70 @@ body.ih-find-active input::-moz-selection {
 .ih-find-bar-collapsed .ih-find-count-total {
   display: block;
 }
+
+.ih-find-bar-collapsed .ih-find-select-hint,
+.ih-find-bar-collapsed .ih-find-hint {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 3px 2px;
+  width: 34px;
+  max-width: 34px;
+  font-size: 11px;
+  line-height: 1.15;
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  border-radius: 0 8px 8px 0;
+  border-left: none;
+  border-top: 1px solid
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 25%,
+      var(--SmartThemeBorderColor)
+    );
+  border-right: 1px solid
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 25%,
+      var(--SmartThemeBorderColor)
+    );
+  border-bottom: 1px solid
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 25%,
+      var(--SmartThemeBorderColor)
+    );
+  box-shadow: 2px 0 6px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.2));
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  z-index: 0;
+  animation: ih-find-hint-slide-in 0.2s ease-out;
+}
+
+.ih-find-bar-collapsed .ih-find-select-hint i,
+.ih-find-bar-collapsed .ih-find-hint i {
+  writing-mode: horizontal-tb;
+  margin-bottom: 2px;
+}
+
+.ih-find-bar-collapsed .ih-find-select-hint span,
+.ih-find-bar-collapsed .ih-find-hint span {
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  letter-spacing: 2px;
+}
+
+@keyframes ih-find-hint-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 0.95;
+    transform: translateX(0);
+  }
+}

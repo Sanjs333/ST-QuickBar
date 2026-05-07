@@ -3778,6 +3778,7 @@ ${iReset} {
     height: auto !important;
     min-width: 0 !important;
     min-height: 0 !important;
+    display: inline-block !important;
 }
 ${css}`;
     let styleEl = document.getElementById("ih-fa-icon-protection");

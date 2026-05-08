@@ -36,12 +36,12 @@ const BUTTON_DEFS = {
     text: null,
   },
   prevAiMsg: {
-    label: "上一条AI消息",
+    label: "上一条消息",
     icon: "fa-solid fa-chevron-up",
     text: null,
   },
   nextAiMsg: {
-    label: "下一条AI消息",
+    label: "下一条消息",
     icon: "fa-solid fa-chevron-down",
     text: null,
   },
@@ -113,6 +113,11 @@ const BUTTON_DEFS = {
   bottomNavMode: {
     label: "底部跳转模式",
     icon: "fa-solid fa-angle-double-down",
+    text: null,
+  },
+  includeUserNavMode: {
+    label: "包含用户消息导航",
+    icon: "fa-solid fa-arrows-up-down",
     text: null,
   },
   enterDeleteMode: {
@@ -331,6 +336,7 @@ const defaultSettings = {
       k === "openQRAssistant" ||
       k === "switchPanelProfile" ||
       k === "bottomNavMode" ||
+      k === "includeUserNavMode" ||
       k === "enterDeleteMode" ||
       k === "multiSelectDelete" ||
       k === "copyText" ||
@@ -382,6 +388,7 @@ const shortcutFunctionMap = {
   openQRAssistant: doOpenQRAssistant,
   switchPanelProfile: () => switchToNextPanelProfile(),
   bottomNavMode: () => bottomNavController.toggle(),
+  includeUserNavMode: () => includeUserNavController.toggle(),
   wrapToggle: () => wrapModeController.toggle(),
   enterDeleteMode: () => doEnterDeleteMode(),
   multiSelectDelete: () => doMultiSelectDelete(),
@@ -616,6 +623,12 @@ const messageNavigation = {
   _pendingJump: null,
 
   _getAiMessages() {
+    if (
+      typeof includeUserNavController !== "undefined" &&
+      includeUserNavController.active
+    ) {
+      return $("#chat .mes");
+    }
     return $("#chat .mes[is_user='false']");
   },
 
@@ -847,8 +860,30 @@ const bottomNavController = {
     $(selector).toggleClass("input-helper-btn-active", this.active);
     toastr.info(
       this.active
-        ? "底部跳转模式已开启：上/下一条AI跳到消息底部"
+        ? "底部跳转模式已开启：上/下一条跳到消息底部"
         : "底部跳转模式已关闭：恢复跳到消息顶部",
+      "",
+      { timeOut: 1000 },
+    );
+  },
+};
+const includeUserNavController = {
+  active: false,
+  toggle() {
+    this.active = !this.active;
+    try {
+      getSettings().includeUserNavMode = this.active;
+      saveSettingsDebounced();
+    } catch (e) {}
+    const selector =
+      "#input_include_user_nav_mode_btn, " +
+      ".ih-folder-dropdown-portal [data-button-key='includeUserNavMode'], " +
+      ".ih-floating-panel [data-button-key='includeUserNavMode']";
+    $(selector).toggleClass("input-helper-btn-active", this.active);
+    toastr.info(
+      this.active
+        ? "包含用户消息导航已开启：上/下一条会包含用户消息"
+        : "包含用户消息导航已关闭：只在AI消息间跳转",
       "",
       { timeOut: 1000 },
     );
@@ -3950,6 +3985,7 @@ function getButtonIdFromKey(key) {
     openQRAssistant: "input_open_qr_assistant_btn",
     switchPanelProfile: "input_switch_panel_profile_btn",
     bottomNavMode: "input_bottom_nav_mode_btn",
+    includeUserNavMode: "input_include_user_nav_mode_btn",
     enterDeleteMode: "input_enter_delete_mode_btn",
     multiSelectDelete: "input_multi_select_delete_btn",
     copyText: "input_copy_text_btn",
@@ -5047,11 +5083,12 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-angles-up"></i> <b>跳转聊天顶部</b>：一键滚动到聊天最顶端</li>
     <li><i class="fa-solid fa-arrow-down"></i> <b>跳转聊天底部</b>：一键滚动到聊天最底端</li>
     <li><i class="fa-solid fa-arrow-up"></i> <b>跳转AI消息顶部</b>：滚动到最新一条AI回复的顶部</li>
-    <li><i class="fa-solid fa-chevron-up"></i>/<i class="fa-solid fa-chevron-down"></i> <b>上/下一条AI消息</b>：在AI消息之间快速跳转</li>
+    <li><i class="fa-solid fa-chevron-up"></i>/<i class="fa-solid fa-chevron-down"></i> <b>上/下一条AI消息</b>：在AI消息之间快速跳转。开启「包含用户消息导航」后会一并跳转到用户消息</li>
     <li><i class="fa-solid fa-book-open"></i> <b>翻页模式</b>：开启后，上/下导航变为翻页（也支持音量键翻页，需安装Key Mapper）；双击音量上键跳到最新AI消息顶部，双击音量下键跳到聊天底部。开启翻页模式后，点击聊天区域上半部分向上翻页，下半部分向下翻页。可以在设置里的「翻页滚动高度」调整每次翻页的距离，100% 约等于一屏高度，数值越小翻得越细，数值越大翻得越快。开启翻页模式时，如果悬浮球设置了"自动隐藏"会自动出现以方便操作，关闭翻页后再隐藏。</li>
     <li><i class="fa-solid fa-gauge-high"></i> <b>自动滚动</b>：以设定速度自动向下滚动，适合阅读长文；用户手动滚动时暂停，2秒后恢复</li>
     <li><i class="fa-solid fa-location-dot"></i> <b>跳转指定楼层</b>：输入楼层号直接跳转</li>
-    <li><i class="fa-solid fa-angle-double-down"></i> <b>底部跳转模式</b>：开启后，上/下一条AI消息跳转改为对齐消息底部，而不是顶部。适合从底部往上浏览的阅读习惯</li>
+    <li><i class="fa-solid fa-angle-double-down"></i> <b>底部跳转模式</b>：开启后，上/下一条消息跳转改为对齐消息底部，而不是顶部。适合从底部往上浏览的阅读习惯</li>
+    <li><i class="fa-solid fa-arrows-up-down"></i> <b>包含用户消息导航</b>：默认上/下一条按钮只在 AI 消息间跳转，开启此模式后会一并跳转到用户消息。可以和「底部跳转模式」叠加使用</li>
 </ul>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-wand-magic-sparkles"></i> 消息操作</h4>
 <ul style="margin:4px 0;padding-left:18px;list-style:none;">
@@ -5065,6 +5102,15 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-list-check"></i> <b>多选删除</b>：打开插件内置的消息列表弹窗，可以勾选任意多条消息，包括不连续楼层，然后一次性删除。删除前会自动保存快照，5 分钟内可用「撤回删除」恢复</li>
     <li><i class="fa-solid fa-magnifying-glass"></i> <b>查找替换</b>：在输入框、正在编辑中的消息、以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）里查找和替换文本，支持 Enter 跳转下一个、Shift+Enter 跳转上一个、Esc 关闭；点击 Aa 可以切换是否区分大小写。普通 textarea 中查找到的当前匹配会显示可视高亮，即使点击「替换为」输入框，当前匹配位置也会继续标出，方便确认替换目标。<br>移动端嫌占地方？点击替换行最右侧的折叠按钮（双左箭头），可以把整个查找框收成屏幕左侧的一条窄竖条，只保留展开按钮、上/下导航、当前/总数；点击展开按钮（双右箭头）即可恢复完整面板，搜索状态、匹配位置、跨弹窗跟随等行为完全保留。切换酒馆主题时查找框的颜色也会自动同步更新，跟悬浮面板一样跟着主题走。</li>
 </ul>
+<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-address-book"></i> 聊天管理</h4>
+<ul style="margin:4px 0;padding-left:18px;list-style:none;">
+    <li><i class="fa-solid fa-address-book"></i> <b>聊天管理器</b>：打开当前角色/群聊的聊天列表，方便切换或管理历史聊天</li>
+    <li><i class="fa-solid fa-comments"></i> <b>新建聊天</b>：和当前角色开启一个全新的聊天</li>
+    <li><i class="fa-solid fa-pen-to-square"></i> <b>重命名聊天</b>：弹窗输入新名字，回车或点确定即可重命名当前聊天</li>
+    <li><i class="fa-solid fa-comment-slash"></i> <b>删除聊天</b>：删除当前聊天，删除前会自动保存快照。删除后会弹出"点此撤回"的提示（5 分钟内有效），点击即可恢复刚刚删除的聊天，避免手滑误删丢失记录</li>
+    <li><i class="fa-solid fa-xmark"></i> <b>关闭聊天</b>：关闭当前聊天回到角色选择页</li>
+</ul>
+<p style="opacity:0.7;font-size:11px;">⚠️ 删除聊天会真实从酒馆里删掉文件，5 分钟撤回窗口过后无法再恢复哦，重要聊天建议先备份</p>
 <p style="opacity:0.7;font-size:11px;">⚠️ 删除类操作可在设置中开启"删除操作前弹窗确认"来防止误操作。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-ghost"></i> 消息隐藏管理</h4>
 <p>管理哪些消息对AI可见。可以隐藏/显示指定范围的楼层，或只保留最近N条。隐藏的消息不会发送给AI。</p>
@@ -5087,7 +5133,7 @@ function openHelpPanel() {
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-circle-dot"></i> 悬浮面板</h4>
 <p>开启后会出现一个可拖拽的悬浮球或固定面板。可以把导航跳转等功能按钮放进去。悬浮球模式下点击展开面板，点击其他区域自动收起；固定面板模式下常驻显示。支持自定义悬浮球样式（包括GIF）、面板方向（竖向侧边展开 / 竖向上下展开 / 横向上下展开）。放进悬浮面板的按钮不会在主工具栏中重复显示。面板中的按钮可拖拽排序。</p>
 <p><b>透明背景</b>选项仅在上传了自定义图片时生效，开启后悬浮球的默认边框、阴影、背景色都会隐藏，只显示图片本身。</p>
-<p><b>面板方案</b>：可以创建多套面板按钮配置（比如"全屏模式"用翻页按钮、"编辑模式"用符号按钮），通过设置面板里的方案管理器切换，或者把「切换面板方案」按钮放进悬浮面板，一键循环切换不同布局。</p>
+<p><b>面板方案</b>：可以创建多套面板按钮配置（比如"全屏模式"用翻页按钮、"编辑模式"用符号按钮），通过设置面板里的方案管理器切换，或者把<i class="fa-solid fa-layer-group"></i>「切换面板方案」按钮放到工具栏或悬浮面板里，一键循环切换不同布局，也支持绑定快捷键。</p>
 <p><b>面板方案保存内容</b>：每个面板方案保存五项设置——<b>面板按钮列表</b>（哪些按钮、排列顺序）、<b>面板方向</b>（竖向/横向）、<b>面板按钮大小</b>、<b>面板宽度</b>、<b>面板最大高度</b>。切换方案时会立即应用这些设置。注意：悬浮球的图片/大小/形状等外观设置由单独的「图片方案」管理，不包含在面板方案内。</p>
 <p><b>图片方案保存内容</b>：每个图片方案保存六项设置——悬浮球图片 URL、展开状态图片 URL、球大小、球形状（圆形/方形）、透明背景开关、跟随美化开关。</p>
 <p>开启「自动隐藏」后，悬浮球/面板平时隐藏，点击屏幕任意空白位置即可切换显示/隐藏（包括聊天区域、抽屉空白处等）。点击悬浮球/面板自身、输入框、按钮、链接、弹窗等交互元素时不会触发切换。翻页模式开启时会自动显示悬浮球，关闭翻页后自动隐藏回去。</p>
@@ -8645,7 +8691,7 @@ function renderFolderSettings() {
       buildToolbar();
     });
   container
-    .off("click", ".ih-folder-add-button-btn")
+    .off("click", ".ih-folder-add-button-btn:not(.ih-folder-clear-btn)")
     .on(
       "click",
       ".ih-folder-add-button-btn:not(.ih-folder-clear-btn)",
@@ -9357,10 +9403,13 @@ async function loadSettings() {
     if (s.shortcuts[key] === undefined) s.shortcuts[key] = "";
   }
   if (!s.buttonOrder) s.buttonOrder = [...defaultSettings.buttonOrder];
-  const tabIdx = s.buttonOrder.indexOf("tab");
-  if (tabIdx > -1) s.buttonOrder.splice(tabIdx, 1);
-  delete s.buttons["tab"];
-  delete s.shortcuts["tab"];
+  const obsoleteKeys = ["tab", "chatList"];
+  obsoleteKeys.forEach((k) => {
+    const idx = s.buttonOrder.indexOf(k);
+    if (idx > -1) s.buttonOrder.splice(idx, 1);
+    delete s.buttons[k];
+    delete s.shortcuts[k];
+  });
   for (const key of defaultSettings.buttonOrder) {
     if (!s.buttonOrder.includes(key)) s.buttonOrder.push(key);
   }
@@ -9383,6 +9432,13 @@ async function loadSettings() {
       ".ih-folder-dropdown-portal [data-button-key='bottomNavMode'], " +
       ".ih-floating-panel [data-button-key='bottomNavMode']",
   ).toggleClass("input-helper-btn-active", bottomNavController.active);
+  if (s.includeUserNavMode === undefined) s.includeUserNavMode = false;
+  includeUserNavController.active = !!s.includeUserNavMode;
+  $(
+    "#input_include_user_nav_mode_btn, " +
+      ".ih-folder-dropdown-portal [data-button-key='includeUserNavMode'], " +
+      ".ih-floating-panel [data-button-key='includeUserNavMode']",
+  ).toggleClass("input-helper-btn-active", includeUserNavController.active);
   if (!s.floatingPanel) s.floatingPanel = { ...defaultSettings.floatingPanel };
   if (s.floatingPanel.enabled === undefined) s.floatingPanel.enabled = false;
   if (s.floatingPanel.orientation === undefined)
@@ -10018,6 +10074,12 @@ jQuery(async () => {
       '<button id="input_bottom_nav_mode_btn" class="input-helper-btn" title="底部跳转模式" data-norefocus="true"><i class="fa-solid fa-angle-double-down"></i></button>',
     );
     $("#input_helper_toolbar").append(bottomNavBtn);
+  }
+  if (!$("#input_include_user_nav_mode_btn").length) {
+    const includeUserNavBtn = $(
+      '<button id="input_include_user_nav_mode_btn" class="input-helper-btn" title="包含用户消息导航" data-norefocus="true"><i class="fa-solid fa-arrows-up-down"></i></button>',
+    );
+    $("#input_helper_toolbar").append(includeUserNavBtn);
   }
   if (!$("#input_enter_delete_mode_btn").length) {
     const enterDelBtn = $(

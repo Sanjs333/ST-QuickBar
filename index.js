@@ -141,6 +141,23 @@ const BUTTON_DEFS = {
   newline: { label: "换行", icon: "fa-solid fa-turn-down", text: null },
   user: { label: "用户标记 {{user}}", icon: "fa-solid fa-user", text: null },
   char: { label: "角色标记 {{char}}", icon: "fa-solid fa-robot", text: null },
+  chatManager: {
+    label: "聊天管理器",
+    icon: "fa-solid fa-address-book",
+    text: null,
+  },
+  chatNew: { label: "新建聊天", icon: "fa-solid fa-comments", text: null },
+  chatRename: {
+    label: "重命名聊天",
+    icon: "fa-solid fa-pen-to-square",
+    text: null,
+  },
+  chatDelete: {
+    label: "删除聊天",
+    icon: "fa-solid fa-comment-slash",
+    text: null,
+  },
+  chatClose: { label: "关闭聊天", icon: "fa-solid fa-xmark", text: null },
 };
 
 const ALL_BUTTON_KEYS = Object.keys(BUTTON_DEFS);
@@ -317,7 +334,12 @@ const defaultSettings = {
       k === "enterDeleteMode" ||
       k === "multiSelectDelete" ||
       k === "copyText" ||
-      k === "pasteText"
+      k === "pasteText" ||
+      k === "chatManager" ||
+      k === "chatNew" ||
+      k === "chatRename" ||
+      k === "chatDelete" ||
+      k === "chatClose"
         ? false
         : true,
     ]),
@@ -365,6 +387,11 @@ const shortcutFunctionMap = {
   multiSelectDelete: () => doMultiSelectDelete(),
   copyText: () => doCopy(),
   pasteText: () => doPaste(),
+  chatManager: () => doChatManager(),
+  chatNew: () => doChatNew(),
+  chatRename: () => doChatRename(),
+  chatDelete: () => doChatDelete(),
+  chatClose: () => doChatClose(),
 };
 
 function ihBlurToDismissKeyboard(targetEl) {
@@ -3928,6 +3955,11 @@ function getButtonIdFromKey(key) {
     copyText: "input_copy_text_btn",
     pasteText: "input_paste_text_btn",
     wrapToggle: "input_wrap_toggle_btn",
+    chatManager: "input_chat_manager_btn",
+    chatNew: "input_chat_new_btn",
+    chatRename: "input_chat_rename_btn",
+    chatDelete: "input_chat_delete_btn",
+    chatClose: "input_chat_close_btn",
   };
   return map[key] || "";
 }
@@ -5226,6 +5258,202 @@ function openHideManagerPanel() {
     await doUnhideAll();
     refreshStatus();
   });
+}
+
+function doChatManager() {
+  const btn = document.getElementById("option_select_chat");
+  if (btn) btn.click();
+  else toastr.warning("找不到聊天管理器入口", "", { timeOut: 1200 });
+}
+
+function doChatNew() {
+  const btn = document.getElementById("option_start_new_chat");
+  if (btn) btn.click();
+  else toastr.warning("找不到新建聊天入口", "", { timeOut: 1200 });
+}
+
+function doChatClose() {
+  const btn = document.getElementById("option_close_chat");
+  if (btn) btn.click();
+  else toastr.warning("找不到关闭聊天入口", "", { timeOut: 1200 });
+}
+
+async function doChatRename() {
+  const ctx = SillyTavern.getContext();
+  const currentChatName = ctx.getCurrentChatId();
+  if (!currentChatName) {
+    toastr.warning("当前没有打开聊天", "", { timeOut: 1200 });
+    return;
+  }
+  const { overlay, escHandler } = createDialogOverlay();
+  const safeName = ihEscapeAttr(currentChatName);
+  const content = $(`
+    <div class="ih-jump-dialog-content">
+      <h3><i class="fa-solid fa-pen-to-square"></i> 重命名聊天</h3>
+      <div class="ih-jump-body">
+        <div class="ih-hm-row">
+          <input type="text" id="ih_cr_input" class="ih-hm-input" style="width:100%;" value="${safeName}" />
+        </div>
+      </div>
+      <div class="ih-jump-actions">
+        <button class="ih-hm-btn" id="ih_cr_cancel">取消</button>
+        <button class="ih-hm-btn ih-hm-btn-ok" id="ih_cr_ok"><i class="fa-solid fa-check"></i> 确定</button>
+      </div>
+    </div>
+  `);
+  overlay.append(content);
+  syncDialogTheme(content[0]);
+  content.on("click", (e) => e.stopPropagation());
+  generateFaIconProtectionCSS();
+  const closeDialog = () => {
+    document.removeEventListener("keydown", escHandler, true);
+    overlay.remove();
+  };
+  overlay.off("click").on("click", (e) => {
+    if (e.target === overlay[0]) closeDialog();
+  });
+  content.find("#ih_cr_cancel").on("click", closeDialog);
+  const doRename = async () => {
+    const newName = String(content.find("#ih_cr_input").val() || "").trim();
+    if (!newName || newName === currentChatName) {
+      closeDialog();
+      return;
+    }
+    closeDialog();
+    try {
+      if (typeof ctx.renameChat === "function") {
+        await ctx.renameChat(currentChatName, newName);
+        toastr.success("已重命名", "", { timeOut: 1000 });
+      } else {
+        toastr.error("当前版本不支持重命名", "", { timeOut: 1500 });
+      }
+    } catch (e) {
+      console.error("重命名失败", e);
+      toastr.error("重命名失败：" + (e?.message || e), "", { timeOut: 1500 });
+    }
+  };
+  content.find("#ih_cr_ok").on("click", doRename);
+  content.find("#ih_cr_input").on("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      doRename();
+    }
+  });
+  setTimeout(() => {
+    const inp = content.find("#ih_cr_input")[0];
+    if (inp) {
+      inp.focus();
+      try {
+        inp.select();
+      } catch (e) {}
+    }
+  }, 100);
+}
+
+async function doChatDelete() {
+  const ctx = SillyTavern.getContext();
+  const currentChatName = ctx.getCurrentChatId();
+  if (!currentChatName) {
+    toastr.warning("当前没有打开聊天", "", { timeOut: 1200 });
+    return;
+  }
+  if (getSettings().confirmDangerousActions) {
+    const ok = await new Promise((resolve) => {
+      const { overlay, escHandler } = createDialogOverlay();
+      const content = $(`
+        <div class="ih-jump-dialog-content">
+          <h3><i class="fa-solid fa-triangle-exclamation"></i> 删除当前聊天</h3>
+          <div style="font-size:12px;line-height:1.7;margin-bottom:14px;">
+            确定删除聊天 <b>${ihEscapeHtml(currentChatName)}</b> 吗？<br>
+            <span style="color:rgba(255,120,120,0.9);">此操作不可恢复！</span>
+          </div>
+          <div class="ih-jump-actions">
+            <button class="ih-hm-btn" id="ih_cd_cancel">取消</button>
+            <button class="ih-hm-btn ih-hm-btn-warn" id="ih_cd_ok"><i class="fa-solid fa-trash"></i> 删除</button>
+          </div>
+        </div>
+      `);
+      overlay.append(content);
+      syncDialogTheme(content[0]);
+      content.on("click", (e) => e.stopPropagation());
+      generateFaIconProtectionCSS();
+      const close = (val) => {
+        document.removeEventListener("keydown", escHandler, true);
+        overlay.remove();
+        resolve(val);
+      };
+      overlay.off("click").on("click", (e) => {
+        if (e.target === overlay[0]) close(false);
+      });
+      content.find("#ih_cd_cancel").on("click", () => close(false));
+      content.find("#ih_cd_ok").on("click", () => close(true));
+    });
+    if (!ok) return;
+  }
+  const snapshot = {
+    name: currentChatName,
+    messages: JSON.parse(JSON.stringify(chat)),
+  };
+  const _origToastrWarning = toastr.warning;
+  const _origToastrError = toastr.error;
+  const _toastFilter = function (orig) {
+    return function (msg, title, opts) {
+      const text =
+        (typeof msg === "string" ? msg : "") +
+        (typeof title === "string" ? title : "");
+      if (
+        /超时|timeout|time\s*out/i.test(text) &&
+        /chat|聊天|delete|删除/i.test(text)
+      ) {
+        return;
+      }
+      return orig.call(this, msg, title, opts);
+    };
+  };
+  toastr.warning = _toastFilter(_origToastrWarning);
+  toastr.error = _toastFilter(_origToastrError);
+  const _restoreToastr = () => {
+    toastr.warning = _origToastrWarning;
+    toastr.error = _origToastrError;
+  };
+
+  try {
+    await executeSlashCommandsWithOptions("/delchat");
+    setTimeout(_restoreToastr, 1500);
+    toastr.success(
+      `已删除聊天"${snapshot.name}"，点此撤回（5分钟内有效）`,
+      "",
+      {
+        timeOut: 0,
+        extendedTimeOut: 0,
+        closeButton: true,
+        tapToDismiss: false,
+        onclick: async () => {
+          try {
+            chat.length = 0;
+            snapshot.messages.forEach((m) => chat.push(m));
+            await executeSlashCommandsWithOptions("/forcesave");
+            await executeSlashCommandsWithOptions(
+              `/renamechat ${snapshot.name}`,
+            );
+            await executeSlashCommandsWithOptions("/chat-reload");
+            toastr.success(`已恢复聊天"${snapshot.name}"`, "", {
+              timeOut: 1500,
+            });
+          } catch (err) {
+            console.error("撤回删除聊天失败", err);
+            toastr.error("撤回失败：" + (err?.message || err), "", {
+              timeOut: 2000,
+            });
+          }
+        },
+      },
+    );
+  } catch (e) {
+    _restoreToastr();
+    console.error("删除聊天失败", e);
+    toastr.error("删除失败", "", { timeOut: 1500 });
+  }
 }
 
 const floatingPanelController = {
@@ -9827,6 +10055,31 @@ jQuery(async () => {
     );
     $("#input_helper_toolbar").append(chatUndoBtn);
   }
+  if (!$("#input_chat_manager_btn").length) {
+    $("#input_helper_toolbar").append(
+      '<button id="input_chat_manager_btn" class="input-helper-btn" title="聊天管理器" data-norefocus="true"><i class="fa-solid fa-address-book"></i></button>',
+    );
+  }
+  if (!$("#input_chat_new_btn").length) {
+    $("#input_helper_toolbar").append(
+      '<button id="input_chat_new_btn" class="input-helper-btn" title="新建聊天" data-norefocus="true"><i class="fa-solid fa-comments"></i></button>',
+    );
+  }
+  if (!$("#input_chat_rename_btn").length) {
+    $("#input_helper_toolbar").append(
+      '<button id="input_chat_rename_btn" class="input-helper-btn" title="重命名聊天" data-norefocus="true"><i class="fa-solid fa-pen-to-square"></i></button>',
+    );
+  }
+  if (!$("#input_chat_delete_btn").length) {
+    $("#input_helper_toolbar").append(
+      '<button id="input_chat_delete_btn" class="input-helper-btn" title="删除聊天" data-norefocus="true"><i class="fa-solid fa-comment-slash"></i></button>',
+    );
+  }
+  if (!$("#input_chat_close_btn").length) {
+    $("#input_helper_toolbar").append(
+      '<button id="input_chat_close_btn" class="input-helper-btn" title="关闭聊天" data-norefocus="true"><i class="fa-solid fa-xmark"></i></button>',
+    );
+  }
 
   ALL_BUTTON_KEYS.forEach((key) => {
     const btnId = getButtonIdFromKey(key);
@@ -10078,6 +10331,11 @@ jQuery(async () => {
         findReplaceController.syncTheme();
         updateToolbarMaxHeight();
         try {
+          document
+            .querySelectorAll(".ih-dialog-overlay > div")
+            .forEach((el) => syncDialogTheme(el));
+        } catch (e) {}
+        try {
           const _sp = document.querySelector(".input-helper-settings");
           if (_sp) syncDialogTheme(_sp, { skipBg: true });
         } catch (e) {}
@@ -10251,7 +10509,6 @@ jQuery(async () => {
       historyManager.clear();
       historyManager._sharedHistoriesByKey.clear();
       chatUndoManager.clear();
-
       if (shiftMode.active) shiftMode.deactivate();
       if (autoScrollController.active) autoScrollController.stop();
       if (findReplaceController.active) findReplaceController.close();

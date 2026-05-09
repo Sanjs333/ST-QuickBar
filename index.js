@@ -7176,14 +7176,21 @@ function bindRepeatableButton(btn, action) {
     stopRepeat();
   });
 
-  btn.on("touchstart", function (e) {
-    const t = e.originalEvent.touches[0];
-    touchStartX = t.clientX;
-    touchStartY = t.clientY;
-    touchMoved = false;
-    suppressMouseUntil = Date.now() + 600;
-    startRepeat();
-  });
+  if (btn[0]) {
+    btn[0].addEventListener(
+      "touchstart",
+      function (e) {
+        e.preventDefault();
+        const t = e.touches[0];
+        touchStartX = t.clientX;
+        touchStartY = t.clientY;
+        touchMoved = false;
+        suppressMouseUntil = Date.now() + 600;
+        startRepeat();
+      },
+      { passive: false },
+    );
+  }
   btn.on("touchmove", function (e) {
     const t = e.originalEvent.touches[0];
     const dx = Math.abs(t.clientX - touchStartX);

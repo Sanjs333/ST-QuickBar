@@ -36,12 +36,12 @@ const BUTTON_DEFS = {
     text: null,
   },
   prevAiMsg: {
-    label: "上一条消息",
+    label: "上一条AI消息",
     icon: "fa-solid fa-chevron-up",
     text: null,
   },
   nextAiMsg: {
-    label: "下一条消息",
+    label: "下一条AI消息",
     icon: "fa-solid fa-chevron-down",
     text: null,
   },
@@ -146,6 +146,16 @@ const BUTTON_DEFS = {
   newline: { label: "换行", icon: "fa-solid fa-turn-down", text: null },
   user: { label: "用户标记 {{user}}", icon: "fa-solid fa-user", text: null },
   char: { label: "角色标记 {{char}}", icon: "fa-solid fa-robot", text: null },
+  cursorLeft: {
+    label: "光标左移",
+    icon: "fa-solid fa-caret-left",
+    text: null,
+  },
+  cursorRight: {
+    label: "光标右移",
+    icon: "fa-solid fa-caret-right",
+    text: null,
+  },
   chatManager: {
     label: "聊天管理器",
     icon: "fa-solid fa-address-book",
@@ -181,6 +191,8 @@ const INPUT_BUTTON_KEYS = new Set([
   "char",
   "copyText",
   "pasteText",
+  "cursorLeft",
+  "cursorRight",
 ]);
 
 function isInputButton(key) {
@@ -345,7 +357,9 @@ const defaultSettings = {
       k === "chatNew" ||
       k === "chatRename" ||
       k === "chatDelete" ||
-      k === "chatClose"
+      k === "chatClose" ||
+      k === "cursorLeft" ||
+      k === "cursorRight"
         ? false
         : true,
     ]),
@@ -399,6 +413,8 @@ const shortcutFunctionMap = {
   chatRename: () => doChatRename(),
   chatDelete: () => doChatDelete(),
   chatClose: () => doChatClose(),
+  cursorLeft: () => doCursorLeft(),
+  cursorRight: () => doCursorRight(),
 };
 
 function ihBlurToDismissKeyboard(targetEl) {
@@ -3996,6 +4012,8 @@ function getButtonIdFromKey(key) {
     chatRename: "input_chat_rename_btn",
     chatDelete: "input_chat_delete_btn",
     chatClose: "input_chat_close_btn",
+    cursorLeft: "input_cursor_left_btn",
+    cursorRight: "input_cursor_right_btn",
   };
   return map[key] || "";
 }
@@ -4261,6 +4279,50 @@ function insertUserTag() {
 }
 function insertCharTag() {
   insertTag("{{char}}");
+}
+function moveCursor(delta) {
+  const target = getInsertionTarget();
+  if (!target) return;
+
+  if (target.isContentEditable) {
+    const cmView = getCodeMirrorView(target);
+    if (cmView) {
+      const head = cmView.state.selection.main.head;
+      const docLen = cmView.state.doc.length;
+      const newPos = Math.max(0, Math.min(docLen, head + delta));
+      cmView.dispatch({
+        selection: { anchor: newPos },
+        scrollIntoView: true,
+      });
+      cmView.focus();
+      return;
+    }
+    const doc = target.ownerDocument || document;
+    const win = doc.defaultView || window;
+    target.focus();
+    const sel = win.getSelection();
+    if (!sel) return;
+    try {
+      sel.modify("move", delta > 0 ? "forward" : "backward", "character");
+    } catch (e) {}
+    return;
+  }
+
+  const len = (target.value || "").length;
+  const cur = target.selectionStart || 0;
+  const newPos = Math.max(0, Math.min(len, cur + delta));
+  try {
+    target.setSelectionRange(newPos, newPos);
+    target.focus({ preventScroll: true });
+  } catch (e) {}
+}
+
+function doCursorLeft() {
+  moveCursor(-1);
+}
+
+function doCursorRight() {
+  moveCursor(1);
 }
 
 async function doCopy() {
@@ -5052,6 +5114,44 @@ function openBeautyPromptPanel() {
     document.body.removeChild(ta);
   }
 }
+const CHANGELOG_VERSION = "2.4";
+const CHANGELOG_HTML = `
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.4</h4>
+<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
+  <li>新增「光标左移 / 光标右移」按钮，按住可连续移动光标，支持发送框、消息编辑、外部输入框、CodeMirror 编辑器和 contentEditable 富文本</li>
+  <li>新增「更新日志」入口，点击设置面板顶部按钮即可查看历史版本变更</li>
+</ul>
+`;
+
+function openChangelogPanel() {
+  const { overlay, escHandler } = createDialogOverlay();
+  const content = $(`
+    <div class="ih-help-panel-content">
+      <h3 style="margin:0 0 12px;display:flex;align-items:center;gap:8px;font-size:15px;">
+        <i class="fa-solid fa-clipboard-list"></i> 更新日志
+        <span style="margin-left:auto;font-size:12px;opacity:0.7;font-weight:normal;color:var(--SmartThemeQuoteColor,cornflowerblue);">v${CHANGELOG_VERSION}</span>
+      </h3>
+      <div style="font-size:12px;line-height:1.8;opacity:0.92;">
+        ${CHANGELOG_HTML}
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+        <button class="ih-hm-btn ih-hm-btn-close" id="ih_changelog_close">关闭</button>
+      </div>
+    </div>
+  `);
+  overlay.append(content);
+  syncDialogTheme(content[0]);
+  content.on("click", (e) => e.stopPropagation());
+  generateFaIconProtectionCSS();
+  const closeDialog = () => {
+    document.removeEventListener("keydown", escHandler, true);
+    overlay.remove();
+  };
+  overlay.off("click").on("click", (e) => {
+    if (e.target === overlay[0]) closeDialog();
+  });
+  content.find("#ih_changelog_close").on("click", closeDialog);
+}
 
 function openHelpPanel() {
   const { overlay, escHandler } = createDialogOverlay();
@@ -5075,6 +5175,10 @@ function openHelpPanel() {
 <p>外部编辑框也会单独记录历史，例如角色卡字段、世界书、预设编辑器、全局 CSS、自定义拓展渲染出的普通输入框等。插件会在聚焦时识别当前编辑框内容，如果同一个 textarea 被酒馆复用来编辑另一份内容，会自动重建历史，避免不同页面或不同美化方案之间撤回串台。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-up-down-left-right"></i> 选中模式</h4>
 <p>移动端文本选择辅助工具。开启后，先在输入框中点击一个位置作为起点，再点击另一个位置，插件会自动把这两点之间的文本全部选中，方便批量操作。再次点击按钮可关闭该模式。</p>
+<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-caret-left"></i><i class="fa-solid fa-caret-right"></i> 光标左移 / 右移</h4>
+<p>移动端精确移动光标的辅助按钮。点击一下移动一个字符，<b>按住不放可连续移动</b>（约 0.35 秒后开始连续触发，松手停止）。</p>
+<p>支持所有编辑场景：聊天输入框、消息编辑框、设置面板里的输入框、世界书 / 角色卡定义、CodeMirror 代码编辑器、contentEditable 富文本区域。光标移动不会触发输入事件，<b>不会污染撤销历史</b>，可以放心连按。</p>
+<p style="opacity:0.7;font-size:11px;">💡 默认是关闭状态，可以在「按钮管理」里勾上它们让按钮出现在工具栏；移动端用户也可以放进悬浮面板里使用。</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-object-group"></i> 选中包裹模式（全局）</h4>
 <p>开启后，自定义按钮的"插入内容"会按照设置的"光标位置"切成左右两半，自动包裹住你已选中的文本。例如自定义内容是 <code>**粗体**</code>、光标位置=中间，开启此模式选中"abc"再点按钮，会变成 <code>**abc**</code>。原生的 **、""、() 等内置符号按钮本来就是包裹模式，不受这个开关影响。</p>
 <p>如果只想给个别按钮启用而不想全局开启，可以在编辑该自定义按钮时勾选下方的"选中包裹"选项。</p>
@@ -7021,6 +7125,78 @@ const floatingPanelController = {
     }
   },
 };
+function bindRepeatableButton(btn, action) {
+  let holdTimer = null;
+  let repeatTimer = null;
+  let repeating = false;
+  let suppressClickUntil = 0;
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchMoved = false;
+
+  const HOLD_DELAY = 350;
+  const REPEAT_INTERVAL = 60;
+
+  const stopRepeat = () => {
+    if (holdTimer) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+    if (repeatTimer) {
+      clearInterval(repeatTimer);
+      repeatTimer = null;
+    }
+    if (repeating) {
+      suppressClickUntil = Date.now() + 200;
+    }
+    repeating = false;
+  };
+
+  const startRepeat = () => {
+    stopRepeat();
+    action();
+    holdTimer = setTimeout(() => {
+      repeating = true;
+      repeatTimer = setInterval(action, REPEAT_INTERVAL);
+    }, HOLD_DELAY);
+  };
+
+  btn.on("mousedown", function (e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    startRepeat();
+  });
+  btn.on("mouseup mouseleave", function () {
+    stopRepeat();
+  });
+
+  btn.on("touchstart", function (e) {
+    const t = e.originalEvent.touches[0];
+    touchStartX = t.clientX;
+    touchStartY = t.clientY;
+    touchMoved = false;
+    startRepeat();
+  });
+  btn.on("touchmove", function (e) {
+    const t = e.originalEvent.touches[0];
+    const dx = Math.abs(t.clientX - touchStartX);
+    const dy = Math.abs(t.clientY - touchStartY);
+    if (dx > 10 || dy > 10) {
+      touchMoved = true;
+      stopRepeat();
+    }
+  });
+  btn.on("touchend touchcancel", function () {
+    stopRepeat();
+  });
+
+  btn.on("click", function (e) {
+    if (Date.now() < suppressClickUntil) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+}
 
 function getActionForKey(key) {
   if (shortcutFunctionMap[key]) return shortcutFunctionMap[key];
@@ -7039,6 +7215,11 @@ function bindButtonAction(btn, key) {
     );
   const action = getActionForKey(key);
   if (!action) return;
+
+  if (key === "cursorLeft" || key === "cursorRight") {
+    bindRepeatableButton(btn, action);
+    return;
+  }
   if (isMobile) {
     btn
       .on("touchstart", function (e) {
@@ -10111,6 +10292,18 @@ jQuery(async () => {
     );
     $("#input_helper_toolbar").append(wrapBtn);
   }
+  if (!$("#input_cursor_left_btn").length) {
+    const cursorLeftBtn = $(
+      '<button id="input_cursor_left_btn" class="input-helper-btn" title="光标左移（按住连续移动）" data-norefocus="true"><i class="fa-solid fa-caret-left"></i></button>',
+    );
+    $("#input_helper_toolbar").append(cursorLeftBtn);
+  }
+  if (!$("#input_cursor_right_btn").length) {
+    const cursorRightBtn = $(
+      '<button id="input_cursor_right_btn" class="input-helper-btn" title="光标右移（按住连续移动）" data-norefocus="true"><i class="fa-solid fa-caret-right"></i></button>',
+    );
+    $("#input_helper_toolbar").append(cursorRightBtn);
+  }
   if (!$("#input_chat_undo_btn").length) {
     const chatUndoBtn = $(
       '<button id="input_chat_undo_btn" class="input-helper-btn input-helper-btn-disabled" title="撤回删除" data-norefocus="true"><i class="fa-solid fa-trash-arrow-up"></i></button>',
@@ -10251,18 +10444,21 @@ jQuery(async () => {
     floatingPanelController.refresh();
     buildToolbar();
   });
-  const helpBtnEl = $("#ih_open_help_btn");
-  if (helpBtnEl.length) {
+  const leftContainer = $("#ih_settings_top_left");
+  if (leftContainer.length) {
     const beautyBtn =
       $(`<div id="ih_open_beauty_prompt_btn" class="menu_button menu_button_icon" title="获取美化 CSS 的提示词" style="cursor:pointer;">
             <i class="fa-solid fa-palette"></i>
             <span>美化指南</span>
         </div>`);
-    helpBtnEl.before(beautyBtn);
+    leftContainer.append(beautyBtn);
   }
 
   $(document).on("click", "#ih_open_beauty_prompt_btn", function () {
     openBeautyPromptPanel();
+  });
+  $(document).on("click", "#ih_open_changelog_btn", function () {
+    openChangelogPanel();
   });
   $(document).on("click", "#ih_open_help_btn", function () {
     openHelpPanel();

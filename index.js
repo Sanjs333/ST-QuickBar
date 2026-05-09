@@ -7130,12 +7130,13 @@ function bindRepeatableButton(btn, action) {
   let repeatTimer = null;
   let repeating = false;
   let suppressClickUntil = 0;
+  let suppressMouseUntil = 0;
   let touchStartX = 0;
   let touchStartY = 0;
   let touchMoved = false;
 
-  const HOLD_DELAY = 350;
-  const REPEAT_INTERVAL = 60;
+  const HOLD_DELAY = 350; // 长按多久后开始连续触发(毫秒)
+  const REPEAT_INTERVAL = 60; // 连续触发的间隔(毫秒)
 
   const stopRepeat = () => {
     if (holdTimer) {
@@ -7163,10 +7164,15 @@ function bindRepeatableButton(btn, action) {
 
   btn.on("mousedown", function (e) {
     if (e.button !== 0) return;
+    if (Date.now() < suppressMouseUntil) {
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
     startRepeat();
   });
   btn.on("mouseup mouseleave", function () {
+    if (Date.now() < suppressMouseUntil) return;
     stopRepeat();
   });
 
@@ -7175,6 +7181,7 @@ function bindRepeatableButton(btn, action) {
     touchStartX = t.clientX;
     touchStartY = t.clientY;
     touchMoved = false;
+    suppressMouseUntil = Date.now() + 600;
     startRepeat();
   });
   btn.on("touchmove", function (e) {
@@ -7187,6 +7194,7 @@ function bindRepeatableButton(btn, action) {
     }
   });
   btn.on("touchend touchcancel", function () {
+    suppressMouseUntil = Date.now() + 600;
     stopRepeat();
   });
 

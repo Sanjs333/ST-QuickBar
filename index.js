@@ -4346,7 +4346,18 @@ function doGenerateSwipe() {
     });
     return;
   }
-  executeSlashCommandsWithOptions("/swipe direction=right await=true");
+  const $lastMes = $("#chat .mes").last();
+  const $swipeRight = $lastMes.find(".swipe_right");
+  if ($swipeRight.length && $swipeRight.is(":visible")) {
+    $swipeRight.trigger("click");
+    return;
+  }
+  try {
+    Generate("swipe");
+  } catch (e) {
+    console.error("生成备选回复失败", e);
+    toastr.error("生成备选回复失败，请检查酒馆版本", "", { timeOut: 1500 });
+  }
 }
 
 function insertCustomSymbol(symbol) {
@@ -4933,22 +4944,12 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.5";
+const CHANGELOG_VERSION = "2.5.1";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.5</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.5.1</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li>将原「消息隐藏管理」与「多选删除」和「消息跳转」合并为统一的「消息管理」面板，内含隐藏 / 删除 / 移动 三个标签页</li>
-  <li>隐藏页：支持单条操作、范围隐藏/显示、保留最近 N 条、以及勾选多条批量隐藏/显示</li>
-  <li>删除页：支持勾选、范围选择、范围删除，与原多选删除完全兼容，操作前自动保存撤回快照</li>
-  <li>移动页：新增批量多选移动，勾选多条消息可一次性按原顺序移动到指定楼层</li>
-  <li>三个页面共用工具栏：全选（双状态）、反选、范围选择、清除</li>
-  <li>消息列表每条支持点击跳转到原聊天位置，方便定位；滚动时标题栏固定在顶部不跟随滚动</li>
-  <li>将原独立的"跳转到指定楼层"按钮合并进消息管理面板的「隐藏」标签页：在单条楼层号输入框后点"跳转"即可直接定位消息，工具栏的原跳转按钮已移除，减少按钮冗余。</li>
-  <li>输入楼层号时列表会实时高亮对应消息</li>
-  <li>范围选择模式下如果已勾选一条消息，会自动将其设为起点，无需重新点击</li>
-  <li>UI 全面优化：分段 Tab、卡片化输入行、跟随主题色的范围高亮、顶部 × 关闭按钮、隐藏滚动条等细节打磨</li>
-  <li>设置面板顶部新增小字版本号显示，方便一眼确认当前插件版本</li>
-  <li>插件折叠头新增闪烁的 new! 红字提醒，版本更新时更容易被注意到，查看日志后消失</li>
+  <li>对 1.14 版本进行了兼容处理</li>
+  <li>优化「消息管理」面板的标题和说明文案</li>
 </ul>
 `;
 
@@ -6174,7 +6175,8 @@ async function doChatRename() {
         await ctx.renameChat(currentChatName, newName);
         toastr.success("已重命名", "", { timeOut: 1000 });
       } else {
-        toastr.error("当前版本不支持重命名", "", { timeOut: 1500 });
+        await executeSlashCommandsWithOptions(`/renamechat ${newName}`);
+        toastr.success("已重命名", "", { timeOut: 1000 });
       }
     } catch (e) {
       console.error("重命名失败", e);

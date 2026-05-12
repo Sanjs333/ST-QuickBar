@@ -86,13 +86,8 @@ const BUTTON_DEFS = {
     text: null,
   },
   hideManager: {
-    label: "消息隐藏管理",
+    label: "消息管理",
     icon: "fa-solid fa-ghost",
-    text: null,
-  },
-  jumpToFloor: {
-    label: "跳转到指定楼层",
-    icon: "fa-solid fa-location-dot",
     text: null,
   },
   findReplace: {
@@ -123,11 +118,6 @@ const BUTTON_DEFS = {
   enterDeleteMode: {
     label: "进入删除模式",
     icon: "fa-solid fa-trash-can",
-    text: null,
-  },
-  multiSelectDelete: {
-    label: "消息管理",
-    icon: "fa-solid fa-list-check",
     text: null,
   },
   copyText: { label: "复制", icon: "fa-solid fa-copy", text: null },
@@ -298,6 +288,7 @@ const defaultSettings = {
   enabled: true,
   confirmDangerousActions: false,
   toolbarPinned: false,
+  lastSeenChangelogVersion: "",
   autoScrollSpeed: 50,
   pagingScrollRatio: 0.93,
   autoScrollToAiOnStream: false,
@@ -343,14 +334,12 @@ const defaultSettings = {
       k === "nextAiMsg" ||
       k === "pagingMode" ||
       k === "autoScroll" ||
-      k === "jumpToFloor" ||
       k === "findReplace" ||
       k === "openQRAssistant" ||
       k === "switchPanelProfile" ||
       k === "bottomNavMode" ||
       k === "includeUserNavMode" ||
       k === "enterDeleteMode" ||
-      k === "multiSelectDelete" ||
       k === "copyText" ||
       k === "pasteText" ||
       k === "chatManager" ||
@@ -397,7 +386,6 @@ const shortcutFunctionMap = {
   generateSwipe: doGenerateSwipe,
   chatUndo: () => chatUndoManager.undo(),
   hideManager: openHideManagerPanel,
-  jumpToFloor: doJumpToFloor,
   findReplace: () => findReplaceController.toggle(),
   openQRAssistant: doOpenQRAssistant,
   switchPanelProfile: () => switchToNextPanelProfile(),
@@ -405,7 +393,6 @@ const shortcutFunctionMap = {
   includeUserNavMode: () => includeUserNavController.toggle(),
   wrapToggle: () => wrapModeController.toggle(),
   enterDeleteMode: () => doEnterDeleteMode(),
-  multiSelectDelete: () => doMultiSelectDelete(),
   copyText: () => doCopy(),
   pasteText: () => doPaste(),
   chatManager: () => doChatManager(),
@@ -929,175 +916,6 @@ function doEnterDeleteMode() {
       ".ih-floating-panel [data-button-key='enterDeleteMode']";
     $(sel).toggleClass("input-helper-btn-active", !!isOn);
   }, 120);
-}
-
-function doMultiSelectDelete() {
-  if (chat.length === 0) {
-    toastr.warning("当前没有聊天消息", "", { timeOut: 1000 });
-    return;
-  }
-  const { overlay, escHandler } = createDialogOverlay();
-
-  const itemsHtml = chat
-    .map((msg, idx) => {
-      const rawMes = String(msg?.mes || "");
-      const sender = ihEscapeHtml(msg.is_user ? "你" : msg.name || "AI");
-      const previewText = rawMes.replace(/\s+/g, " ").substring(0, 60);
-      const preview = ihEscapeHtml(previewText);
-      const isHidden = isMessageHidden(msg);
-      return `
-      <label class="ih-msd-item" data-floor="${idx}">
-        <input type="checkbox" data-floor="${idx}" />
-        <span class="ih-msd-floor">#${idx}</span>
-        <span class="ih-msd-sender">${sender}</span>
-        <span class="ih-msd-preview">${preview}${rawMes.length > 60 ? "..." : ""}</span>
-        ${isHidden ? '<span class="ih-msd-hidden">[隐]</span>' : ""}
-      </label>
-    `;
-    })
-    .join("");
-
-  const content = $(`
-    <div class="ih-hide-manager-content" style="width:520px;max-width:94%;">
-      <h3><i class="fa-solid fa-list-check"></i> 消息管理</h3>
-      <div class="ih-hm-status">
-        <i class="fa-solid fa-circle-info"></i>
-        <span>勾选要删除消息，或在下方输入楼层进行移动，共 ${chat.length} 条</span>
-      </div>
-      <div class="ih-hm-group" style="padding:6px 0;border-bottom:1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 35%, transparent);margin-bottom:8px;">
-        <div class="ih-hm-group-label">移动楼层</div>
-        <div class="ih-hm-row">
-          <input type="number" id="ih_msd_move_from" class="ih-hm-input" placeholder="从" min="0" max="${chat.length - 1}" />
-          <span class="ih-hm-sep">→</span>
-          <input type="number" id="ih_msd_move_to" class="ih-hm-input" placeholder="到" min="0" max="${chat.length - 1}" />
-          <button class="ih-hm-btn ih-hm-btn-ok" id="ih_msd_move_confirm"><i class="fa-solid fa-arrows-up-down"></i> 移动</button>
-          <span class="ih-hm-hint" style="font-size:10px;opacity:0.55;">把"从"楼层移到"到"楼层位置</span>
-        </div>
-      </div>
-      <div class="ih-hm-row" style="margin-bottom:8px;">
-        <button class="ih-hm-btn" id="ih_msd_select_all"><i class="fa-solid fa-check-double"></i> 全选</button>
-        <button class="ih-hm-btn" id="ih_msd_invert"><i class="fa-solid fa-rotate"></i> 反选</button>
-        <button class="ih-hm-btn" id="ih_msd_clear"><i class="fa-solid fa-eraser"></i> 清空</button>
-        <span class="ih-hm-hint" id="ih_msd_count">已选 0 条</span>
-      </div>
-      <div class="ih-msd-list" style="max-height:50vh;overflow-y:auto;border:1px solid var(--SmartThemeBorderColor);border-radius:6px;padding:4px;">
-        ${itemsHtml}
-      </div>
-      <div class="ih-jump-actions" style="margin-top:12px;">
-        <button class="ih-hm-btn" id="ih_msd_cancel">取消</button>
-        <button class="ih-hm-btn ih-hm-btn-warn" id="ih_msd_confirm"><i class="fa-solid fa-trash"></i> 删除选中</button>
-      </div>
-    </div>
-  `);
-  overlay.append(content);
-  syncDialogTheme(content[0]);
-  content.on("click", (e) => e.stopPropagation());
-  generateFaIconProtectionCSS();
-
-  const closeDialog = () => {
-    document.removeEventListener("keydown", escHandler, true);
-    overlay.remove();
-  };
-  overlay.off("click").on("click", (e) => {
-    if (e.target === overlay[0]) closeDialog();
-  });
-
-  function updateCount() {
-    const n = content.find(
-      ".ih-msd-list input[type='checkbox']:checked",
-    ).length;
-    content.find("#ih_msd_count").text(`已选 ${n} 条`);
-  }
-
-  content.find("#ih_msd_cancel").on("click", closeDialog);
-  content.find("#ih_msd_select_all").on("click", () => {
-    content.find(".ih-msd-list input[type='checkbox']").prop("checked", true);
-    updateCount();
-  });
-  content.find("#ih_msd_clear").on("click", () => {
-    content.find(".ih-msd-list input[type='checkbox']").prop("checked", false);
-    updateCount();
-  });
-  content.find("#ih_msd_invert").on("click", () => {
-    content.find(".ih-msd-list input[type='checkbox']").each(function () {
-      this.checked = !this.checked;
-    });
-    updateCount();
-  });
-  content.on("change", ".ih-msd-list input[type='checkbox']", updateCount);
-  content.find("#ih_msd_move_confirm").on("click", async () => {
-    const fromVal = content.find("#ih_msd_move_from").val();
-    const toVal = content.find("#ih_msd_move_to").val();
-    if (fromVal === "" || toVal === "") {
-      toastr.warning("请输入起始和目标楼层", "", { timeOut: 1200 });
-      return;
-    }
-    const from = parseInt(fromVal);
-    const to = parseInt(toVal);
-    if (
-      isNaN(from) ||
-      isNaN(to) ||
-      from < 0 ||
-      to < 0 ||
-      from >= chat.length ||
-      to >= chat.length
-    ) {
-      toastr.error(`无效楼层（范围 0~${chat.length - 1}）`, "", {
-        timeOut: 1800,
-      });
-      return;
-    }
-    if (from === to) {
-      toastr.info("起始和目标是同一楼层哦", "", { timeOut: 1000 });
-      return;
-    }
-    if (getSettings().confirmDangerousActions) {
-      if (!confirm(`确定把楼层 ${from} 移动到楼层 ${to} 的位置吗？`)) return;
-    }
-    chatUndoManager.save();
-    const msg = chat.splice(from, 1)[0];
-    chat.splice(to, 0, msg);
-    closeDialog();
-    try {
-      await executeSlashCommandsWithOptions("/forcesave");
-      await executeSlashCommandsWithOptions("/chat-reload");
-      toastr.success(`已将楼层 ${from} 移动到 ${to}（可点撤回按钮还原）`, "", {
-        timeOut: 2000,
-      });
-    } catch (e) {
-      console.error("快捷工具栏: 移动楼层失败", e);
-      toastr.error("移动失败，请尝试撤回", "", { timeOut: 1500 });
-    }
-  });
-
-  content.find("#ih_msd_confirm").on("click", async () => {
-    const selected = [];
-    content
-      .find(".ih-msd-list input[type='checkbox']:checked")
-      .each(function () {
-        selected.push(parseInt($(this).data("floor")));
-      });
-    if (selected.length === 0) {
-      toastr.warning("还没选中任何消息哦", "", { timeOut: 1000 });
-      return;
-    }
-    if (getSettings().confirmDangerousActions) {
-      if (
-        !confirm(
-          `确定删除选中的 ${selected.length} 条消息吗？\n楼层：${selected.join(", ")}`,
-        )
-      )
-        return;
-    }
-    chatUndoManager.save();
-    closeDialog();
-    selected.sort((a, b) => b - a);
-    const cmd = "/cut " + selected.join(" ");
-    await executeSlashCommandsWithOptions(cmd);
-    toastr.success(`已删除 ${selected.length} 条消息（可点撤回按钮还原）`, "", {
-      timeOut: 2000,
-    });
-  });
 }
 
 const pagingController = {
@@ -3828,7 +3646,13 @@ function _doGenerateFaIconProtectionCSS() {
     const baseReset = selectors
       .map((s) => `${s} [class*="fa-"]::before`)
       .join(",\n");
-    const iReset = selectors.map((s) => `${s} i[class*="fa-"]`).join(",\n");
+    const selectorsForIReset = selectors.filter(
+      (s) => s !== ".ih-floating-ball",
+    );
+    const iReset = selectorsForIReset
+      .map((s) => `${s} i[class*="fa-"]`)
+      .join(",\n");
+    const ballIReset = `.ih-floating-ball i[class*="fa-"]`;
     const fullCSS = `
 ${baseReset} {
     font-family: "Font Awesome 6 Free" !important;
@@ -3857,6 +3681,14 @@ ${iReset} {
     min-width: 0 !important;
     min-height: 0 !important;
     display: inline-block !important;
+}
+${ballIReset} {
+    font-family: "Font Awesome 6 Free" !important;
+    font-weight: 900 !important;
+    color: inherit !important;
+    filter: none !important;
+    background: none !important;
+    background-image: none !important;
 }
 ${css}`;
     let styleEl = document.getElementById("ih-fa-icon-protection");
@@ -3996,14 +3828,12 @@ function getButtonIdFromKey(key) {
     generateSwipe: "input_generate_swipe_btn",
     chatUndo: "input_chat_undo_btn",
     hideManager: "input_hide_manager_btn",
-    jumpToFloor: "input_jump_to_floor_btn",
     findReplace: "input_find_replace_btn",
     openQRAssistant: "input_open_qr_assistant_btn",
     switchPanelProfile: "input_switch_panel_profile_btn",
     bottomNavMode: "input_bottom_nav_mode_btn",
     includeUserNavMode: "input_include_user_nav_mode_btn",
     enterDeleteMode: "input_enter_delete_mode_btn",
-    multiSelectDelete: "input_multi_select_delete_btn",
     copyText: "input_copy_text_btn",
     pasteText: "input_paste_text_btn",
     wrapToggle: "input_wrap_toggle_btn",
@@ -4490,77 +4320,6 @@ function doContinueReply() {
   executeSlashCommandsWithOptions("/continue await=true");
 }
 
-function doJumpToFloor() {
-  const total = chat.length;
-  if (total === 0) {
-    toastr.warning("当前没有聊天消息", "", { timeOut: 1000 });
-    return;
-  }
-  const { overlay, escHandler } = createDialogOverlay();
-  const content = $(`
-        <div class="ih-jump-dialog-content">
-            <h3><i class="fa-solid fa-location-dot"></i> 跳转到指定楼层</h3>
-            <div class="ih-jump-body">
-                <div class="ih-hm-row">
-                    <input type="number" id="ih_jump_floor_input" class="ih-hm-input"
-                           placeholder="0 ~ ${total - 1}" min="0" max="${total - 1}" />
-                    <span class="ih-hm-hint">共 ${total} 条消息</span>
-                </div>
-            </div>
-            <div class="ih-jump-actions">
-                <button class="ih-hm-btn" id="ih_jump_cancel">取消</button>
-                <button class="ih-hm-btn ih-hm-btn-ok" id="ih_jump_confirm"><i class="fa-solid fa-location-dot"></i> 跳转</button>
-            </div>
-        </div>
-    `);
-  overlay.append(content);
-  syncDialogTheme(content[0]);
-  content.on("click", (e) => e.stopPropagation());
-  generateFaIconProtectionCSS();
-  const closeDialog = () => {
-    document.removeEventListener("keydown", escHandler, true);
-    overlay.remove();
-  };
-  overlay.off("click").on("click", (e) => {
-    if (e.target === overlay[0]) closeDialog();
-  });
-  content.find("#ih_jump_cancel").on("click", closeDialog);
-  const doJump = async () => {
-    const input = content.find("#ih_jump_floor_input").val().trim();
-    if (!input && input !== "0") {
-      closeDialog();
-      return;
-    }
-    const floor = parseInt(input);
-    if (isNaN(floor) || floor < 0 || floor >= total) {
-      toastr.error(`无效楼层: ${input}（范围 0~${total - 1}）`, "", {
-        timeOut: 2500,
-      });
-      return;
-    }
-    closeDialog();
-    const chatEl = document.getElementById("chat");
-    if (!chatEl) return;
-    const mesEl = chatEl.querySelector(`.mes[mesid="${floor}"]`);
-    if (mesEl) {
-      const _r = mesEl.getBoundingClientRect();
-      const useCenter = _r.height < chatEl.clientHeight - 40;
-      scrollChatToElement(mesEl, "smooth", useCenter);
-    } else {
-      await executeSlashCommandsWithOptions(`/chat-jump ${floor}`);
-    }
-    toastr.info(`已跳转到楼层 ${floor}`, "", { timeOut: 1000 });
-  };
-  content.find("#ih_jump_confirm").on("click", doJump);
-  content.find("#ih_jump_floor_input").on("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      doJump();
-    }
-  });
-  setTimeout(() => content.find("#ih_jump_floor_input").focus(), 100);
-}
-
 function doOpenQRAssistant() {
   const rocketBtn = document.getElementById("quick-reply-rocket-button");
   if (rocketBtn) {
@@ -5010,7 +4769,7 @@ function openBeautyPromptPanel() {
    - 必须同时关闭 background、border、box-shadow、backdrop-filter、outline 全家桶，
      否则会看到一圈"透明背景板"或光晕
    - background-size 用 contain 保持图片原比例不裁切，用 cover 会裁切两侧
-   - 需要隐藏默认省略号图标：\`.ih-floating-ball > i { display: none !important; }\`
+   - 需要隐藏默认省略号图标：\`.ih-floating-ball > i { display: none !important; }\`（如果发现三个点仍未隐藏，说明选择器权重不够，改用更具体的写法：\`.ih-floating-ball i[class*="fa-"] { display: none !important; }\`）
    - 如果要给展开状态使用另一张图，请写 \`.ih-floating-ball.ih-ball-expanded { background-image: url("展开图") !important; }\`
    - 如果当前美化不想区分展开状态，可以不要写 \`.ih-ball-expanded\`，插件会继续使用默认球图
 
@@ -5114,16 +4873,117 @@ function openBeautyPromptPanel() {
     document.body.removeChild(ta);
   }
 }
-const CHANGELOG_VERSION = "2.4";
+
+let _latestRemoteVersion = "";
+
+function compareVersions(a, b) {
+  const pa = String(a || "")
+    .split(".")
+    .map((n) => parseInt(n) || 0);
+  const pb = String(b || "")
+    .split(".")
+    .map((n) => parseInt(n) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+    if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+  }
+  return 0;
+}
+
+async function checkRemoteUpdate() {
+  try {
+    const localResp = await fetch(
+      `/scripts/extensions/third-party/${extensionName}/manifest.json`,
+    );
+    if (!localResp.ok) return;
+    const localManifest = await localResp.json();
+    const localVersion = localManifest.version || "";
+    const homePage = localManifest.homePage || localManifest.homepage || "";
+    const match = homePage.match(/github\.com\/([^/]+)\/([^/.]+)/);
+    if (!match) return;
+    const owner = match[1];
+    const repo = match[2];
+    let remoteVersion = "";
+    for (const branch of ["main", "master"]) {
+      try {
+        const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/manifest.json?t=${Date.now()}`;
+        const resp = await fetch(url, { cache: "no-cache" });
+        if (resp.ok) {
+          const m = await resp.json();
+          remoteVersion = m.version || "";
+          if (remoteVersion) break;
+        }
+      } catch (e) {}
+    }
+    if (!remoteVersion) return;
+    _latestRemoteVersion = remoteVersion;
+    if (compareVersions(remoteVersion, localVersion) > 0) {
+      const s = getSettings();
+      if (s.lastSeenChangelogVersion !== remoteVersion) {
+        const badge = document.getElementById("ih_new_badge");
+        if (badge) {
+          badge.style.display = "inline-block";
+          badge.title = `发现新版本 v${remoteVersion}（当前 v${localVersion}），请在扩展管理器中更新`;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("快捷工具栏: 远程版本检查失败", e);
+  }
+}
+
+const CHANGELOG_VERSION = "2.5";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.4</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.5</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li>新增「光标左移 / 光标右移」按钮，按住可连续移动光标，支持发送框、消息编辑、外部输入框、CodeMirror 编辑器和 contentEditable 富文本</li>
-  <li>新增「更新日志」入口，点击设置面板顶部按钮即可查看历史版本变更</li>
+  <li>将原「消息隐藏管理」与「多选删除」和「消息跳转」合并为统一的「消息管理」面板，内含隐藏 / 删除 / 移动 三个标签页</li>
+  <li>隐藏页：支持单条操作、范围隐藏/显示、保留最近 N 条、以及勾选多条批量隐藏/显示</li>
+  <li>删除页：支持勾选、范围选择、范围删除，与原多选删除完全兼容，操作前自动保存撤回快照</li>
+  <li>移动页：新增批量多选移动，勾选多条消息可一次性按原顺序移动到指定楼层</li>
+  <li>三个页面共用工具栏：全选（双状态）、反选、范围选择、清除</li>
+  <li>消息列表每条支持点击跳转到原聊天位置，方便定位；滚动时标题栏固定在顶部不跟随滚动</li>
+  <li>将原独立的"跳转到指定楼层"按钮合并进消息管理面板的「隐藏」标签页：在单条楼层号输入框后点"跳转"即可直接定位消息，工具栏的原跳转按钮已移除，减少按钮冗余。</li>
+  <li>输入楼层号时列表会实时高亮对应消息</li>
+  <li>范围选择模式下如果已勾选一条消息，会自动将其设为起点，无需重新点击</li>
+  <li>UI 全面优化：分段 Tab、卡片化输入行、跟随主题色的范围高亮、顶部 × 关闭按钮、隐藏滚动条等细节打磨</li>
+  <li>设置面板顶部新增小字版本号显示，方便一眼确认当前插件版本</li>
+  <li>插件折叠头新增闪烁的 new! 红字提醒，版本更新时更容易被注意到，查看日志后消失</li>
 </ul>
 `;
 
+function setupChangelogAutoPopup() {
+  const drawer = document.querySelector(
+    ".input-helper-settings .inline-drawer",
+  );
+  if (!drawer) return;
+  if (drawer._ihChangelogBound) return;
+  drawer._ihChangelogBound = true;
+  const toggle = drawer.querySelector(".inline-drawer-toggle");
+  if (!toggle) return;
+  toggle.addEventListener("click", function () {
+    setTimeout(() => {
+      const s = getSettings();
+      if (s.lastSeenChangelogVersion === CHANGELOG_VERSION) return;
+      const content = drawer.querySelector(".inline-drawer-content");
+      if (!content) return;
+      if (content.offsetHeight > 0) {
+        openChangelogPanel();
+      }
+    }, 250);
+  });
+}
+
 function openChangelogPanel() {
+  const latestKnown =
+    _latestRemoteVersion &&
+    compareVersions(_latestRemoteVersion, CHANGELOG_VERSION) > 0
+      ? _latestRemoteVersion
+      : CHANGELOG_VERSION;
+  getSettings().lastSeenChangelogVersion = latestKnown;
+  saveSettingsDebounced();
+  const badge = document.getElementById("ih_new_badge");
+  if (badge) badge.style.display = "none";
   const { overlay, escHandler } = createDialogOverlay();
   const content = $(`
     <div class="ih-help-panel-content">
@@ -5190,7 +5050,6 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-chevron-up"></i>/<i class="fa-solid fa-chevron-down"></i> <b>上/下一条AI消息</b>：在AI消息之间快速跳转。开启「包含用户消息导航」后会一并跳转到用户消息</li>
     <li><i class="fa-solid fa-book-open"></i> <b>翻页模式</b>：开启后，上/下导航变为翻页（也支持音量键翻页，需安装Key Mapper）；双击音量上键跳到最新AI消息顶部，双击音量下键跳到聊天底部。开启翻页模式后，点击聊天区域上半部分向上翻页，下半部分向下翻页。可以在设置里的「翻页滚动高度」调整每次翻页的距离，100% 约等于一屏高度，数值越小翻得越细，数值越大翻得越快。开启翻页模式时，如果悬浮球设置了"自动隐藏"会自动出现以方便操作，关闭翻页后再隐藏。</li>
     <li><i class="fa-solid fa-gauge-high"></i> <b>自动滚动</b>：以设定速度自动向下滚动，适合阅读长文；用户手动滚动时暂停，2秒后恢复</li>
-    <li><i class="fa-solid fa-location-dot"></i> <b>跳转指定楼层</b>：输入楼层号直接跳转</li>
     <li><i class="fa-solid fa-angle-double-down"></i> <b>底部跳转模式</b>：开启后，上/下一条消息跳转改为对齐消息底部，而不是顶部。适合从底部往上浏览的阅读习惯</li>
     <li><i class="fa-solid fa-arrows-up-down"></i> <b>包含用户消息导航</b>：默认上/下一条按钮只在 AI 消息间跳转，开启此模式后会一并跳转到用户消息。可以和「底部跳转模式」叠加使用</li>
 </ul>
@@ -5203,7 +5062,6 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-shuffle"></i> <b>生成备选回复</b>：为最后一条AI消息生成一条新的备选回复（Swipe）</li>
     <li><i class="fa-solid fa-trash-arrow-up"></i> <b>撤回删除</b>：在执行删除消息或删除备选等操作后，点击此按钮可以撤回到操作前的状态。快照保留 5 分钟，过期或切换聊天后自动清除</li>
     <li><i class="fa-solid fa-trash-can"></i> <b>进入删除模式</b>：一键进入/退出酒馆原生的消息多选删除模式。进入后可以勾选多条消息批量删除</li>
-    <li><i class="fa-solid fa-list-check"></i> <b>多选删除</b>：打开插件内置的消息列表弹窗，可以勾选任意多条消息，包括不连续楼层，然后一次性删除。删除前会自动保存快照，5 分钟内可用「撤回删除」恢复</li>
     <li><i class="fa-solid fa-magnifying-glass"></i> <b>查找替换</b>：在输入框、正在编辑中的消息、以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）里查找和替换文本，支持 Enter 跳转下一个、Shift+Enter 跳转上一个、Esc 关闭；点击 Aa 可以切换是否区分大小写。普通 textarea 中查找到的当前匹配会显示可视高亮，即使点击「替换为」输入框，当前匹配位置也会继续标出，方便确认替换目标。<br>移动端嫌占地方？点击替换行最右侧的折叠按钮（双左箭头），可以把整个查找框收成屏幕左侧的一条窄竖条，只保留展开按钮、上/下导航、当前/总数；点击展开按钮（双右箭头）即可恢复完整面板，搜索状态、匹配位置、跨弹窗跟随等行为完全保留。切换酒馆主题时查找框的颜色也会自动同步更新，跟悬浮面板一样跟着主题走。</li>
 </ul>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-address-book"></i> 聊天管理</h4>
@@ -5216,8 +5074,14 @@ function openHelpPanel() {
 </ul>
 <p style="opacity:0.7;font-size:11px;">⚠️ 删除聊天会真实从酒馆里删掉文件，5 分钟撤回窗口过后无法再恢复哦，重要聊天建议先备份</p>
 <p style="opacity:0.7;font-size:11px;">⚠️ 删除类操作可在设置中开启"删除操作前弹窗确认"来防止误操作。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-ghost"></i> 消息隐藏管理</h4>
-<p>管理哪些消息对AI可见。可以隐藏/显示指定范围的楼层，或只保留最近N条。隐藏的消息不会发送给AI。</p>
+<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-ghost"></i> 消息管理</h4>
+<p>统一的消息管理面板（原「消息隐藏管理」和「多选删除」已合并），内含三个标签页：</p>
+<ul style="margin:4px 0;padding-left:18px;">
+    <li><b>隐藏</b>：管理哪些消息对 AI 可见。支持单条隐藏/显示/跳转、范围隐藏/显示、保留最近 N 条、勾选多条批量隐藏/显示。输入楼层号后点"跳转"可直接定位到该消息；隐藏的消息不会发送给 AI</li>
+    <li><b>删除</b>：可勾选任意多条消息（包括不连续楼层），或按范围批量删除。删除前会自动保存快照，5 分钟内可用「撤回删除」恢复</li>
+    <li><b>移动</b>：勾选多条消息，一次性按原顺序移动到指定楼层。移动前也会自动保存快照，方便撤回</li>
+</ul>
+<p>三个标签页共用工具栏：全选、反选、范围选择、清除。输入楼层号时列表会实时高亮对应消息（单条用强色、范围用主题色、保留最近用绿色、移动目标用紫色）。每条消息前的小箭头按钮可以一键跳转到原聊天位置～</p>
 <h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-puzzle-piece"></i> 自定义内容</h4>
 <p>在设置面板中可以添加自己常用的自定义按钮，点击按钮会在输入框中插入预设内容。</p>
 <p><b>插入内容</b>支持多种形式：</p>
@@ -5298,60 +5162,207 @@ function openHideManagerPanel() {
     return;
   }
   const { overlay, escHandler } = createDialogOverlay();
-  const status = getHiddenStatus();
+  const total = chat.length;
+
+  function buildMessageListHTML() {
+    return chat
+      .map((msg, idx) => {
+        const rawMes = String(msg?.mes || "");
+        const sender = ihEscapeHtml(msg.name || (msg.is_user ? "User" : "AI"));
+        const previewText = rawMes.replace(/\s+/g, " ").substring(0, 60);
+        const preview = ihEscapeHtml(previewText);
+        const truncate = rawMes.length > 60 ? "..." : "";
+        const hidden = isMessageHidden(msg);
+        const ghost = hidden
+          ? '<span class="ih-mgr-msg-ghost"><i class="fa-solid fa-ghost"></i></span>'
+          : "";
+        return `
+          <div class="ih-mgr-msg-item ${hidden ? "ih-mgr-msg-is-hidden" : ""}" data-floor="${idx}">
+            <span class="ih-mgr-msg-check"><input type="checkbox" data-floor="${idx}" /></span>
+            <span class="ih-mgr-msg-lead">
+              <button class="ih-mgr-msg-jump" data-floor="${idx}" title="跳转到此消息"><i class="fa-solid fa-location-arrow"></i></button>
+              <span class="ih-mgr-msg-floor">#${idx}</span>
+            </span>
+            <span class="ih-mgr-msg-sender">${sender}</span>
+            <span class="ih-mgr-msg-preview">${preview}${truncate}</span>
+            ${ghost}
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  const initStatus = getHiddenStatus();
+
   const content = $(`
-        <div class="ih-hide-manager-content">
-            <h3><i class="fa-solid fa-ghost"></i> 消息隐藏管理</h3>
-            <div class="ih-hm-status" id="ih_hm_status">
-                <i class="fa-solid fa-circle-info"></i> <span>${status.summary}</span>
-            </div>
-            <div class="ih-hm-group">
-                <div class="ih-hm-group-label">隐藏/显示指定楼层</div>
-                <div class="ih-hm-row">
-                    <input type="number" id="ih_specific_floor" class="ih-hm-input" placeholder="楼层号" min="0" max="${chat.length - 1}" />
-                    <button class="ih-hm-btn ih-hm-btn-warn" id="ih_do_hide_one"><i class="fa-solid fa-eye-slash"></i> 隐藏</button>
-                    <button class="ih-hm-btn ih-hm-btn-ok" id="ih_do_unhide_one"><i class="fa-solid fa-eye"></i> 显示</button>
-                </div>
-            </div>
-            <div class="ih-hm-group">
-                <div class="ih-hm-group-label">隐藏范围</div>
-                <div class="ih-hm-row">
-                    <input type="number" id="ih_hide_from" class="ih-hm-input" placeholder="起始（留空=0）" min="0" max="${chat.length - 1}" />
-                    <span class="ih-hm-sep">~</span>
-                    <input type="number" id="ih_hide_to" class="ih-hm-input" placeholder="结束（留空=末尾）" min="0" max="${chat.length - 1}" />
-                    <button class="ih-hm-btn ih-hm-btn-warn" id="ih_do_hide"><i class="fa-solid fa-eye-slash"></i> 隐藏</button>
-                </div>
-            </div>
-            <div class="ih-hm-group">
-                <div class="ih-hm-group-label">取消隐藏</div>
-                <div class="ih-hm-row">
-                    <input type="number" id="ih_unhide_from" class="ih-hm-input" placeholder="起始（留空=0）" min="0" max="${chat.length - 1}" />
-                    <span class="ih-hm-sep">~</span>
-                    <input type="number" id="ih_unhide_to" class="ih-hm-input" placeholder="结束（留空=末尾）" min="0" max="${chat.length - 1}" />
-                    <button class="ih-hm-btn ih-hm-btn-ok" id="ih_do_unhide"><i class="fa-solid fa-eye"></i> 取消隐藏</button>
-                </div>
-            </div>
-            <div class="ih-hm-group">
-                <div class="ih-hm-group-label">只保留最近</div>
-                <div class="ih-hm-row">
-                    <input type="number" id="ih_keep_recent" class="ih-hm-input ih-hm-input-wide" placeholder="条数" min="1" />
-                    <span class="ih-hm-hint">条可见（单次执行）</span>
-                    <button class="ih-hm-btn ih-hm-btn-ok" id="ih_do_keep"><i class="fa-solid fa-filter"></i> 执行</button>
-                </div>
-            </div>
-            <div class="ih-hm-quick">
-                <button class="ih-hm-btn ih-hm-btn-warn ih-hm-btn-half" id="ih_do_hide_all"><i class="fa-solid fa-eye-slash"></i> 隐藏全部</button>
-                <button class="ih-hm-btn ih-hm-btn-ok ih-hm-btn-half" id="ih_do_unhide_all"><i class="fa-solid fa-eye"></i> 显示全部</button>
-            </div>
-            <div class="ih-hm-close-row">
-                <button class="ih-hm-btn ih-hm-btn-close" id="ih_hm_close">关闭</button>
-            </div>
+    <div class="ih-mgr-content">
+      <div class="ih-mgr-header">
+        <h3><i class="fa-solid fa-ghost"></i> 消息管理</h3>
+        <span class="ih-mgr-total-badge">${total} 条消息</span>
+        <button class="ih-mgr-close-x" id="ih_mgr_close" title="关闭"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="ih-mgr-tabs">
+        <button class="ih-mgr-tab ih-mgr-tab-active" data-tab="hide">
+          <i class="fa-solid fa-eye-slash"></i><span>隐藏</span>
+        </button>
+        <button class="ih-mgr-tab" data-tab="delete">
+          <i class="fa-sol id fa-trash"></i><span>删除</span>
+        </button>
+        <button class="ih-mgr-tab" data-tab="move">
+          <i class="fa-solid fa-arrows-up-down"></i><span>移动</span>
+        </button>
+      </div>
+
+      <div class="ih-mgr-tab-panel" data-panel="hide">
+        <div class="ih-mgr-status" id="ih_mgr_hide_status">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>${initStatus.summary}</span>
         </div>
-    `);
+
+        <div class="ih-mgr-inline-row ih-mgr-inline-row-oneline">
+          <label class="ih-mgr-inline-label">单条</label>
+          <input type="number" id="ih_mgr_specific_floor" class="ih-mgr-input" placeholder="楼层号" min="0" max="${total - 1}" />
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon ih-mgr-input-clear-btn" title="清除输入" data-clear-targets="ih_mgr_specific_floor"><i class="fa-solid fa-eraser"></i></button>
+          <div class="ih-mgr-inline-actions">
+            <button class="ih-mgr-btn ih-mgr-btn-warn" id="ih_mgr_hide_one"><i class="fa-solid fa-eye-slash"></i> 隐藏</button>
+            <button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_mgr_unhide_one"><i class="fa-solid fa-eye"></i> 显示</button>
+            <button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_mgr_jump_one"><i class="fa-solid fa-location-arrow"></i> 跳转</button>
+          </div>
+        </div>
+
+        <div class="ih-mgr-inline-row ih-mgr-inline-row-oneline">
+          <label class="ih-mgr-inline-label">范围</label>
+          <input type="number" id="ih_mgr_range_from" class="ih-mgr-input" placeholder="起始" min="0" max="${total - 1}" />
+          <span class="ih-mgr-arrow">→</span>
+          <input type="number" id="ih_mgr_range_to" class="ih-mgr-input" placeholder="结束" min="0" max="${total - 1}" />
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon ih-mgr-input-clear-btn" title="清除输入" data-clear-targets="ih_mgr_range_from,ih_mgr_range_to"><i class="fa-solid fa-eraser"></i></button>
+          <div class="ih-mgr-inline-actions">
+            <button class="ih-mgr-btn ih-mgr-btn-warn" id="ih_mgr_do_range_hide"><i class="fa-solid fa-eye-slash"></i> 隐藏</button>
+            <button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_mgr_do_range_unhide"><i class="fa-solid fa-eye"></i> 显示</button>
+          </div>
+        </div>
+
+        <div class="ih-mgr-inline-row">
+          <label class="ih-mgr-inline-label">保留最近</label>
+          <input type="number" id="ih_mgr_keep_recent" class="ih-mgr-input" placeholder="条数" min="1" />
+          <span class="ih-mgr-hint-inline">条可见</span>
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon ih-mgr-input-clear-btn" title="清除输入" data-clear-targets="ih_mgr_keep_recent"><i class="fa-solid fa-eraser"></i></button>
+          <div class="ih-mgr-inline-actions">
+            <button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_mgr_do_keep"><i class="fa-solid fa-filter"></i> 执行</button>
+          </div>
+        </div>
+
+        <div class="ih-mgr-toolbar">
+          <div class="ih-mgr-btn-group">
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_hide_select_all" title="全选"><i class="fa-solid fa-check-double"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_hide_invert" title="反选"><i class="fa-solid fa-rotate"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_hide_range_toggle" title="范围选择"><i class="fa-solid fa-arrows-left-right-to-line"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_hide_clear" title="清除选择"><i class="fa-solid fa-eraser"></i></button>
+          </div>
+          <span class="ih-mgr-count" id="ih_mgr_hide_count">已选 0 条</span>
+        </div>
+
+        <div class="ih-mgr-list-wrap">
+          <div class="ih-mgr-msg-list" data-tab="hide"></div>
+        </div>
+
+        <div class="ih-mgr-footer-split">
+          <div class="ih-mgr-action-group">
+            <div class="ih-mgr-btn-group">
+              <button class="ih-mgr-btn ih-mgr-btn-ghost ih-mgr-btn-ghost-warn" id="ih_mgr_do_hide_all"><i class="fa-solid fa-eye-slash"></i> 全部隐藏</button>
+              <button class="ih-mgr-btn ih-mgr-btn-ghost ih-mgr-btn-ghost-ok" id="ih_mgr_do_unhide_all"><i class="fa-solid fa-eye"></i> 全部显示</button>
+            </div>
+          </div>
+          <div class="ih-mgr-action-group">
+            <div class="ih-mgr-btn-group">
+              <button class="ih-mgr-btn ih-mgr-btn-warn ih-mgr-btn-primary" id="ih_mgr_hide_selected"><i class="fa-solid fa-eye-slash"></i> 隐藏所选</button>
+              <button class="ih-mgr-btn ih-mgr-btn-ok ih-mgr-btn-primary" id="ih_mgr_unhide_selected"><i class="fa-solid fa-eye"></i> 显示所选</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ih-mgr-tab-panel" data-panel="delete" style="display:none;">
+        <div class="ih-mgr-status">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>勾选要删除的消息，或用范围选择批量框选</span>
+        </div>
+
+        <div class="ih-mgr-inline-row ih-mgr-inline-row-oneline">
+          <label class="ih-mgr-inline-label">范围删除</label>
+          <input type="number" id="ih_mgr_del_from" class="ih-mgr-input" placeholder="从" min="0" max="${total - 1}" />
+          <span class="ih-mgr-arrow">→</span>
+          <input type="number" id="ih_mgr_del_to" class="ih-mgr-input" placeholder="到" min="0" max="${total - 1}" />
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon ih-mgr-input-clear-btn" title="清除输入" data-clear-targets="ih_mgr_del_from,ih_mgr_del_to"><i class="fa-solid fa-eraser"></i></button>
+          <div class="ih-mgr-inline-actions">
+            <button class="ih-mgr-btn ih-mgr-btn-warn" id="ih_mgr_del_range_confirm"><i class="fa-solid fa-trash"></i> 删除</button>
+          </div>
+        </div>
+
+        <div class="ih-mgr-toolbar">
+          <div class="ih-mgr-btn-group">
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_del_select_all" title="全选"><i class="fa-solid fa-check-double"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_del_invert" title="反选"><i class="fa-solid fa-rotate"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_del_range_toggle" title="范围选择"><i class="fa-solid fa-arrows-left-right-to-line"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_del_clear" title="清除选择"><i class="fa-solid fa-eraser"></i></button>
+          </div>
+          <span class="ih-mgr-count" id="ih_mgr_del_count">已选 0 条</span>
+        </div>
+
+        <div class="ih-mgr-list-wrap">
+          <div class="ih-mgr-msg-list" data-tab="delete"></div>
+        </div>
+
+        <div class="ih-mgr-footer-actions">
+          <button class="ih-mgr-btn ih-mgr-btn-warn ih-mgr-btn-primary" id="ih_mgr_del_confirm"><i class="fa-solid fa-trash"></i> 删除选中</button>
+        </div>
+      </div>
+
+      <div class="ih-mgr-tab-panel" data-panel="move" style="display:none;">
+        <div class="ih-mgr-status">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>勾选要移动的消息（可多条），输入目标楼层后点移动</span>
+        </div>
+
+        <div class="ih-mgr-inline-row">
+          <label class="ih-mgr-inline-label">目标楼层</label>
+          <input type="number" id="ih_mgr_mv_target" class="ih-mgr-input" placeholder="楼层号" min="0" max="${total - 1}" />
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon ih-mgr-input-clear-btn" title="清除输入" data-clear-targets="ih_mgr_mv_target"><i class="fa-solid fa-eraser"></i></button>
+          <div class="ih-mgr-inline-actions">
+            <button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_mgr_mv_confirm"><i class="fa-solid fa-arrows-up-down"></i> 移动</button>
+          </div>
+        </div>
+
+        <div class="ih-mgr-toolbar">
+          <div class="ih-mgr-btn-group">
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_mv_select_all" title="全选"><i class="fa-solid fa-check-double"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_mv_invert" title="反选"><i class="fa-solid fa-rotate"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_mv_range_toggle" title="范围选择"><i class="fa-solid fa-arrows-left-right-to-line"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_mv_clear" title="清除选择"><i class="fa-solid fa-eraser"></i></button>
+          </div>
+          <span class="ih-mgr-count" id="ih_mgr_mv_count">已选 0 条</span>
+        </div>
+
+        <div class="ih-mgr-list-wrap">
+          <div class="ih-mgr-msg-list" data-tab="move"></div>
+        </div>
+      </div>
+
+    </div>
+  `);
+
   overlay.append(content);
   syncDialogTheme(content[0]);
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
+  requestAnimationFrame(() => {
+    const _msgListHTML = buildMessageListHTML();
+    content.find('.ih-mgr-msg-list[data-tab="hide"]').html(_msgListHTML);
+    content.find('.ih-mgr-msg-list[data-tab="delete"]').html(_msgListHTML);
+    content.find('.ih-mgr-msg-list[data-tab="move"]').html(_msgListHTML);
+  });
+
   const closeDialog = () => {
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
@@ -5359,55 +5370,743 @@ function openHideManagerPanel() {
   overlay.off("click").on("click", (e) => {
     if (e.target === overlay[0]) closeDialog();
   });
-  content.find("#ih_hm_close").on("click", closeDialog);
-  function refreshStatus() {
-    const s = getHiddenStatus();
-    content.find("#ih_hm_status span").text(s.summary);
+  content.find("#ih_mgr_close").on("click", closeDialog);
+  content.on("click", ".ih-mgr-input-clear-btn", function () {
+    const targetsStr = $(this).attr("data-clear-targets") || "";
+    const targets = targetsStr
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    targets.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.value = "";
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+  });
+
+  content.on("click", ".ih-mgr-tab", function () {
+    const tab = $(this).data("tab");
+    content.find(".ih-mgr-tab").removeClass("ih-mgr-tab-active");
+    $(this).addClass("ih-mgr-tab-active");
+    content.find(".ih-mgr-tab-panel").hide();
+    content.find(`.ih-mgr-tab-panel[data-panel="${tab}"]`).show();
+  });
+
+  content.on("click", ".ih-mgr-msg-jump", function (e) {
+    e.stopPropagation();
+    e.preventDefault();
+    const floor = parseInt($(this).data("floor"));
+    if (isNaN(floor)) return;
+    closeDialog();
+    const chatEl = document.getElementById("chat");
+    if (!chatEl) return;
+    const mesEl = chatEl.querySelector(`.mes[mesid="${floor}"]`);
+    if (mesEl) {
+      const r = mesEl.getBoundingClientRect();
+      const useCenter = r.height < chatEl.clientHeight - 40;
+      scrollChatToElement(mesEl, "smooth", useCenter);
+    } else {
+      executeSlashCommandsWithOptions(`/chat-jump ${floor}`);
+    }
+    toastr.info(`已跳转到楼层 ${floor}`, "", { timeOut: 1000 });
+  });
+
+  const hidePanel = content.find('.ih-mgr-tab-panel[data-panel="hide"]');
+  const delPanel = content.find('.ih-mgr-tab-panel[data-panel="delete"]');
+  const movePanel = content.find('.ih-mgr-tab-panel[data-panel="move"]');
+
+  function updateSelectAllButton(panel, btnSel) {
+    const checkboxes = panel.find(".ih-mgr-msg-list input[type=checkbox]");
+    const t = checkboxes.length;
+    const c = checkboxes.filter(":checked").length;
+    const btn = panel.find(btnSel);
+    if (t > 0 && c === t) {
+      btn.html('<i class="fa-solid fa-square-xmark"></i>');
+      btn.attr("title", "取消全选");
+      btn.addClass("ih-mgr-btn-active");
+    } else {
+      btn.html('<i class="fa-solid fa-check-double"></i>');
+      btn.attr("title", "全选");
+      btn.removeClass("ih-mgr-btn-active");
+    }
   }
-  content.find("#ih_do_hide_one").on("click", async () => {
-    const val = content.find("#ih_specific_floor").val();
-    if (val === "") {
+
+  function getSelectedFloors(panel) {
+    const arr = [];
+    panel
+      .find(".ih-mgr-msg-list input[type=checkbox]:checked")
+      .each(function () {
+        arr.push(parseInt($(this).data("floor")));
+      });
+    return arr.sort((a, b) => a - b);
+  }
+
+  function mergeToRanges(floors) {
+    if (floors.length === 0) return [];
+    const sorted = [...floors].sort((a, b) => a - b);
+    const ranges = [];
+    let start = sorted[0];
+    let end = sorted[0];
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] === end + 1) {
+        end = sorted[i];
+      } else {
+        ranges.push([start, end]);
+        start = sorted[i];
+        end = sorted[i];
+      }
+    }
+    ranges.push([start, end]);
+    return ranges;
+  }
+
+  function setupRangeSelection(panel, toggleBtnId) {
+    const state = { rangeMode: false, rangeStart: null };
+
+    panel.find(toggleBtnId).on("click", function () {
+      state.rangeMode = !state.rangeMode;
+      if (state.rangeMode) {
+        const checked = getSelectedFloors(panel);
+        if (checked.length === 1) {
+          state.rangeStart = checked[0];
+        } else {
+          state.rangeStart = null;
+        }
+      } else {
+        state.rangeStart = null;
+      }
+      $(this).toggleClass("ih-mgr-btn-active", state.rangeMode);
+      panel.toggleClass("ih-mgr-range-mode", state.rangeMode);
+      applyRangeStartHighlight(panel, state.rangeStart);
+      if (state.rangeMode) {
+        if (state.rangeStart !== null) {
+          toastr.info(
+            `已将 #${state.rangeStart} 设为起点，再点一条作为终点`,
+            "",
+            { timeOut: 1500 },
+          );
+        } else {
+          toastr.info("范围选择：点起点，再点终点，中间自动勾选", "", {
+            timeOut: 1500,
+          });
+        }
+      }
+    });
+
+    return state;
+  }
+
+  function applyRangeStartHighlight(panel, startFloor) {
+    panel.find(".ih-mgr-msg-item").removeClass("ih-mgr-range-start");
+    if (startFloor !== null && startFloor !== undefined) {
+      panel
+        .find(`.ih-mgr-msg-item[data-floor="${startFloor}"]`)
+        .addClass("ih-mgr-range-start");
+    }
+  }
+
+  function handleListClick(panel, state, onChange) {
+    panel.on("click", ".ih-mgr-msg-item", function (e) {
+      const floor = parseInt($(this).data("floor"));
+
+      if (state.rangeMode) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (state.rangeStart === null) {
+          state.rangeStart = floor;
+          applyRangeStartHighlight(panel, state.rangeStart);
+        } else {
+          const a = Math.min(state.rangeStart, floor);
+          const b = Math.max(state.rangeStart, floor);
+          for (let i = a; i <= b; i++) {
+            panel
+              .find(`.ih-mgr-msg-list input[data-floor="${i}"]`)
+              .prop("checked", true);
+            panel
+              .find(`.ih-mgr-msg-list .ih-mgr-msg-item[data-floor="${i}"]`)
+              .addClass("ih-mgr-msg-checked");
+          }
+          state.rangeStart = null;
+          state.rangeMode = false;
+          panel.find(".ih-mgr-btn-active").each(function () {
+            if (
+              $(this).attr("id") &&
+              $(this).attr("id").endsWith("_range_toggle")
+            ) {
+              $(this).removeClass("ih-mgr-btn-active");
+            }
+          });
+          panel.removeClass("ih-mgr-range-mode");
+          applyRangeStartHighlight(panel, null);
+          onChange();
+        }
+        return;
+      }
+
+      if ($(e.target).is("input[type=checkbox]")) return;
+
+      const cb = $(this).find("input[type=checkbox]")[0];
+      if (cb) {
+        cb.checked = !cb.checked;
+        $(this).toggleClass("ih-mgr-msg-checked", cb.checked);
+      }
+      onChange();
+    });
+
+    panel.on("change", ".ih-mgr-msg-list input[type=checkbox]", function () {
+      if (state.rangeMode) return;
+      $(this)
+        .closest(".ih-mgr-msg-item")
+        .toggleClass("ih-mgr-msg-checked", this.checked);
+      onChange();
+    });
+  }
+
+  const hideState = setupRangeSelection(hidePanel, "#ih_mgr_hide_range_toggle");
+  const delState = setupRangeSelection(delPanel, "#ih_mgr_del_range_toggle");
+  const mvState = setupRangeSelection(movePanel, "#ih_mgr_mv_range_toggle");
+
+  function scrollListToFloor(listEl, floor) {
+    if (floor === null || floor === undefined || isNaN(floor) || floor < 0)
+      return;
+    const list = listEl[0];
+    if (!list) return;
+    const item = list.querySelector(`.ih-mgr-msg-item[data-floor="${floor}"]`);
+    if (!item) return;
+    const listRect = list.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    const listH = list.clientHeight;
+    const itemH = itemRect.height;
+    const itemTopInList = itemRect.top - listRect.top + list.scrollTop;
+    const scrollTop = list.scrollTop;
+    if (
+      itemTopInList >= scrollTop &&
+      itemTopInList + itemH <= scrollTop + listH
+    )
+      return;
+    const targetTop = itemTopInList - (listH - itemH) / 2;
+    list.scrollTo({
+      top: Math.max(0, targetTop),
+      behavior: "smooth",
+    });
+  }
+
+  function applyHideRangeInputHighlight() {
+    const list = hidePanel.find(".ih-mgr-msg-list");
+    list
+      .find(".ih-mgr-msg-item")
+      .removeClass(
+        "ih-mgr-highlight ih-mgr-highlight-single ih-mgr-highlight-keep",
+      );
+
+    const single = hidePanel.find("#ih_mgr_specific_floor").val();
+    if (single !== "") {
+      const f = parseInt(single);
+      if (!isNaN(f) && f >= 0 && f < total) {
+        list
+          .find(`.ih-mgr-msg-item[data-floor="${f}"]`)
+          .addClass("ih-mgr-highlight-single");
+      }
+    }
+
+    const fv = hidePanel.find("#ih_mgr_range_from").val();
+    const tv = hidePanel.find("#ih_mgr_range_to").val();
+    if (fv !== "" || tv !== "") {
+      const f = fv === "" ? 0 : parseInt(fv);
+      const t = tv === "" ? total - 1 : parseInt(tv);
+      if (!isNaN(f) && !isNaN(t)) {
+        const lo = Math.max(0, Math.min(f, t));
+        const hi = Math.min(total - 1, Math.max(f, t));
+        for (let i = lo; i <= hi; i++) {
+          list
+            .find(`.ih-mgr-msg-item[data-floor="${i}"]`)
+            .addClass("ih-mgr-highlight");
+        }
+      }
+    }
+
+    const keepVal = hidePanel.find("#ih_mgr_keep_recent").val();
+    if (keepVal !== "") {
+      const n = parseInt(keepVal);
+      if (!isNaN(n) && n > 0 && n < total) {
+        const start = total - n;
+        for (let i = start; i < total; i++) {
+          list
+            .find(`.ih-mgr-msg-item[data-floor="${i}"]`)
+            .addClass("ih-mgr-highlight-keep");
+        }
+      }
+    }
+  }
+
+  function applyDelRangeInputHighlight() {
+    const list = delPanel.find(".ih-mgr-msg-list");
+    list.find(".ih-mgr-msg-item").removeClass("ih-mgr-highlight");
+    const fv = delPanel.find("#ih_mgr_del_from").val();
+    const tv = delPanel.find("#ih_mgr_del_to").val();
+    if (fv === "" && tv === "") return;
+    const f = fv === "" ? 0 : parseInt(fv);
+    const t = tv === "" ? total - 1 : parseInt(tv);
+    if (isNaN(f) || isNaN(t)) return;
+    const lo = Math.max(0, Math.min(f, t));
+    const hi = Math.min(total - 1, Math.max(f, t));
+    for (let i = lo; i <= hi; i++) {
+      list
+        .find(`.ih-mgr-msg-item[data-floor="${i}"]`)
+        .addClass("ih-mgr-highlight");
+    }
+  }
+
+  function applyMoveTargetHighlight() {
+    const list = movePanel.find(".ih-mgr-msg-list");
+    list.find(".ih-mgr-msg-item").removeClass("ih-mgr-move-target");
+    const tv = movePanel.find("#ih_mgr_mv_target").val();
+    if (tv === "") return;
+    const t = parseInt(tv);
+    if (!isNaN(t) && t >= 0 && t < total) {
+      list
+        .find(`.ih-mgr-msg-item[data-floor="${t}"]`)
+        .addClass("ih-mgr-move-target");
+    }
+  }
+
+  hidePanel.on("input", "input[type=number]", applyHideRangeInputHighlight);
+  delPanel.on("input", "input[type=number]", applyDelRangeInputHighlight);
+  movePanel.on("input", "input[type=number]", applyMoveTargetHighlight);
+  hidePanel.on("input", "#ih_mgr_range_from, #ih_mgr_range_to", () => {
+    const fv = hidePanel.find("#ih_mgr_range_from").val();
+    const tv = hidePanel.find("#ih_mgr_range_to").val();
+    const list = hidePanel.find(".ih-mgr-msg-list");
+    list.find("input[type=checkbox]").prop("checked", false);
+    list.find(".ih-mgr-msg-item").removeClass("ih-mgr-msg-checked");
+    if (fv !== "" || tv !== "") {
+      const f = fv === "" ? 0 : parseInt(fv);
+      const t = tv === "" ? total - 1 : parseInt(tv);
+      if (!isNaN(f) && !isNaN(t)) {
+        const lo = Math.max(0, Math.min(f, t));
+        const hi = Math.min(total - 1, Math.max(f, t));
+        for (let i = lo; i <= hi; i++) {
+          list
+            .find(`input[type=checkbox][data-floor="${i}"]`)
+            .prop("checked", true);
+          list
+            .find(`.ih-mgr-msg-item[data-floor="${i}"]`)
+            .addClass("ih-mgr-msg-checked");
+        }
+      }
+    }
+    updateHideCount();
+  });
+
+  delPanel.on("input", "#ih_mgr_del_from, #ih_mgr_del_to", () => {
+    const fv = delPanel.find("#ih_mgr_del_from").val();
+    const tv = delPanel.find("#ih_mgr_del_to").val();
+    const list = delPanel.find(".ih-mgr-msg-list");
+    list.find("input[type=checkbox]").prop("checked", false);
+    list.find(".ih-mgr-msg-item").removeClass("ih-mgr-msg-checked");
+    if (fv !== "" || tv !== "") {
+      const f = fv === "" ? 0 : parseInt(fv);
+      const t = tv === "" ? total - 1 : parseInt(tv);
+      if (!isNaN(f) && !isNaN(t)) {
+        const lo = Math.max(0, Math.min(f, t));
+        const hi = Math.min(total - 1, Math.max(f, t));
+        for (let i = lo; i <= hi; i++) {
+          list
+            .find(`input[type=checkbox][data-floor="${i}"]`)
+            .prop("checked", true);
+          list
+            .find(`.ih-mgr-msg-item[data-floor="${i}"]`)
+            .addClass("ih-mgr-msg-checked");
+        }
+      }
+    }
+    updateDelCount();
+  });
+  hidePanel.on("input", "#ih_mgr_specific_floor", function () {
+    const v = $(this).val();
+    if (v !== "")
+      scrollListToFloor(hidePanel.find(".ih-mgr-msg-list"), parseInt(v));
+  });
+  hidePanel.on("input", "#ih_mgr_range_from", function () {
+    const v = $(this).val();
+    if (v !== "")
+      scrollListToFloor(hidePanel.find(".ih-mgr-msg-list"), parseInt(v));
+  });
+  hidePanel.on("input", "#ih_mgr_range_to", function () {
+    const v = $(this).val();
+    if (v !== "")
+      scrollListToFloor(hidePanel.find(".ih-mgr-msg-list"), parseInt(v));
+  });
+  hidePanel.on("input", "#ih_mgr_keep_recent", function () {
+    const v = $(this).val();
+    if (v === "") return;
+    const n = parseInt(v);
+    if (!isNaN(n) && n > 0) {
+      scrollListToFloor(
+        hidePanel.find(".ih-mgr-msg-list"),
+        Math.max(0, total - n),
+      );
+    }
+  });
+  delPanel.on("input", "#ih_mgr_del_from", function () {
+    const v = $(this).val();
+    if (v !== "")
+      scrollListToFloor(delPanel.find(".ih-mgr-msg-list"), parseInt(v));
+  });
+  delPanel.on("input", "#ih_mgr_del_to", function () {
+    const v = $(this).val();
+    if (v !== "")
+      scrollListToFloor(delPanel.find(".ih-mgr-msg-list"), parseInt(v));
+  });
+  movePanel.on("input", "#ih_mgr_mv_target", function () {
+    const v = $(this).val();
+    if (v !== "")
+      scrollListToFloor(movePanel.find(".ih-mgr-msg-list"), parseInt(v));
+  });
+
+  function updateHideCount() {
+    const n = hidePanel.find(
+      ".ih-mgr-msg-list input[type=checkbox]:checked",
+    ).length;
+    hidePanel.find("#ih_mgr_hide_count").text(`已选 ${n} 条`);
+    updateSelectAllButton(hidePanel, "#ih_mgr_hide_select_all");
+  }
+  function updateDelCount() {
+    const n = delPanel.find(
+      ".ih-mgr-msg-list input[type=checkbox]:checked",
+    ).length;
+    delPanel.find("#ih_mgr_del_count").text(`已选 ${n} 条`);
+    updateSelectAllButton(delPanel, "#ih_mgr_del_select_all");
+  }
+  function updateMvCount() {
+    const n = movePanel.find(
+      ".ih-mgr-msg-list input[type=checkbox]:checked",
+    ).length;
+    movePanel.find("#ih_mgr_mv_count").text(`已选 ${n} 条`);
+    updateSelectAllButton(movePanel, "#ih_mgr_mv_select_all");
+  }
+
+  handleListClick(hidePanel, hideState, updateHideCount);
+  handleListClick(delPanel, delState, updateDelCount);
+  handleListClick(movePanel, mvState, updateMvCount);
+
+  function bindSelectAll(
+    panel,
+    selectBtnId,
+    invertBtnId,
+    clearBtnId,
+    updateFn,
+  ) {
+    panel.find(selectBtnId).on("click", () => {
+      const checkboxes = panel.find(".ih-mgr-msg-list input[type=checkbox]");
+      const t = checkboxes.length;
+      const c = checkboxes.filter(":checked").length;
+      const shouldCheck = !(t > 0 && c === t);
+      checkboxes.prop("checked", shouldCheck);
+      panel
+        .find(".ih-mgr-msg-list .ih-mgr-msg-item")
+        .toggleClass("ih-mgr-msg-checked", shouldCheck);
+      updateFn();
+    });
+    panel.find(invertBtnId).on("click", () => {
+      panel.find(".ih-mgr-msg-list input[type=checkbox]").each(function () {
+        this.checked = !this.checked;
+        $(this)
+          .closest(".ih-mgr-msg-item")
+          .toggleClass("ih-mgr-msg-checked", this.checked);
+      });
+      updateFn();
+    });
+    panel.find(clearBtnId).on("click", () => {
+      panel
+        .find(".ih-mgr-msg-list input[type=checkbox]")
+        .prop("checked", false);
+      panel
+        .find(".ih-mgr-msg-list .ih-mgr-msg-item")
+        .removeClass("ih-mgr-msg-checked");
+      updateFn();
+    });
+  }
+
+  bindSelectAll(
+    hidePanel,
+    "#ih_mgr_hide_select_all",
+    "#ih_mgr_hide_invert",
+    "#ih_mgr_hide_clear",
+    updateHideCount,
+  );
+  bindSelectAll(
+    delPanel,
+    "#ih_mgr_del_select_all",
+    "#ih_mgr_del_invert",
+    "#ih_mgr_del_clear",
+    updateDelCount,
+  );
+  bindSelectAll(
+    movePanel,
+    "#ih_mgr_mv_select_all",
+    "#ih_mgr_mv_invert",
+    "#ih_mgr_mv_clear",
+    updateMvCount,
+  );
+
+  function refreshAllLists() {
+    const hideSaved = new Set(getSelectedFloors(hidePanel));
+    const delSaved = new Set(getSelectedFloors(delPanel));
+    const mvSaved = new Set(getSelectedFloors(movePanel));
+
+    const newHTML = buildMessageListHTML();
+    hidePanel.find(".ih-mgr-msg-list").html(newHTML);
+    delPanel.find(".ih-mgr-msg-list").html(newHTML);
+    movePanel.find(".ih-mgr-msg-list").html(newHTML);
+
+    const restore = (panel, saved) => {
+      saved.forEach((f) => {
+        if (f >= 0 && f < chat.length) {
+          panel
+            .find(`.ih-mgr-msg-list input[data-floor="${f}"]`)
+            .prop("checked", true);
+          panel
+            .find(`.ih-mgr-msg-list .ih-mgr-msg-item[data-floor="${f}"]`)
+            .addClass("ih-mgr-msg-checked");
+        }
+      });
+    };
+    restore(hidePanel, hideSaved);
+    restore(delPanel, delSaved);
+    restore(movePanel, mvSaved);
+
+    const s = getHiddenStatus();
+    content.find("#ih_mgr_hide_status span").text(s.summary);
+
+    applyHideRangeInputHighlight();
+    applyDelRangeInputHighlight();
+    applyMoveTargetHighlight();
+    applyRangeStartHighlight(hidePanel, hideState.rangeStart);
+    applyRangeStartHighlight(delPanel, delState.rangeStart);
+    applyRangeStartHighlight(movePanel, mvState.rangeStart);
+
+    updateHideCount();
+    updateDelCount();
+    updateMvCount();
+  }
+
+  hidePanel.find("#ih_mgr_hide_one").on("click", async () => {
+    const v = hidePanel.find("#ih_mgr_specific_floor").val();
+    if (v === "") {
       toastr.warning("请输入楼层号", "", { timeOut: 1000 });
       return;
     }
-    await doHideOne(val);
-    refreshStatus();
+    await doHideOne(v);
+    refreshAllLists();
   });
-  content.find("#ih_do_unhide_one").on("click", async () => {
-    const val = content.find("#ih_specific_floor").val();
-    if (val === "") {
+  hidePanel.find("#ih_mgr_unhide_one").on("click", async () => {
+    const v = hidePanel.find("#ih_mgr_specific_floor").val();
+    if (v === "") {
       toastr.warning("请输入楼层号", "", { timeOut: 1000 });
       return;
     }
-    await doUnhideOne(val);
-    refreshStatus();
+    await doUnhideOne(v);
+    refreshAllLists();
   });
-  content.find("#ih_do_hide").on("click", async () => {
+  hidePanel.find("#ih_mgr_jump_one").on("click", () => {
+    const v = hidePanel.find("#ih_mgr_specific_floor").val();
+    if (v === "") {
+      toastr.warning("请输入楼层号", "", { timeOut: 1000 });
+      return;
+    }
+    const floor = parseInt(v);
+    if (isNaN(floor) || floor < 0 || floor >= chat.length) {
+      toastr.error(`无效楼层: ${v}（范围 0~${chat.length - 1}）`, "", {
+        timeOut: 2000,
+      });
+      return;
+    }
+    closeDialog();
+    const chatEl = document.getElementById("chat");
+    if (!chatEl) return;
+    const mesEl = chatEl.querySelector(`.mes[mesid="${floor}"]`);
+    if (mesEl) {
+      const r = mesEl.getBoundingClientRect();
+      const useCenter = r.height < chatEl.clientHeight - 40;
+      scrollChatToElement(mesEl, "smooth", useCenter);
+    } else {
+      executeSlashCommandsWithOptions(`/chat-jump ${floor}`);
+    }
+    toastr.info(`已跳转到楼层 ${floor}`, "", { timeOut: 1000 });
+  });
+  hidePanel.find("#ih_mgr_do_range_hide").on("click", async () => {
     await doHideRange(
-      content.find("#ih_hide_from").val(),
-      content.find("#ih_hide_to").val(),
+      hidePanel.find("#ih_mgr_range_from").val(),
+      hidePanel.find("#ih_mgr_range_to").val(),
     );
-    refreshStatus();
+    refreshAllLists();
   });
-  content.find("#ih_do_unhide").on("click", async () => {
+  hidePanel.find("#ih_mgr_do_range_unhide").on("click", async () => {
     await doUnhideRange(
-      content.find("#ih_unhide_from").val(),
-      content.find("#ih_unhide_to").val(),
+      hidePanel.find("#ih_mgr_range_from").val(),
+      hidePanel.find("#ih_mgr_range_to").val(),
     );
-    refreshStatus();
+    refreshAllLists();
   });
-  content.find("#ih_do_keep").on("click", async () => {
-    await doKeepRecent(content.find("#ih_keep_recent").val());
-    refreshStatus();
+  hidePanel.find("#ih_mgr_do_keep").on("click", async () => {
+    await doKeepRecent(hidePanel.find("#ih_mgr_keep_recent").val());
+    refreshAllLists();
   });
-  content.find("#ih_do_hide_all").on("click", async () => {
+  hidePanel.find("#ih_mgr_do_hide_all").on("click", async () => {
     await doHideAll();
-    refreshStatus();
+    refreshAllLists();
   });
-  content.find("#ih_do_unhide_all").on("click", async () => {
+  hidePanel.find("#ih_mgr_do_unhide_all").on("click", async () => {
     await doUnhideAll();
-    refreshStatus();
+    refreshAllLists();
   });
+
+  async function batchHideUnhide(panel, isHide) {
+    const selected = getSelectedFloors(panel);
+    if (selected.length === 0) {
+      toastr.warning("还没选中任何消息哦", "", { timeOut: 1000 });
+      return;
+    }
+    const ranges = mergeToRanges(selected);
+    const cmdName = isHide ? "/hide" : "/unhide";
+    for (const [a, b] of ranges) {
+      if (a === b) {
+        await executeSlashCommandsWithOptions(`${cmdName} ${a}`);
+      } else {
+        await executeSlashCommandsWithOptions(`${cmdName} ${a}-${b}`);
+      }
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    toastr.success(
+      `已${isHide ? "隐藏" : "显示"} ${selected.length} 条消息`,
+      "",
+      { timeOut: 1500 },
+    );
+    refreshAllLists();
+  }
+
+  hidePanel.find("#ih_mgr_hide_selected").on("click", () => {
+    batchHideUnhide(hidePanel, true);
+  });
+  hidePanel.find("#ih_mgr_unhide_selected").on("click", () => {
+    batchHideUnhide(hidePanel, false);
+  });
+
+  delPanel.find("#ih_mgr_del_range_confirm").on("click", async () => {
+    const fv = delPanel.find("#ih_mgr_del_from").val();
+    const tv = delPanel.find("#ih_mgr_del_to").val();
+    if (fv === "" || tv === "") {
+      toastr.warning("请输入起始和结束楼层", "", { timeOut: 1200 });
+      return;
+    }
+    const f = parseInt(fv);
+    const t = parseInt(tv);
+    if (isNaN(f) || isNaN(t) || f < 0 || t < 0 || f >= total || t >= total) {
+      toastr.error(`无效楼层（范围 0~${total - 1}）`, "", { timeOut: 1800 });
+      return;
+    }
+    const lo = Math.min(f, t);
+    const hi = Math.max(f, t);
+    const count = hi - lo + 1;
+    if (getSettings().confirmDangerousActions) {
+      if (!confirm(`确定删除楼层 ${lo} 到 ${hi} 共 ${count} 条消息吗？`))
+        return;
+    }
+    chatUndoManager.save();
+    closeDialog();
+    const floors = [];
+    for (let i = hi; i >= lo; i--) floors.push(i);
+    await executeSlashCommandsWithOptions("/cut " + floors.join(" "));
+    toastr.success(`已删除 ${count} 条消息（可点撤回按钮还原）`, "", {
+      timeOut: 2000,
+    });
+  });
+
+  delPanel.find("#ih_mgr_del_confirm").on("click", async () => {
+    const selected = getSelectedFloors(delPanel);
+    if (selected.length === 0) {
+      toastr.warning("还没选中任何消息哦", "", { timeOut: 1000 });
+      return;
+    }
+    if (getSettings().confirmDangerousActions) {
+      if (
+        !confirm(
+          `确定删除选中的 ${selected.length} 条消息吗？\n楼层：${selected.join(", ")}`,
+        )
+      )
+        return;
+    }
+    chatUndoManager.save();
+    closeDialog();
+    const reversed = [...selected].sort((a, b) => b - a);
+    await executeSlashCommandsWithOptions("/cut " + reversed.join(" "));
+    toastr.success(`已删除 ${selected.length} 条消息（可点撤回按钮还原）`, "", {
+      timeOut: 2000,
+    });
+  });
+
+  movePanel.find("#ih_mgr_mv_confirm").on("click", async () => {
+    const selected = getSelectedFloors(movePanel);
+    if (selected.length === 0) {
+      toastr.warning("请至少勾选一条要移动的消息", "", { timeOut: 1200 });
+      return;
+    }
+    const tv = movePanel.find("#ih_mgr_mv_target").val();
+    if (tv === "") {
+      toastr.warning("请输入目标楼层", "", { timeOut: 1200 });
+      return;
+    }
+    const target = parseInt(tv);
+    if (isNaN(target) || target < 0 || target >= total) {
+      toastr.error(`无效楼层（范围 0~${total - 1}）`, "", { timeOut: 1800 });
+      return;
+    }
+    if (selected.length === 1 && selected[0] === target) {
+      toastr.info("选中和目标是同一楼层哦", "", { timeOut: 1000 });
+      return;
+    }
+    if (getSettings().confirmDangerousActions) {
+      if (
+        !confirm(
+          `确定把 ${selected.length} 条消息移动到楼层 ${target} 的位置吗？`,
+        )
+      )
+        return;
+    }
+    chatUndoManager.save();
+
+    const toMove = selected.map((f) => chat[f]);
+    for (let i = selected.length - 1; i >= 0; i--) {
+      chat.splice(selected[i], 1);
+    }
+    let newTarget = target;
+    for (const f of selected) {
+      if (f < target) newTarget--;
+    }
+    newTarget = Math.max(0, Math.min(chat.length, newTarget));
+    chat.splice(newTarget, 0, ...toMove);
+
+    closeDialog();
+    try {
+      await executeSlashCommandsWithOptions("/forcesave");
+      await executeSlashCommandsWithOptions("/chat-reload");
+      toastr.success(
+        `已移动 ${selected.length} 条消息到楼层 ${target}（可撤回还原）`,
+        "",
+        { timeOut: 2000 },
+      );
+    } catch (e) {
+      console.error("快捷工具栏: 移动失败", e);
+      toastr.error("移动失败，请尝试撤回", "", { timeOut: 1500 });
+    }
+  });
+
+  updateHideCount();
+  updateDelCount();
+  updateMvCount();
 }
 
 function doChatManager() {
@@ -7135,8 +7834,8 @@ function bindRepeatableButton(btn, action) {
   let touchStartY = 0;
   let touchMoved = false;
 
-  const HOLD_DELAY = 350; // 长按多久后开始连续触发(毫秒)
-  const REPEAT_INTERVAL = 60; // 连续触发的间隔(毫秒)
+  const HOLD_DELAY = 350;
+  const REPEAT_INTERVAL = 60;
 
   const stopRepeat = () => {
     if (holdTimer) {
@@ -9599,7 +10298,7 @@ async function loadSettings() {
     if (s.shortcuts[key] === undefined) s.shortcuts[key] = "";
   }
   if (!s.buttonOrder) s.buttonOrder = [...defaultSettings.buttonOrder];
-  const obsoleteKeys = ["tab", "chatList"];
+  const obsoleteKeys = ["tab", "chatList", "multiSelectDelete", "jumpToFloor"];
   obsoleteKeys.forEach((k) => {
     const idx = s.buttonOrder.indexOf(k);
     if (idx > -1) s.buttonOrder.splice(idx, 1);
@@ -9621,6 +10320,19 @@ async function loadSettings() {
   if (s.lockScrollOnGeneration === undefined) s.lockScrollOnGeneration = false;
   if (s.twoRowMode === undefined) s.twoRowMode = false;
   if (s.twoRowOrder === undefined) s.twoRowOrder = "input-first";
+  if (s.lastSeenChangelogVersion === undefined) s.lastSeenChangelogVersion = "";
+  setTimeout(() => {
+    const verEl = document.getElementById("ih_version_label");
+    if (verEl) verEl.textContent = `v${CHANGELOG_VERSION}`;
+    if (s.lastSeenChangelogVersion !== CHANGELOG_VERSION) {
+      const badge = document.getElementById("ih_new_badge");
+      if (badge) badge.style.display = "inline-block";
+    }
+    setupChangelogAutoPopup();
+  }, 100);
+  setTimeout(() => {
+    checkRemoteUpdate();
+  }, 800);
   if (s.bottomNavMode === undefined) s.bottomNavMode = false;
   bottomNavController.active = !!s.bottomNavMode;
   $(
@@ -10235,12 +10947,6 @@ jQuery(async () => {
     });
   }
 
-  if (!$("#input_jump_to_floor_btn").length) {
-    const jumpBtn = $(
-      '<button id="input_jump_to_floor_btn" class="input-helper-btn" title="跳转到指定楼层" data-norefocus="true"><i class="fa-solid fa-location-dot"></i></button>',
-    );
-    $("#input_helper_toolbar").append(jumpBtn);
-  }
   if (!$("#input_find_replace_btn").length) {
     const findReplBtn = $(
       '<button id="input_find_replace_btn" class="input-helper-btn" title="查找替换" data-norefocus="true"><i class="fa-solid fa-magnifying-glass"></i></button>',
@@ -10282,12 +10988,6 @@ jQuery(async () => {
       '<button id="input_enter_delete_mode_btn" class="input-helper-btn" title="进入删除模式" data-norefocus="true"><i class="fa-solid fa-trash-can"></i></button>',
     );
     $("#input_helper_toolbar").append(enterDelBtn);
-  }
-  if (!$("#input_multi_select_delete_btn").length) {
-    const multiDelBtn = $(
-      '<button id="input_multi_select_delete_btn" class="input-helper-btn" title="多选删除" data-norefocus="true"><i class="fa-solid fa-list-check"></i></button>',
-    );
-    $("#input_helper_toolbar").append(multiDelBtn);
   }
   if (!$("#input_copy_text_btn").length) {
     const copyBtn = $(

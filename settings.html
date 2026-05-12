@@ -1,12 +1,49 @@
+<style>
+  @keyframes ih-new-blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
+  }
+</style>
 <div class="input-helper-settings">
   <div class="inline-drawer">
     <div class="inline-drawer-toggle inline-drawer-header">
-      <b>快捷工具栏</b>
+      <span style="display: inline-flex; align-items: center">
+        <b>快捷工具栏</b>
+        <span
+          id="ih_new_badge"
+          style="
+            display: none;
+            color: #dc5a4c;
+            font-size: 14px;
+            font-weight: bold;
+            margin-left: 8px;
+            letter-spacing: 1px;
+            animation: ih-new-blink 1.2s ease-in-out infinite;
+          "
+          >new!</span
+        >
+      </span>
       <div
         class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
       ></div>
     </div>
     <div class="inline-drawer-content">
+      <div
+        id="ih_version_label"
+        style="
+          text-align: left;
+          font-size: 10px;
+          opacity: 0.5;
+          margin-bottom: 4px;
+          letter-spacing: 0.5px;
+          padding-left: 2px;
+        "
+      ></div>
       <div
         style="
           display: flex;

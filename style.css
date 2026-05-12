@@ -2332,7 +2332,7 @@ body.ih-find-active input::-moz-selection {
   top: 0;
   bottom: 0;
   margin: 0;
-  padding: 3px 2px;
+  padding: 6px 4px;
   width: 34px;
   max-width: 34px;
   font-size: 11px;
@@ -2371,7 +2371,6 @@ body.ih-find-active input::-moz-selection {
 .ih-find-bar-collapsed .ih-find-select-hint i,
 .ih-find-bar-collapsed .ih-find-hint i {
   writing-mode: horizontal-tb;
-  margin-bottom: 2px;
 }
 
 .ih-find-bar-collapsed .ih-find-select-hint span,
@@ -2389,5 +2388,1015 @@ body.ih-find-active input::-moz-selection {
   to {
     opacity: 0.95;
     transform: translateX(0);
+  }
+}
+
+/* ========= 消息管理面板 ========= */
+.ih-mgr-content {
+  background-color: var(--SmartThemeBlurTintColor);
+  color: var(--SmartThemeBodyColor);
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 14px; /* 整体圆角 */
+  padding: 20px; /* 整体内边距 */
+  width: 600px; /* 弹窗宽度 */
+  max-width: 94%;
+  max-height: 94vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-shadow: 0 12px 36px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.45));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.ih-mgr-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 5px; /* 标题与下方内容的间距 */
+}
+
+.ih-mgr-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  letter-spacing: 0.2px;
+}
+
+.ih-mgr-header h3 i {
+  color: var(--SmartThemeQuoteColor, cornflowerblue);
+  font-size: 15px;
+}
+
+.ih-mgr-total-badge {
+  font-size: 11px;
+  padding: 4px 11px;
+  border-radius: 12px;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 14%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 28%,
+      transparent
+    );
+  opacity: 0.88;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  margin-left: auto;
+}
+
+/* === Tab 分段控件 === */
+.ih-mgr-tabs {
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeBodyColor) 7%,
+    transparent
+  );
+  border-radius: 11px; /* Tab容器圆角 */
+  border: 1px solid
+    color-mix(in srgb, var(--SmartThemeBorderColor) 35%, transparent);
+}
+
+.ih-mgr-tab {
+  flex: 1;
+  padding: 8px 12px; /* Tab高度 */
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--SmartThemeBodyColor);
+  cursor: pointer;
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  opacity: 0.55;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+
+.ih-mgr-tab:hover {
+  opacity: 0.88;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeChatTintColor) 50%,
+    transparent
+  );
+}
+
+.ih-mgr-tab-active {
+  opacity: 1;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 28%,
+    var(--SmartThemeBlurTintColor)
+  );
+  box-shadow:
+    0 2px 8px
+      color-mix(
+        in srgb,
+        var(--SmartThemeQuoteColor, cornflowerblue) 22%,
+        transparent
+      ),
+    0 1px 2px rgba(0, 0, 0, 0.08);
+  font-weight: 600;
+}
+
+.ih-mgr-tab-active:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 34%,
+    var(--SmartThemeBlurTintColor)
+  );
+}
+
+.ih-mgr-tab i {
+  font-size: 11px;
+}
+
+/* === 标签页内容 === */
+.ih-mgr-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  animation: ih-mgr-panel-in 0.18s ease-out;
+}
+
+@keyframes ih-mgr-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* === 状态提示条 === */
+.ih-mgr-status {
+  padding: 9px 13px;
+  border-radius: 9px;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeBodyColor) 2%,
+    transparent
+  ); /* 薄雾浓度：越大越明显（4% 更淡 / 8% 更深） */
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--SmartThemeBodyColor) 14%,
+      var(--SmartThemeBorderColor)
+    ); /* 边框浓度：跟薄雾呼应 */
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  line-height: 1.55;
+}
+
+.ih-mgr-status i {
+  flex-shrink: 0;
+  opacity: 0.7; /* 图标不透明度：越大越明显（0.7 更显眼 / 0.4 更淡） */
+  font-size: 13px;
+}
+
+/* === 紧凑行布局（替代卡片） === */
+.ih-mgr-inline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  flex-wrap: wrap;
+}
+
+.ih-mgr-inline-row-oneline {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ih-mgr-inline-row-oneline::-webkit-scrollbar {
+  height: 0;
+  display: none;
+}
+
+.ih-mgr-inline-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  opacity: 0.75;
+  letter-spacing: 0.3px;
+  min-width: 66px; /* 标签最小宽度，保持对齐 */
+  flex-shrink: 0;
+}
+
+.ih-mgr-inline-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* === 输入框 === */
+.ih-mgr-input {
+  width: 88px; /* 输入框宽度 */
+  padding: 6px 10px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 7px;
+  background-color: var(--SmartThemeBlurTintColor);
+  color: var(--SmartThemeBodyColor);
+  font-size: 12px;
+  text-align: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  font-family: var(--monoFontFamily);
+}
+
+.ih-mgr-input:hover {
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 35%,
+    var(--SmartThemeBorderColor)
+  );
+}
+
+.ih-mgr-input:focus {
+  outline: none;
+  border-color: var(--SmartThemeQuoteColor, cornflowerblue);
+  box-shadow: 0 0 0 3px
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 18%,
+      transparent
+    );
+}
+
+.ih-mgr-arrow {
+  font-size: 13px;
+  opacity: 0.45;
+  flex-shrink: 0;
+  font-weight: bold;
+}
+
+.ih-mgr-hint-inline {
+  font-size: 11px;
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+
+/* === 按钮 === */
+.ih-mgr-btn {
+  padding: 6px 13px; /* 按钮内边距 */
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 7px;
+  background-color: var(--SmartThemeBlurTintColor);
+  color: var(--SmartThemeBodyColor);
+  cursor: pointer;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+}
+
+.ih-mgr-btn:hover {
+  background-color: var(--SmartThemeChatTintColor);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.18));
+}
+
+.ih-mgr-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.ih-mgr-btn i {
+  font-size: 10.5px;
+}
+
+.ih-mgr-btn-mini {
+  padding: 5px 10px;
+  font-size: 11.5px;
+}
+
+/* 纯图标小按钮：正方形、图标居中 */
+.ih-mgr-btn-icon {
+  padding: 5px 9px; /* 图标按钮左右内边距 */
+  min-width: 30px; /* 最小宽度保证方形感 */
+  justify-content: center;
+  gap: 0;
+}
+
+.ih-mgr-btn-icon i {
+  font-size: 12px; /* 图标大小 */
+  margin: 0;
+}
+
+.ih-mgr-input-clear-btn {
+  background-color: transparent !important;
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeBorderColor) 50%,
+    transparent
+  ) !important;
+  opacity: 0.55;
+}
+
+.ih-mgr-input-clear-btn:hover {
+  opacity: 1;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 14%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 35%,
+    transparent
+  ) !important;
+}
+
+.ih-mgr-btn-warn {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 16%,
+    var(--SmartThemeBlurTintColor)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 32%,
+    var(--SmartThemeBorderColor)
+  );
+}
+
+.ih-mgr-btn-warn:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 28%,
+    var(--SmartThemeBlurTintColor)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 45%,
+    var(--SmartThemeBorderColor)
+  );
+}
+
+.ih-mgr-btn-ok {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 16%,
+    var(--SmartThemeBlurTintColor)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 32%,
+    var(--SmartThemeBorderColor)
+  );
+}
+
+.ih-mgr-btn-ok:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 28%,
+    var(--SmartThemeBlurTintColor)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 45%,
+    var(--SmartThemeBorderColor)
+  );
+}
+
+.ih-mgr-btn-active {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 38%,
+    var(--SmartThemeBlurTintColor)
+  );
+  border-color: var(--SmartThemeQuoteColor, cornflowerblue);
+  box-shadow: 0 0 0 2px
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 22%,
+      transparent
+    );
+}
+
+.ih-mgr-btn-active:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 45%,
+    var(--SmartThemeBlurTintColor)
+  );
+}
+
+.ih-mgr-btn-close {
+  padding: 6px 24px;
+}
+
+.ih-mgr-btn-primary {
+  padding: 7px 16px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+/* === 工具栏（全选/反选/范围/清除 + 计数） === */
+.ih-mgr-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 2px 2px;
+  flex-wrap: wrap;
+  border-top: 1px dashed
+    color-mix(in srgb, var(--SmartThemeBorderColor) 35%, transparent);
+  padding-top: 9px;
+  margin-top: 3px;
+}
+
+.ih-mgr-btn-group {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.ih-mgr-count {
+  font-size: 11px;
+  opacity: 0.7;
+  font-family: var(--monoFontFamily);
+  flex-shrink: 0;
+  padding: 3px 10px;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeBodyColor) 5%,
+    transparent
+  );
+  border-radius: 10px;
+  letter-spacing: 0.3px;
+}
+
+/* === 消息列表 === */
+.ih-mgr-list-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ih-mgr-msg-list {
+  max-height: 36vh; /* 列表最大高度 */
+  overflow-y: auto;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--SmartThemeBodyColor) 18%,
+      var(--SmartThemeBorderColor)
+    );
+  border-radius: 9px;
+  padding: 5px;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeBodyColor) 2%,
+    transparent
+  ); /* 关键：用 body 色（=主题文字色）的 6% 做薄雾，自动跟随主题 */
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--SmartThemeBodyColor) 3%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.ih-mgr-msg-list {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.ih-mgr-msg-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* === 单条消息 === */
+.ih-mgr-msg-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 11px; /* 单条消息内边距 */
+  font-size: 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  border: 1px solid transparent;
+  user-select: none;
+}
+
+.ih-mgr-msg-item:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 8%,
+    transparent
+  );
+}
+
+.ih-mgr-msg-check {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ih-mgr-msg-check input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--SmartThemeQuoteColor, cornflowerblue);
+  width: 14px;
+  height: 14px;
+}
+
+/* 跳转按钮 */
+.ih-mgr-msg-jump {
+  flex-shrink: 0;
+  width: 22px; /* 按钮大小 */
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background-color: transparent;
+  color: var(--SmartThemeBodyColor);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5; /* 默认半透明，低调一些 */
+  transition: all 0.15s ease;
+}
+
+.ih-mgr-msg-jump:hover {
+  opacity: 1;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 22%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 40%,
+    transparent
+  );
+  color: var(--SmartThemeQuoteColor, cornflowerblue);
+  transform: translateX(1px);
+}
+
+.ih-mgr-msg-jump:active {
+  transform: translateX(1px) scale(0.92);
+}
+
+.ih-mgr-msg-jump {
+  position: relative;
+  z-index: 2;
+}
+
+.ih-mgr-msg-jump i {
+  font-size: 10px; /* 箭头图标大小 */
+}
+
+/* 范围选择模式下禁用跳转（避免干扰） */
+.ih-mgr-range-mode .ih-mgr-msg-jump {
+  pointer-events: none;
+  opacity: 0.2;
+}
+
+.ih-mgr-msg-floor {
+  font-family: var(--monoFontFamily);
+  font-size: 10.5px;
+  opacity: 0.55;
+  flex-shrink: 0;
+  text-align: left;
+  font-weight: 500;
+}
+
+/* 跳转按钮 + 序号 的小组合 */
+.ih-mgr-msg-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px; /* 按钮和序号之间的距离，数值越大越远 */
+  flex-shrink: 0;
+  margin-left: -2px;
+}
+
+.ih-mgr-msg-sender {
+  font-weight: 600;
+  flex-shrink: 0;
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  opacity: 0.92; /* 比正文略深一点做强调，但继承主题文字色 */
+}
+
+.ih-mgr-msg-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.78;
+  font-size: 11.5px;
+}
+
+.ih-mgr-msg-ghost {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 60%,
+    var(--SmartThemeBodyColor)
+  );
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 16%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 25%,
+      transparent
+    );
+}
+
+/* 已隐藏消息样式 */
+.ih-mgr-msg-is-hidden .ih-mgr-msg-preview,
+.ih-mgr-msg-is-hidden .ih-mgr-msg-sender,
+.ih-mgr-msg-is-hidden .ih-mgr-msg-floor {
+  opacity: 0.42;
+  font-style: italic;
+}
+
+/* 高亮：输入框范围（蓝） */
+.ih-mgr-msg-item.ih-mgr-highlight {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 18%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 42%,
+    transparent
+  );
+  box-shadow: 0 1px 3px
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 18%,
+      transparent
+    );
+}
+
+/* 高亮：单条输入 */
+.ih-mgr-msg-item.ih-mgr-highlight-single {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 22%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 50%,
+    transparent
+  );
+}
+
+/* 高亮：只保留最近（跟随主题色，虚线区分范围） */
+.ih-mgr-msg-item.ih-mgr-highlight-keep {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 10%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 35%,
+    transparent
+  );
+  border-style: dashed;
+  box-shadow: 0 1px 3px
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 15%,
+      transparent
+    );
+}
+
+/* 已勾选（橙） */
+.ih-mgr-msg-item.ih-mgr-msg-checked {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 16%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 42%,
+    transparent
+  );
+}
+
+.ih-mgr-msg-item.ih-mgr-msg-checked:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 24%,
+    transparent
+  );
+}
+
+/* 范围模式起点（主题色虚线） */
+.ih-mgr-msg-item.ih-mgr-range-start {
+  border-style: dashed !important;
+  border-color: var(--SmartThemeQuoteColor, cornflowerblue) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 22%,
+    transparent
+  ) !important;
+  box-shadow: 0 0 0 2px
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 38%,
+      transparent
+    );
+}
+
+/* 范围模式下：列表整体主题色提示 + 禁用checkbox独立点击 */
+.ih-mgr-range-mode .ih-mgr-msg-list {
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 45%,
+    var(--SmartThemeBorderColor)
+  );
+  box-shadow: 0 0 0 2px
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 14%,
+      transparent
+    );
+}
+
+.ih-mgr-range-mode .ih-mgr-msg-item {
+  cursor: crosshair;
+}
+
+/* 关键：范围模式下禁用checkbox直接点击，避免事件冲突 */
+.ih-mgr-range-mode .ih-mgr-msg-check,
+.ih-mgr-range-mode .ih-mgr-msg-check input[type="checkbox"] {
+  pointer-events: none;
+}
+
+/* 移动目标（紫） */
+.ih-mgr-msg-item.ih-mgr-move-target {
+  background-color: color-mix(in srgb, mediumpurple 22%, transparent);
+  border-color: color-mix(in srgb, mediumpurple 52%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, mediumpurple 22%, transparent);
+}
+
+.ih-mgr-msg-item.ih-mgr-move-target::after {
+  content: "目标";
+  margin-left: auto;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background-color: color-mix(in srgb, mediumpurple 42%, transparent);
+  color: var(--SmartThemeBodyColor);
+  flex-shrink: 0;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  border: 1px solid color-mix(in srgb, mediumpurple 55%, transparent);
+}
+
+/* 底部操作区 */
+.ih-mgr-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.ih-mgr-footer-split {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding-top: 2px;
+  flex-wrap: wrap;
+}
+
+/* 底部按钮分组（带标签） */
+.ih-mgr-action-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px; /* 标签和按钮的间距 */
+}
+
+/* Ghost 轻量按钮（作用于全部组使用） */
+.ih-mgr-btn-ghost {
+  background-color: transparent !important;
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeBorderColor) 65%,
+    transparent
+  ) !important;
+  opacity: 0.82;
+  font-weight: 500;
+}
+
+.ih-mgr-btn-ghost-warn:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 14%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 38%,
+    transparent
+  ) !important;
+  opacity: 1;
+  color: var(--SmartThemeEmColor, orange);
+}
+
+.ih-mgr-btn-ghost-ok:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 14%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 38%,
+    transparent
+  ) !important;
+  opacity: 1;
+  color: var(--SmartThemeQuoteColor, cornflowerblue);
+}
+
+/* 顶部 × 关闭按钮 */
+.ih-mgr-close-x {
+  width: 28px; /* 按钮大小 */
+  height: 28px;
+  padding: 0;
+  border: 1px solid
+    color-mix(in srgb, var(--SmartThemeBorderColor) 60%, transparent);
+  border-radius: 8px;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeBodyColor) 5%,
+    transparent
+  );
+  color: var(--SmartThemeBodyColor);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  opacity: 0.65;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  margin-left: 2px; /* 跟 badge 的间距 */
+}
+
+.ih-mgr-close-x:hover {
+  opacity: 1;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 25%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 45%,
+    transparent
+  );
+  transform: rotate(90deg); /* 悬停旋转动画，想去掉就把这行删掉 */
+}
+
+.ih-mgr-close-x:active {
+  transform: rotate(90deg) scale(0.92);
+}
+
+.ih-mgr-close-x i {
+  font-size: 13px; /* × 图标大小 */
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .ih-mgr-content {
+    padding: 14px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+  .ih-mgr-tab {
+    padding: 7px 8px;
+    font-size: 11.5px;
+    gap: 5px;
+  }
+  .ih-mgr-tab i {
+    font-size: 10.5px;
+  }
+  .ih-mgr-inline-label {
+    min-width: 56px;
+    font-size: 11px;
+  }
+  .ih-mgr-inline-row-oneline {
+    gap: 5px; /* 移动端：行内元素间距缩小 */
+  }
+  .ih-mgr-inline-row-oneline .ih-mgr-inline-label {
+    min-width: 0; /* 移动端：标签靠内容自撑宽度，不强制对齐 */
+    font-size: 10.5px;
+    flex-shrink: 0;
+  }
+  .ih-mgr-inline-row-oneline .ih-mgr-input {
+    width: 58px; /* 移动端：输入框宽度 */
+    padding: 5px 4px;
+    flex-shrink: 0;
+  }
+  .ih-mgr-inline-row-oneline .ih-mgr-btn {
+    padding: 5px 8px;
+    font-size: 10.5px;
+    flex-shrink: 0;
+  }
+  .ih-mgr-inline-row-oneline .ih-mgr-btn-icon {
+    padding: 5px 7px;
+    min-width: 26px;
+  }
+  .ih-mgr-inline-row-oneline .ih-mgr-inline-actions {
+    gap: 4px; /* 右侧按钮组间距 */
+  }
+  .ih-mgr-inline-row-oneline .ih-mgr-arrow {
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+  .ih-mgr-msg-item {
+    font-size: 11px;
+    padding: 6px 8px;
+    gap: 7px;
+  }
+  .ih-mgr-msg-sender {
+    max-width: 50px;
+  }
+  .ih-mgr-msg-list {
+    max-height: 34vh;
+  }
+  .ih-mgr-input {
+    width: 72px;
+    font-size: 11.5px;
+    padding: 5px 8px;
+  }
+  .ih-mgr-btn {
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+  .ih-mgr-btn-mini {
+    padding: 4px 8px;
+    font-size: 10.5px;
+  }
+  .ih-mgr-footer-split {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px; /* 两组之间的间距 */
+  }
+  .ih-mgr-action-group {
+    width: 100%;
+  }
+  .ih-mgr-footer-split .ih-mgr-btn-group {
+    display: flex;
+    gap: 6px; /* 同一行内按钮间距 */
+    width: 100%;
+  }
+  .ih-mgr-footer-split .ih-mgr-btn-group .ih-mgr-btn {
+    flex: 1; /* 按钮等分宽度填满整行 */
+    justify-content: center;
   }
 }

@@ -406,11 +406,7 @@
 }
 
 .ih-folder-row {
-  background-color: color-mix(
-    in srgb,
-    var(--SmartThemeQuoteColor, cornflowerblue) 8%,
-    var(--SmartThemeBlurTintColor)
-  );
+  background-color: transparent;
   border-color: color-mix(
     in srgb,
     var(--SmartThemeQuoteColor, cornflowerblue) 20%,
@@ -421,8 +417,8 @@
 .ih-folder-row:hover {
   background-color: color-mix(
     in srgb,
-    var(--SmartThemeQuoteColor, cornflowerblue) 15%,
-    var(--SmartThemeBlurTintColor)
+    var(--SmartThemeQuoteColor, cornflowerblue) 8%,
+    transparent
   );
 }
 
@@ -497,11 +493,7 @@
 }
 
 .ih-child-row {
-  background-color: color-mix(
-    in srgb,
-    var(--SmartThemeBlurTintColor) 80%,
-    transparent
-  );
+  background-color: transparent;
 }
 
 .ih-child-remove-btn {
@@ -657,41 +649,6 @@
   font-size: 12px;
 }
 
-.ih-folder-icon-btn {
-  border: 1px solid var(--SmartThemeBorderColor);
-  background-color: var(--SmartThemeBlurTintColor);
-  color: var(--SmartThemeBodyColor);
-  border-radius: 4px;
-  padding: 3px 8px;
-  cursor: pointer;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  transition: background-color 0.2s;
-}
-
-.ih-folder-icon-btn:hover {
-  background-color: var(--SmartThemeChatTintColor);
-}
-
-.ih-folder-delete-btn {
-  border: 1px solid var(--SmartThemeBorderColor);
-  background-color: color-mix(in srgb, red 15%, var(--SmartThemeBlurTintColor));
-  color: var(--SmartThemeBodyColor);
-  border-radius: 4px;
-  padding: 3px 6px;
-  cursor: pointer;
-  font-size: 11px;
-  flex-shrink: 0;
-  transition: background-color 0.2s;
-}
-
-.ih-folder-delete-btn:hover {
-  background-color: color-mix(in srgb, red 30%, var(--SmartThemeBlurTintColor));
-}
-
 .ih-folder-button-list {
   display: flex;
   flex-wrap: wrap;
@@ -700,11 +657,7 @@
   padding: 4px;
   border: 1px dashed var(--SmartThemeBorderColor);
   border-radius: 4px;
-  background-color: color-mix(
-    in srgb,
-    var(--SmartThemeBlurTintColor) 60%,
-    transparent
-  );
+  background-color: transparent;
 }
 
 .ih-folder-button-list .ih-folder-chip {
@@ -714,7 +667,7 @@
   padding: 2px 8px;
   border: 1px solid var(--SmartThemeBorderColor);
   border-radius: 12px;
-  background-color: var(--SmartThemeBlurTintColor);
+  background-color: transparent;
   font-size: 11px;
   cursor: default;
 }
@@ -2142,6 +2095,10 @@ textarea.ih-replace-input::-webkit-scrollbar {
 .ih-floating-ball.ih-dragging:active {
   transform: none !important;
   transition: none !important;
+}
+
+#integrated_button_settings .button-preview {
+  background-color: transparent !important;
 }
 
 .ih-msd-list {

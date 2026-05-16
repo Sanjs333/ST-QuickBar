@@ -3154,35 +3154,94 @@ const historyManager = {
 };
 
 const chatUndoManager = {
-  _snapshot: null,
-  _autoClearTimer: null,
+  _snapshots: [],
+  _stableSnapshot: null,
+  _lastSaveTime: 0,
+  _autoClearTimers: [],
+  _stableSnapshotTimer: null,
+  _justSaved: false,
+  _justSavedTimer: null,
   AUTO_CLEAR_MS: 5 * 60 * 1000,
+  MAX_SNAPSHOTS: 20,
 
-  save() {
-    try {
-      this._snapshot = JSON.parse(JSON.stringify(chat));
-    } catch (e) {
-      console.warn("快捷工具栏: 保存聊天快照失败", e);
-      this._snapshot = null;
-      return;
+  _pushSnapshot(snapshot) {
+    this._snapshots.push(snapshot);
+    this._lastSaveTime = Date.now();
+    while (this._snapshots.length > this.MAX_SNAPSHOTS) {
+      this._snapshots.shift();
+      const t = this._autoClearTimers.shift();
+      if (t) clearTimeout(t);
     }
-    clearTimeout(this._autoClearTimer);
     const self = this;
-    this._autoClearTimer = setTimeout(function () {
-      self._snapshot = null;
-      self.updateButton();
+    const timer = setTimeout(function () {
+      const realIdx = self._snapshots.indexOf(snapshot);
+      if (realIdx > -1) {
+        self._snapshots.splice(realIdx, 1);
+        self._autoClearTimers.splice(realIdx, 1);
+        self.updateButton();
+      }
     }, this.AUTO_CLEAR_MS);
+    this._autoClearTimers.push(timer);
     this.updateButton();
   },
 
+  save() {
+    let snapshot;
+    try {
+      snapshot = JSON.parse(JSON.stringify(chat));
+    } catch (e) {
+      console.warn("快捷工具栏: 保存聊天快照失败", e);
+      return;
+    }
+    this._justSaved = true;
+    if (this._justSavedTimer) clearTimeout(this._justSavedTimer);
+    const selfRef = this;
+    this._justSavedTimer = setTimeout(function () {
+      selfRef._justSaved = false;
+    }, 500);
+    this._pushSnapshot(snapshot);
+  },
+
+  saveFromExternal() {
+    if (this._justSaved) {
+      this._justSaved = false;
+      if (this._justSavedTimer) clearTimeout(this._justSavedTimer);
+      this._justSavedTimer = null;
+      return;
+    }
+    if (!this._stableSnapshot) return;
+    if (this._stableSnapshot.length <= chat.length) return;
+    let snapshot;
+    try {
+      snapshot = JSON.parse(JSON.stringify(this._stableSnapshot));
+    } catch (e) {
+      return;
+    }
+    this._pushSnapshot(snapshot);
+  },
+
+  updateStableSnapshot(immediate) {
+    clearTimeout(this._stableSnapshotTimer);
+    const doIt = () => {
+      try {
+        this._stableSnapshot = JSON.parse(JSON.stringify(chat));
+      } catch (e) {}
+    };
+    if (immediate) {
+      doIt();
+    } else {
+      this._stableSnapshotTimer = setTimeout(doIt, 150);
+    }
+  },
+
   async undo() {
-    if (!this._snapshot) {
+    if (this._snapshots.length === 0) {
       toastr.warning("没有可撤回的操作", "", { timeOut: 1000 });
       return;
     }
-    const snapshot = this._snapshot;
-    this._snapshot = null;
-    clearTimeout(this._autoClearTimer);
+    const snapshot = this._snapshots.pop();
+    const timer = this._autoClearTimers.pop();
+    if (timer) clearTimeout(timer);
     this.updateButton();
 
     chat.length = 0;
@@ -3193,7 +3252,14 @@ const chatUndoManager = {
     try {
       await executeSlashCommandsWithOptions("/forcesave");
       await executeSlashCommandsWithOptions("/chat-reload");
-      toastr.success("已撤回", "", { timeOut: 500 });
+      const remaining = this._snapshots.length;
+      if (remaining > 0) {
+        toastr.success(`已撤回（还可撤回 ${remaining} 步）`, "", {
+          timeOut: 800,
+        });
+      } else {
+        toastr.success("已撤回", "", { timeOut: 500 });
+      }
     } catch (e) {
       console.error("快捷工具栏: 撤回失败", e);
       toastr.error("撤回失败，请尝试手动恢复", "", { timeOut: 1000 });
@@ -3201,13 +3267,21 @@ const chatUndoManager = {
   },
 
   clear() {
-    this._snapshot = null;
-    clearTimeout(this._autoClearTimer);
+    this._snapshots = [];
+    this._stableSnapshot = null;
+    this._autoClearTimers.forEach(function (t) {
+      clearTimeout(t);
+    });
+    this._autoClearTimers = [];
+    clearTimeout(this._stableSnapshotTimer);
+    if (this._justSavedTimer) clearTimeout(this._justSavedTimer);
+    this._justSavedTimer = null;
+    this._justSaved = false;
     this.updateButton();
   },
 
   hasSnapshot() {
-    return this._snapshot !== null;
+    return this._snapshots.length > 0;
   },
 
   updateButton() {
@@ -4944,12 +5018,13 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.5.1";
+const CHANGELOG_VERSION = "2.6";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.5.1</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.6.0</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li>对 1.14 版本进行了兼容处理</li>
-  <li>优化「消息管理」面板的标题和说明文案</li>
+  <li>「撤回删除」支持多步撤回：连续删除多条消息或多次操作后，点撤回按钮可以一步一步逐次还原（最多保留 20 步快照，每步 5 分钟内有效）</li>
+  <li>撤回机制全局化：现在能监听酒馆原生删除按钮、/del 命令、其他扩展的删除等所有发出 MESSAGE_DELETED 事件的删除行为，不再局限于插件自己的删除按钮</li>
+  <li>设置面板风格统一：修改了拓展设置面板主题风格，更好的适配不同酒馆主题</li>
 </ul>
 `;
 
@@ -8142,6 +8217,19 @@ function syncDialogTheme(contentEl, options) {
         "button, .menu_button, .ih-folder-chip, .input-helper-btn, .button-preview",
       )
       .forEach(function (el) {
+        if (
+          el.classList.contains("button-preview") &&
+          el.closest("#integrated_button_settings")
+        ) {
+          el.style.setProperty("background-color", "transparent", "important");
+          if (s.color) el.style.setProperty("color", s.color, "important");
+          return;
+        }
+        if (el.classList.contains("ih-folder-chip")) {
+          el.style.setProperty("background-color", "transparent", "important");
+          if (s.color) el.style.setProperty("color", s.color, "important");
+          return;
+        }
         if (s.btnColor) el.style.setProperty("color", s.btnColor, "important");
         if (
           s.btnBg &&
@@ -8644,7 +8732,7 @@ function renderSettingsPanel() {
         childrenDiv.append(row);
       });
       const addBtn = $(
-        `<button class="ih-folder-inline-add" data-folder-index="${fi}"><i class="fa-solid fa-plus"></i> 添加按钮到此文件夹</button>`,
+        `<div class="menu_button menu_button_icon ih-folder-inline-add" data-folder-index="${fi}" style="cursor:pointer;width:100%;justify-content:center;margin-top:2px;"><i class="fa-solid fa-plus"></i><span>添加按钮到此文件夹</span></div>`,
       );
       addBtn.on("click", function () {
         showButtonPicker(parseInt($(this).data("folder-index")));
@@ -8983,10 +9071,10 @@ function renderFloatingPanelSettings() {
                     <select id="ih_fp_profile_select" style="flex:1;min-width:100px;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
                         ${(fp.ballProfiles || []).length === 0 ? `<option value="-1" selected>（还没有方案，点 + 新建一个）</option>` : (fp.ballProfiles || []).map((p, i) => `<option value="${i}" ${fp.currentProfileIndex === i ? "selected" : ""}>${ihEscapeHtml(p.name)}</option>`).join("")}
                     </select>
-                    <button class="ih-hm-btn" id="ih_fp_profile_new" title="新建方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-plus"></i></button>
-                    <button class="ih-hm-btn" id="ih_fp_profile_save" title="保存到当前方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-floppy-disk"></i></button>
-                    <button class="ih-hm-btn" id="ih_fp_profile_rename" title="重命名" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-pen"></i></button>
-                    <button class="ih-hm-btn" id="ih_fp_profile_delete" title="删除方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-trash"></i></button>
+                    <div class="menu_button menu_button_icon" id="ih_fp_profile_new" title="新建方案" style="cursor:pointer;margin-left:0;"><i class="fa-solid fa-plus"></i></div>
+                    <div class="menu_button menu_button_icon" id="ih_fp_profile_save" title="保存到当前方案" style="cursor:pointer;margin-left:0;"><i class="fa-solid fa-floppy-disk"></i></div>
+                    <div class="menu_button menu_button_icon" id="ih_fp_profile_rename" title="重命名" style="cursor:pointer;margin-left:0;"><i class="fa-solid fa-pen"></i></div>
+                    <div class="menu_button menu_button_icon" id="ih_fp_profile_delete" title="删除方案" style="cursor:pointer;margin-left:0;"><i class="fa-solid fa-trash"></i></div>
                 </div>
             </div>
             <div class="ih-hm-group" id="ih_fp_ball_settings" style="display:${fp.displayMode === "ball" ? "block" : "none"};padding-top:0;margin-top:-4px;">
@@ -9080,10 +9168,10 @@ function renderFloatingPanelSettings() {
                     <select id="ih_fp_panel_profile_select" style="flex:1;min-width:100px;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;">
                         ${(fp.panelProfiles || []).map((p, i) => `<option value="${i}" ${fp.currentPanelProfileIndex === i ? "selected" : ""}>${ihEscapeHtml(p.name)}</option>`).join("")}
                     </select>
-                    <button class="ih-hm-btn" id="ih_fp_panel_profile_new" title="新建方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-plus"></i></button>
-                    <button class="ih-hm-btn" id="ih_fp_panel_profile_save" title="保存到当前方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-floppy-disk"></i></button>
-                    <button class="ih-hm-btn" id="ih_fp_panel_profile_rename" title="重命名" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-pen"></i></button>
-                    <button class="ih-hm-btn" id="ih_fp_panel_profile_delete" title="删除方案" style="padding:5px 8px;margin-left:0;"><i class="fa-solid fa-trash"></i></button>
+                    <div class="menu_button menu_button_icon" id="ih_fp_panel_profile_new" title="新建方案" style="cursor:pointer;margin-left:0;"><i class="fa-solid fa-plus"></i></div>
+                    <div class="menu_button menu_button_icon" id="ih_fp_panel_profile_save" title="保存到当前方案" style="cursor:pointer;margin-left:0;"><i class="fa-solid fa-floppy-disk"></i></div>
+                    <div class="menu_button menu_button_icon" id="ih_fp_panel_profile_rename" title="重命名" style="cursor:pointer;margin-left:0;"><i class="fa-solid fa-pen"></i></div>
+                    <div class="menu_button menu_button_icon" id="ih_fp_panel_profile_delete" title="删除方案" style="cursor:pointer;margin-left:0;"><i class="fa-solid fa-trash"></i></div>
                 </div>
                 <div style="font-size:10px;opacity:0.5;margin-top:4px;line-height:1.5;">
                     保存当前面板按钮配置为方案，可放入"切换面板方案"按钮快速切换
@@ -9494,9 +9582,9 @@ function renderFolderSettings() {
     const card = $(`
             <div class="ih-folder-setting-card" data-folder-index="${fi}">
                 <div class="ih-folder-setting-header">
-                    <button class="ih-folder-icon-btn" data-folder-index="${fi}" title="选择图标">${iconDisplay}</button>
+                    <div class="menu_button menu_button_icon ih-folder-icon-btn" data-folder-index="${fi}" title="选择图标" style="cursor:pointer;">${iconDisplay}</div>
                     <input type="text" class="ih-folder-name-input" value="${safeFolderName}" placeholder="文件夹名称" data-folder-index="${fi}" />
-                    <button class="ih-folder-delete-btn" data-folder-index="${fi}" title="删除文件夹"><i class="fa-solid fa-trash"></i></button>
+                    <div class="menu_button menu_button_icon ih-folder-delete-btn" data-folder-index="${fi}" title="删除文件夹" style="cursor:pointer;"><i class="fa-solid fa-trash"></i></div>
                 </div>
                 <div class="ih-folder-button-list" data-folder-index="${fi}">
                     ${(folder.buttons || [])
@@ -9939,9 +10027,9 @@ function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
                 <div class="form-group">
                     <label>按钮显示</label>
                     <input type="text" id="custom_symbol_display" value="${safeDisplay}" placeholder="按钮上显示的文字（推荐简短）">
-                    <button class="ih-icon-picker-btn" id="custom_symbol_pick_icon" title="选择 FA 图标">
-                        ${currentIcon ? `<i class="${safeCurrentIcon}"></i>` : '<i class="fa-solid fa-icons"></i>'} 图标
-                    </button>
+                    <div class="menu_button menu_button_icon" id="custom_symbol_pick_icon" title="选择 FA 图标" style="cursor:pointer;">
+                        ${currentIcon ? `<i class="${safeCurrentIcon}"></i>` : '<i class="fa-solid fa-icons"></i>'}<span>图标</span>
+                    </div>
                 </div>
 
                 <input type="hidden" id="custom_symbol_icon" value="${safeCurrentIcon}" />
@@ -9964,8 +10052,8 @@ function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
                 </div>
             </div>
             <div class="custom-symbol-buttons">
-                <button id="custom_symbol_cancel">取消</button>
-                <button id="custom_symbol_save" class="ih-save-btn">保存</button>
+                <div id="custom_symbol_cancel" class="menu_button menu_button_icon" style="cursor:pointer;"><span>取消</span></div>
+                <div id="custom_symbol_save" class="menu_button menu_button_icon" style="cursor:pointer;"><i class="fa-solid fa-check"></i><span>保存</span></div>
             </div>
         </div>
     `);
@@ -9988,7 +10076,7 @@ function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
     const icon = await pickFaIcon();
     if (icon) {
       $("#custom_symbol_icon").val(icon);
-      $(this).html(`<i class="${icon}"></i> 图标`);
+      $(this).html(`<i class="${icon}"></i><span>图标</span>`);
     }
   });
   $("#custom_symbol_cancel").on("click", function () {
@@ -11170,6 +11258,12 @@ jQuery(async () => {
         </div>`);
     leftContainer.append(beautyBtn);
   }
+  $("#ih_open_changelog_btn, #ih_open_help_btn").each(function () {
+    const $b = $(this);
+    if (!$b.hasClass("menu_button")) $b.addClass("menu_button");
+    if (!$b.hasClass("menu_button_icon")) $b.addClass("menu_button_icon");
+    $b.css("cursor", "pointer");
+  });
 
   $(document).on("click", "#ih_open_beauty_prompt_btn", function () {
     openBeautyPromptPanel();
@@ -11500,8 +11594,39 @@ jQuery(async () => {
       _cachedMessageInput = null;
       setTimeout(() => {
         historyManager.init();
+        chatUndoManager.updateStableSnapshot(true);
       }, 200);
     });
+
+    setTimeout(() => {
+      chatUndoManager.updateStableSnapshot(true);
+    }, 300);
+
+    const _stableSnapshotEvents = [
+      event_types.MESSAGE_RECEIVED,
+      event_types.USER_MESSAGE_RENDERED,
+      event_types.CHARACTER_MESSAGE_RENDERED,
+      event_types.MESSAGE_EDITED,
+      event_types.MESSAGE_SWIPED,
+      event_types.GENERATION_ENDED,
+    ];
+    _stableSnapshotEvents.forEach((ev) => {
+      if (!ev) return;
+      try {
+        eventSource.on(ev, function () {
+          chatUndoManager.updateStableSnapshot();
+        });
+      } catch (e) {}
+    });
+
+    if (event_types.MESSAGE_DELETED) {
+      try {
+        eventSource.on(event_types.MESSAGE_DELETED, function () {
+          chatUndoManager.saveFromExternal();
+          setTimeout(() => chatUndoManager.updateStableSnapshot(true), 200);
+        });
+      } catch (e) {}
+    }
 
     eventSource.on(event_types.GENERATION_STARTED, function (type) {
       autoScrollController.setStreaming(true);

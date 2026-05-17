@@ -1412,6 +1412,14 @@ const streamScrollController = {
       this.reset();
       return;
     }
+    if (!lastMes || lastMes.is_user) {
+      this.reset();
+      return;
+    }
+    if (lastMesLen === 0) {
+      this.reset();
+      return;
+    }
     this.reset();
     setTimeout(() => {
       doScrollToLastAi();
@@ -3220,6 +3228,17 @@ const chatUndoManager = {
     this._pushSnapshot(snapshot);
   },
 
+  saveFromRegenerate() {
+    if (this._justSaved) return;
+    let snapshot;
+    try {
+      snapshot = JSON.parse(JSON.stringify(chat));
+    } catch (e) {
+      return;
+    }
+    this._pushSnapshot(snapshot);
+  },
+
   updateStableSnapshot(immediate) {
     clearTimeout(this._stableSnapshotTimer);
     const doIt = () => {
@@ -3249,6 +3268,7 @@ const chatUndoManager = {
       chat.push(msg);
     });
 
+    this._isUndoing = true;
     try {
       await executeSlashCommandsWithOptions("/forcesave");
       await executeSlashCommandsWithOptions("/chat-reload");
@@ -3263,6 +3283,13 @@ const chatUndoManager = {
     } catch (e) {
       console.error("快捷工具栏: 撤回失败", e);
       toastr.error("撤回失败，请尝试手动恢复", "", { timeOut: 1000 });
+    } finally {
+      const self = this;
+      setTimeout(function () {
+        self._isUndoing = false;
+        self.updateStableSnapshot(true);
+        self.updateButton();
+      }, 800);
     }
   },
 
@@ -4407,7 +4434,6 @@ function doOpenQRAssistant() {
 
 function doRegenerateReply() {
   if (chat.length === 0) return;
-  chatUndoManager.save();
   Generate("regenerate");
 }
 
@@ -5018,13 +5044,15 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.6";
+const CHANGELOG_VERSION = "2.6.5";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.6.0</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.6.5</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li>「撤回删除」支持多步撤回：连续删除多条消息或多次操作后，点撤回按钮可以一步一步逐次还原（最多保留 20 步快照，每步 5 分钟内有效）</li>
-  <li>撤回机制全局化：现在能监听酒馆原生删除按钮、/del 命令、其他扩展的删除等所有发出 MESSAGE_DELETED 事件的删除行为，不再局限于插件自己的删除按钮</li>
-  <li>设置面板风格统一：修改了拓展设置面板主题风格，更好的适配不同酒馆主题</li>
+  <li>修复火狐浏览器下拖拽按钮顺序失效的问题</li>
+  <li>文件夹分组名字支持清空：留空后按钮上只显示图标（FA 或 emoji），输入框内容修改后立即生效</li>
+  <li>修复非流式生成时 API 报错后误滚动到上一条 AI 消息顶部的问题：新增三重防护——最后一条不是 AI 消息时不滚、AI 消息内容为空时不滚</li>
+  <li>修复多步撤回失效：修复只能撤回一次的问题；现在撤回过程中会保留剩余快照，可以连续撤回多步</li>
+  <li>支持监听原生重新生成行为：不光是插件按钮，酒馆原生的「重新生成」按钮、其他扩展或命令触发的 regenerate，都会自动保存快照，点撤回按钮就能回到之前的回复</li>
 </ul>
 `;
 
@@ -8491,12 +8519,15 @@ function buildToolbar() {
     else if (folder.display)
       iconHtml = `<span>${ihEscapeHtml(folder.display)}</span>`;
     else iconHtml = `<i class="fa-solid fa-folder"></i>`;
-    const labelText = folder.name || "文件夹";
+    const labelText = folder.name || "";
     const safeLabelText = ihEscapeHtml(labelText);
-    const safeLabelAttr = ihEscapeAttr(labelText);
+    const safeLabelAttr = ihEscapeAttr(labelText || "文件夹");
+    const labelHtml = safeLabelText
+      ? `<span class="ih-folder-label">${safeLabelText}</span>`
+      : "";
     const folderBtn = $(`
             <button id="input_folder_${fi}_btn" class="input-helper-btn ih-folder-btn" title="${safeLabelAttr}" data-norefocus="true" data-folder-index="${fi}">
-                ${iconHtml}<span class="ih-folder-label">${safeLabelText}</span><i class="fa-solid fa-ellipsis-vertical ih-folder-dots"></i>
+                ${iconHtml}${labelHtml}<i class="fa-solid fa-ellipsis-vertical ih-folder-dots"></i>
             </button>
         `);
     toolbar.append(folderBtn);
@@ -9205,6 +9236,11 @@ function renderFloatingPanelSettings() {
   try {
     const chipList = container.find("#ih_fp_button_list");
     if (chipList.sortable) {
+      try {
+        if (chipList.hasClass("ui-sortable")) {
+          chipList.sortable("destroy");
+        }
+      } catch (e) {}
       chipList.sortable({
         items: "> .ih-fp-sortable-chip",
         handle: ".ih-fp-chip-drag",
@@ -9611,6 +9647,7 @@ function renderFolderSettings() {
       const fi = parseInt($(this).data("folder-index"));
       getSettings().folders[fi].name = $(this).val();
       saveSettingsDebounced();
+      buildToolbar();
     });
   container
     .off("click", ".ih-folder-delete-btn")
@@ -9710,6 +9747,11 @@ function renderFolderSettings() {
       const listEl = $(this);
       const fi = parseInt(listEl.data("folder-index"));
       if (listEl.sortable) {
+        try {
+          if (listEl.hasClass("ui-sortable")) {
+            listEl.sortable("destroy");
+          }
+        } catch (e) {}
         listEl.sortable({
           items: "> .ih-folder-sortable-chip",
           handle: ".ih-fp-chip-drag",
@@ -10224,6 +10266,11 @@ function handleGlobalShortcuts(e) {
 function initSortable() {
   try {
     if (!$("#integrated_button_settings").sortable) return;
+    try {
+      if ($("#integrated_button_settings").hasClass("ui-sortable")) {
+        $("#integrated_button_settings").sortable("destroy");
+      }
+    } catch (e) {}
     $("#integrated_button_settings").sortable({
       handle: ".drag-handle",
       axis: "y",
@@ -10302,6 +10349,11 @@ function initSortable() {
     });
     $(".ih-folder-children").each(function () {
       const fi = parseInt($(this).attr("data-folder-index"));
+      try {
+        if ($(this).hasClass("ui-sortable")) {
+          $(this).sortable("destroy");
+        }
+      } catch (e) {}
       $(this).sortable({
         handle: ".drag-handle",
         axis: "y",
@@ -11577,7 +11629,9 @@ jQuery(async () => {
     eventSource.on(event_types.CHAT_CHANGED, function () {
       historyManager.clear();
       historyManager._sharedHistoriesByKey.clear();
-      chatUndoManager.clear();
+      if (!chatUndoManager._isUndoing) {
+        chatUndoManager.clear();
+      }
       if (shiftMode.active) shiftMode.deactivate();
       if (autoScrollController.active) autoScrollController.stop();
       if (findReplaceController.active) findReplaceController.close();
@@ -11629,6 +11683,9 @@ jQuery(async () => {
     }
 
     eventSource.on(event_types.GENERATION_STARTED, function (type) {
+      if (type === "regenerate") {
+        chatUndoManager.saveFromRegenerate();
+      }
       autoScrollController.setStreaming(true);
       streamScrollController.onStreamStart(type);
       scrollLockController.onGenerationStart(type);

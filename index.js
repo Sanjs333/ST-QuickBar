@@ -8508,6 +8508,7 @@ function buildToolbar() {
     const folderKey = `folder_${fi}`;
     $(`#input_folder_${fi}_btn`).remove();
     if (buttons[folderKey] === false) return;
+    if (floatingButtons.has(folderKey)) return;
 
     const visibleButtonsInFolder = (folder.buttons || []).filter((bKey) => {
       if (buttons[bKey] === false) return false;

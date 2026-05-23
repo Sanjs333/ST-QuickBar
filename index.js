@@ -70,6 +70,11 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-forward",
     text: null,
   },
+  editLastMsg: {
+    label: "编辑最后消息",
+    icon: "fa-solid fa-pen-to-square",
+    text: null,
+  },
   generateSwipe: {
     label: "生成备选回复",
     icon: "fa-solid fa-shuffle",
@@ -327,6 +332,7 @@ const defaultSettings = {
       k === "deleteLastMsg" ||
       k === "deleteLastSwipe" ||
       k === "continueReply" ||
+      k === "editLastMsg" ||
       k === "regenerateReply" ||
       k === "generateSwipe" ||
       k === "chatUndo" ||
@@ -382,6 +388,7 @@ const shortcutFunctionMap = {
   deleteLastMsg: doDeleteLastMsg,
   deleteLastSwipe: doDeleteLastSwipe,
   continueReply: doContinueReply,
+  editLastMsg: doEditLastMsg,
   regenerateReply: doRegenerateReply,
   generateSwipe: doGenerateSwipe,
   chatUndo: () => chatUndoManager.undo(),
@@ -3320,6 +3327,41 @@ const chatUndoManager = {
     $(selector).toggleClass("input-helper-btn-disabled", !has);
     $(selector).toggleClass("input-helper-btn-active", has);
   },
+
+  _watchTimer: null,
+  _lastWatchedLength: 0,
+
+  startWatcher() {
+    if (this._watchTimer) return;
+    this._lastWatchedLength = chat.length;
+    const self = this;
+    this._watchTimer = setInterval(function () {
+      if (self._isUndoing) return;
+      const cur = chat.length;
+      const prev = self._lastWatchedLength;
+      if (
+        cur < prev &&
+        self._stableSnapshot &&
+        self._stableSnapshot.length > cur
+      ) {
+        try {
+          const snap = JSON.parse(JSON.stringify(self._stableSnapshot));
+          self._pushSnapshot(snap);
+          toastr.info(`检测到外部删除了 ${prev - cur} 条消息，已保存快照`, "", {
+            timeOut: 1500,
+          });
+        } catch (e) {}
+      }
+      self._lastWatchedLength = cur;
+    }, 800);
+  },
+
+  stopWatcher() {
+    if (this._watchTimer) {
+      clearInterval(this._watchTimer);
+      this._watchTimer = null;
+    }
+  },
 };
 
 const shiftMode = {
@@ -3925,6 +3967,7 @@ function getButtonIdFromKey(key) {
     deleteLastMsg: "input_delete_last_msg_btn",
     deleteLastSwipe: "input_delete_last_swipe_btn",
     continueReply: "input_continue_reply_btn",
+    editLastMsg: "input_edit_last_msg_btn",
     regenerateReply: "input_regenerate_reply_btn",
     generateSwipe: "input_generate_swipe_btn",
     chatUndo: "input_chat_undo_btn",
@@ -3956,6 +3999,14 @@ function getButtonDisplayHtml(key) {
     if (!sym) return "?";
     if (sym.icon) return `<i class="${ihEscapeAttr(sym.icon)}"></i>`;
     return ihEscapeHtml(sym.display || sym.symbol || "?");
+  }
+  if (key.startsWith("folder_")) {
+    const idx = parseInt(key.replace("folder_", ""));
+    const folder = (getSettings().folders || [])[idx];
+    if (!folder) return '<i class="fa-solid fa-folder"></i>';
+    if (folder.icon) return `<i class="${ihEscapeAttr(folder.icon)}"></i>`;
+    if (folder.display) return ihEscapeHtml(folder.display);
+    return '<i class="fa-solid fa-folder"></i>';
   }
   const def = BUTTON_DEFS[key];
   if (!def) return "?";
@@ -4419,6 +4470,26 @@ function doDeleteLastSwipe() {
 function doContinueReply() {
   if (chat.length === 0) return;
   executeSlashCommandsWithOptions("/continue await=true");
+}
+function doEditLastMsg() {
+  if (chat.length === 0) {
+    toastr.warning("当前没有聊天消息", "", { timeOut: 800 });
+    return;
+  }
+  const lastMes = $("#chat .mes").last();
+  if (!lastMes.length) {
+    toastr.warning("找不到最后一条消息", "", { timeOut: 800 });
+    return;
+  }
+  const editBtn = lastMes.find(".mes_edit").first();
+  if (!editBtn.length || !editBtn.is(":visible")) {
+    toastr.warning("找不到编辑按钮", "", { timeOut: 800 });
+    return;
+  }
+  scrollChatToElement(lastMes[0], "smooth", false);
+  setTimeout(() => {
+    editBtn.trigger("click");
+  }, 200);
 }
 
 function doOpenQRAssistant() {
@@ -5044,15 +5115,18 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.6.5";
+const CHANGELOG_VERSION = "2.7";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.6.5</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.7.0</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li>修复火狐浏览器下拖拽按钮顺序失效的问题</li>
-  <li>文件夹分组名字支持清空：留空后按钮上只显示图标（FA 或 emoji），输入框内容修改后立即生效</li>
-  <li>修复非流式生成时 API 报错后误滚动到上一条 AI 消息顶部的问题：新增三重防护——最后一条不是 AI 消息时不滚、AI 消息内容为空时不滚</li>
-  <li>修复多步撤回失效：修复只能撤回一次的问题；现在撤回过程中会保留剩余快照，可以连续撤回多步</li>
-  <li>支持监听原生重新生成行为：不光是插件按钮，酒馆原生的「重新生成」按钮、其他扩展或命令触发的 regenerate，都会自动保存快照，点撤回按钮就能回到之前的回复</li>
+  <li><b>消息列表性能</b>：改为按需渲染，大量消息也不卡。隐藏、删除、移动三个标签共享列表，切换时保留勾选和滚动位置。</li>
+  <li><b>移动位置更直观</b>：目标位置上方显示呼吸横线和“↓ 插入到这里 ↓”标签。</li>
+  <li><b>新增编辑最后消息按钮</b>：一键编辑最新消息。默认关闭，可在按钮管理中开启或绑定快捷键。</li>
+  <li><b>文件夹按钮支持悬浮面板</b>：放入面板后，展开子菜单会自动选择弹出方向并避开屏幕边缘。</li>
+  <li><b>添加按钮界面优化</b>：文件夹与独立按钮分组显示，可展开预览；勾选文件夹会智能避免子按钮重复；已在面板的按钮会标注且无法重复添加。</li>
+  <li><b>文件夹下拉同时显示图标和名称</b>：不再只显图标，辨识更轻松。</li>
+  <li><b>删除保护增强</b>：能检测其他扩展悄悄删除的消息，自动保存快照，可一键恢复。</li>
+  <li><b>修复工具栏误展开</b>：启动后 1.5 秒内忽略非手动聚焦，避免刷新页面后工具栏自动弹出。</li>
 </ul>
 `;
 
@@ -5162,6 +5236,7 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-trash"></i> <b>删除最后消息</b>：删除聊天中的最后一条消息</li>
     <li><i class="fa-solid fa-scissors"></i> <b>删除当前备选</b>：删除最后一条消息的当前 Swipe</li>
     <li><i class="fa-solid fa-forward"></i> <b>继续回复</b>：让AI继续生成上一条回复</li>
+    <li><i class="fa-solid fa-pen-to-square"></i> <b>编辑最后消息</b>：一键让最后一条消息进入编辑模式，相当于自动滚动到底再点小铅笔图标</li>
     <li><i class="fa-solid fa-rotate"></i> <b>重新生成</b>：重新生成最后一条AI回复</li>
     <li><i class="fa-solid fa-shuffle"></i> <b>生成备选回复</b>：为最后一条AI消息生成一条新的备选回复（Swipe）</li>
     <li><i class="fa-solid fa-trash-arrow-up"></i> <b>撤回删除</b>：在执行删除消息或删除备选等操作后，点击此按钮可以撤回到操作前的状态。快照保留 5 分钟，过期或切换聊天后自动清除</li>
@@ -5185,8 +5260,8 @@ function openHelpPanel() {
     <li><b>删除</b>：可勾选任意多条消息（包括不连续楼层），或按范围批量删除。删除前会自动保存快照，5 分钟内可用「撤回删除」恢复</li>
     <li><b>移动</b>：勾选多条消息，一次性按原顺序移动到指定楼层。移动前也会自动保存快照，方便撤回</li>
 </ul>
-<p>三个标签页共用工具栏：全选、反选、范围选择、清除。输入楼层号时列表会实时高亮对应消息（单条用强色、范围用主题色、保留最近用绿色、移动目标用紫色）。每条消息前的小箭头按钮可以一键跳转到原聊天位置～</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-puzzle-piece"></i> 自定义内容</h4>
+<p>三个标签页共用工具栏：全选、反选、范围选择、清除。输入楼层号时列表会实时高亮对应消息（单条用强色、范围用主题色、保留最近用绿色、移动目标在两条消息中间显示"插入到这里"的紫线）。每条消息前的小箭头按钮可以一键跳转到原聊天位置～</p>
+<p><b>勾选 / 滚动跨标签共享</b>：在「隐藏」勾选了几条之后再切到「删除」或「移动」，勾选状态和滚动位置都会保留，不用重新选一遍。</p><h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-puzzle-piece"></i> 自定义内容</h4>
 <p>在设置面板中可以添加自己常用的自定义按钮，点击按钮会在输入框中插入预设内容。</p>
 <p><b>插入内容</b>支持多种形式：</p>
 <ul style="margin:4px 0;padding-left:18px;">
@@ -5268,33 +5343,16 @@ function openHideManagerPanel() {
   const { overlay, escHandler } = createDialogOverlay();
   const total = chat.length;
 
-  function buildMessageListHTML() {
-    return chat
-      .map((msg, idx) => {
-        const rawMes = String(msg?.mes || "");
-        const sender = ihEscapeHtml(msg.name || (msg.is_user ? "User" : "AI"));
-        const previewText = rawMes.replace(/\s+/g, " ").substring(0, 60);
-        const preview = ihEscapeHtml(previewText);
-        const truncate = rawMes.length > 60 ? "..." : "";
-        const hidden = isMessageHidden(msg);
-        const ghost = hidden
-          ? '<span class="ih-mgr-msg-ghost"><i class="fa-solid fa-ghost"></i></span>'
-          : "";
-        return `
-          <div class="ih-mgr-msg-item ${hidden ? "ih-mgr-msg-is-hidden" : ""}" data-floor="${idx}">
-            <span class="ih-mgr-msg-check"><input type="checkbox" data-floor="${idx}" /></span>
-            <span class="ih-mgr-msg-lead">
-              <button class="ih-mgr-msg-jump" data-floor="${idx}" title="跳转到此消息"><i class="fa-solid fa-location-arrow"></i></button>
-              <span class="ih-mgr-msg-floor">#${idx}</span>
-            </span>
-            <span class="ih-mgr-msg-sender">${sender}</span>
-            <span class="ih-mgr-msg-preview">${preview}${truncate}</span>
-            ${ghost}
-          </div>
-        `;
-      })
-      .join("");
-  }
+  const sharedState = {
+    selected: new Set(),
+    rangeStart: null,
+    rangeMode: false,
+    activeTab: "hide",
+    scrollTop: 0,
+  };
+
+  const ROW_HEIGHT = 36;
+  const BUFFER = 6;
 
   const initStatus = getHiddenStatus();
 
@@ -5311,7 +5369,7 @@ function openHideManagerPanel() {
           <i class="fa-solid fa-eye-slash"></i><span>隐藏</span>
         </button>
         <button class="ih-mgr-tab" data-tab="delete">
-          <i class="fa-sol id fa-trash"></i><span>删除</span>
+          <i class="fa-solid fa-trash"></i><span>删除</span>
         </button>
         <button class="ih-mgr-tab" data-tab="move">
           <i class="fa-solid fa-arrows-up-down"></i><span>移动</span>
@@ -5356,35 +5414,6 @@ function openHideManagerPanel() {
             <button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_mgr_do_keep"><i class="fa-solid fa-filter"></i> 执行</button>
           </div>
         </div>
-
-        <div class="ih-mgr-toolbar">
-          <div class="ih-mgr-btn-group">
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_hide_select_all" title="全选"><i class="fa-solid fa-check-double"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_hide_invert" title="反选"><i class="fa-solid fa-rotate"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_hide_range_toggle" title="范围选择"><i class="fa-solid fa-arrows-left-right-to-line"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_hide_clear" title="清除选择"><i class="fa-solid fa-eraser"></i></button>
-          </div>
-          <span class="ih-mgr-count" id="ih_mgr_hide_count">已选 0 条</span>
-        </div>
-
-        <div class="ih-mgr-list-wrap">
-          <div class="ih-mgr-msg-list" data-tab="hide"></div>
-        </div>
-
-        <div class="ih-mgr-footer-split">
-          <div class="ih-mgr-action-group">
-            <div class="ih-mgr-btn-group">
-              <button class="ih-mgr-btn ih-mgr-btn-ghost ih-mgr-btn-ghost-warn" id="ih_mgr_do_hide_all"><i class="fa-solid fa-eye-slash"></i> 全部隐藏</button>
-              <button class="ih-mgr-btn ih-mgr-btn-ghost ih-mgr-btn-ghost-ok" id="ih_mgr_do_unhide_all"><i class="fa-solid fa-eye"></i> 全部显示</button>
-            </div>
-          </div>
-          <div class="ih-mgr-action-group">
-            <div class="ih-mgr-btn-group">
-              <button class="ih-mgr-btn ih-mgr-btn-warn ih-mgr-btn-primary" id="ih_mgr_hide_selected"><i class="fa-solid fa-eye-slash"></i> 隐藏所选</button>
-              <button class="ih-mgr-btn ih-mgr-btn-ok ih-mgr-btn-primary" id="ih_mgr_unhide_selected"><i class="fa-solid fa-eye"></i> 显示所选</button>
-            </div>
-          </div>
-        </div>
       </div>
 
       <div class="ih-mgr-tab-panel" data-panel="delete" style="display:none;">
@@ -5403,24 +5432,6 @@ function openHideManagerPanel() {
             <button class="ih-mgr-btn ih-mgr-btn-warn" id="ih_mgr_del_range_confirm"><i class="fa-solid fa-trash"></i> 删除</button>
           </div>
         </div>
-
-        <div class="ih-mgr-toolbar">
-          <div class="ih-mgr-btn-group">
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_del_select_all" title="全选"><i class="fa-solid fa-check-double"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_del_invert" title="反选"><i class="fa-solid fa-rotate"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_del_range_toggle" title="范围选择"><i class="fa-solid fa-arrows-left-right-to-line"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_del_clear" title="清除选择"><i class="fa-solid fa-eraser"></i></button>
-          </div>
-          <span class="ih-mgr-count" id="ih_mgr_del_count">已选 0 条</span>
-        </div>
-
-        <div class="ih-mgr-list-wrap">
-          <div class="ih-mgr-msg-list" data-tab="delete"></div>
-        </div>
-
-        <div class="ih-mgr-footer-actions">
-          <button class="ih-mgr-btn ih-mgr-btn-warn ih-mgr-btn-primary" id="ih_mgr_del_confirm"><i class="fa-solid fa-trash"></i> 删除选中</button>
-        </div>
       </div>
 
       <div class="ih-mgr-tab-panel" data-panel="move" style="display:none;">
@@ -5437,22 +5448,46 @@ function openHideManagerPanel() {
             <button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_mgr_mv_confirm"><i class="fa-solid fa-arrows-up-down"></i> 移动</button>
           </div>
         </div>
+      </div>
 
+      <div class="ih-mgr-shared-list-area">
         <div class="ih-mgr-toolbar">
           <div class="ih-mgr-btn-group">
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_mv_select_all" title="全选"><i class="fa-solid fa-check-double"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_mv_invert" title="反选"><i class="fa-solid fa-rotate"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_mv_range_toggle" title="范围选择"><i class="fa-solid fa-arrows-left-right-to-line"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_mv_clear" title="清除选择"><i class="fa-solid fa-eraser"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_select_all" title="全选"><i class="fa-solid fa-check-double"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_invert" title="反选"><i class="fa-solid fa-rotate"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_range_toggle" title="范围选择"><i class="fa-solid fa-arrows-left-right-to-line"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_clear" title="清除选择"><i class="fa-solid fa-eraser"></i></button>
           </div>
-          <span class="ih-mgr-count" id="ih_mgr_mv_count">已选 0 条</span>
+          <span class="ih-mgr-count" id="ih_mgr_count">已选 0 条</span>
         </div>
 
         <div class="ih-mgr-list-wrap">
-          <div class="ih-mgr-msg-list" data-tab="move"></div>
+          <div class="ih-mgr-msg-list ih-mgr-vlist" id="ih_mgr_vlist">
+            <div class="ih-mgr-vlist-spacer-top"></div>
+            <div class="ih-mgr-vlist-rows"></div>
+            <div class="ih-mgr-vlist-spacer-bottom"></div>
+          </div>
+        </div>
+
+        <div class="ih-mgr-footer-actions" data-footer="hide">
+          <div class="ih-mgr-action-group">
+            <div class="ih-mgr-btn-group">
+              <button class="ih-mgr-btn ih-mgr-btn-ghost ih-mgr-btn-ghost-warn" id="ih_mgr_do_hide_all"><i class="fa-solid fa-eye-slash"></i> 全部隐藏</button>
+              <button class="ih-mgr-btn ih-mgr-btn-ghost ih-mgr-btn-ghost-ok" id="ih_mgr_do_unhide_all"><i class="fa-solid fa-eye"></i> 全部显示</button>
+            </div>
+          </div>
+          <div class="ih-mgr-action-group">
+            <div class="ih-mgr-btn-group">
+              <button class="ih-mgr-btn ih-mgr-btn-warn ih-mgr-btn-primary" id="ih_mgr_hide_selected"><i class="fa-solid fa-eye-slash"></i> 隐藏所选</button>
+              <button class="ih-mgr-btn ih-mgr-btn-ok ih-mgr-btn-primary" id="ih_mgr_unhide_selected"><i class="fa-solid fa-eye"></i> 显示所选</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ih-mgr-footer-actions" data-footer="delete" style="display:none;">
+          <button class="ih-mgr-btn ih-mgr-btn-warn ih-mgr-btn-primary" id="ih_mgr_del_confirm"><i class="fa-solid fa-trash"></i> 删除选中</button>
         </div>
       </div>
-
     </div>
   `);
 
@@ -5460,12 +5495,184 @@ function openHideManagerPanel() {
   syncDialogTheme(content[0]);
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
-  requestAnimationFrame(() => {
-    const _msgListHTML = buildMessageListHTML();
-    content.find('.ih-mgr-msg-list[data-tab="hide"]').html(_msgListHTML);
-    content.find('.ih-mgr-msg-list[data-tab="delete"]').html(_msgListHTML);
-    content.find('.ih-mgr-msg-list[data-tab="move"]').html(_msgListHTML);
+
+  const vlistEl = content.find("#ih_mgr_vlist")[0];
+  const spacerTopEl = content.find(".ih-mgr-vlist-spacer-top")[0];
+  const spacerBottomEl = content.find(".ih-mgr-vlist-spacer-bottom")[0];
+  const rowsEl = content.find(".ih-mgr-vlist-rows")[0];
+
+  function getHighlightSet() {
+    const set = {
+      ranges: [],
+      singles: new Set(),
+      keep: new Set(),
+      insertAbove: -1,
+      insertBelow: -1,
+    };
+    if (sharedState.activeTab === "hide") {
+      const single = content.find("#ih_mgr_specific_floor").val();
+      if (single !== "") {
+        const f = parseInt(single);
+        if (!isNaN(f) && f >= 0 && f < total) set.singles.add(f);
+      }
+      const fv = content.find("#ih_mgr_range_from").val();
+      const tv = content.find("#ih_mgr_range_to").val();
+      if (fv !== "" || tv !== "") {
+        const f = fv === "" ? 0 : parseInt(fv);
+        const t = tv === "" ? total - 1 : parseInt(tv);
+        if (!isNaN(f) && !isNaN(t)) {
+          const lo = Math.max(0, Math.min(f, t));
+          const hi = Math.min(total - 1, Math.max(f, t));
+          set.ranges.push([lo, hi]);
+        }
+      }
+      const keepVal = content.find("#ih_mgr_keep_recent").val();
+      if (keepVal !== "") {
+        const n = parseInt(keepVal);
+        if (!isNaN(n) && n > 0 && n < total) {
+          for (let i = total - n; i < total; i++) set.keep.add(i);
+        }
+      }
+    } else if (sharedState.activeTab === "delete") {
+      const fv = content.find("#ih_mgr_del_from").val();
+      const tv = content.find("#ih_mgr_del_to").val();
+      if (fv !== "" || tv !== "") {
+        const f = fv === "" ? 0 : parseInt(fv);
+        const t = tv === "" ? total - 1 : parseInt(tv);
+        if (!isNaN(f) && !isNaN(t)) {
+          const lo = Math.max(0, Math.min(f, t));
+          const hi = Math.min(total - 1, Math.max(f, t));
+          set.ranges.push([lo, hi]);
+        }
+      }
+    } else if (sharedState.activeTab === "move") {
+      const tv = content.find("#ih_mgr_mv_target").val();
+      if (tv !== "") {
+        const t = parseInt(tv);
+        if (!isNaN(t) && t >= 0 && t < total) set.insertAbove = t;
+        else if (!isNaN(t) && t >= total && total > 0)
+          set.insertBelow = total - 1;
+      }
+    }
+    return set;
+  }
+
+  function isInRanges(floor, ranges) {
+    for (const [a, b] of ranges) if (floor >= a && floor <= b) return true;
+    return false;
+  }
+
+  function buildRowHtml(floor) {
+    const msg = chat[floor];
+    if (!msg) return "";
+    const rawMes = String(msg?.mes || "");
+    const sender = ihEscapeHtml(msg.name || (msg.is_user ? "User" : "AI"));
+    const previewText = rawMes.replace(/\s+/g, " ").substring(0, 60);
+    const preview = ihEscapeHtml(previewText);
+    const truncate = rawMes.length > 60 ? "..." : "";
+    const hidden = isMessageHidden(msg);
+    const isChecked = sharedState.selected.has(floor);
+    const hl = getHighlightSet();
+    const cls = ["ih-mgr-msg-item"];
+    if (hidden) cls.push("ih-mgr-msg-is-hidden");
+    if (isChecked) cls.push("ih-mgr-msg-checked");
+    if (hl.singles.has(floor)) cls.push("ih-mgr-highlight-single");
+    else if (isInRanges(floor, hl.ranges)) cls.push("ih-mgr-highlight");
+    if (hl.keep.has(floor)) cls.push("ih-mgr-highlight-keep");
+    if (hl.insertAbove === floor) cls.push("ih-mgr-move-insert-above");
+    if (hl.insertBelow === floor) cls.push("ih-mgr-move-insert-below");
+    if (sharedState.rangeStart === floor) cls.push("ih-mgr-range-start");
+    const ghost = hidden
+      ? '<span class="ih-mgr-msg-ghost"><i class="fa-solid fa-ghost"></i></span>'
+      : "";
+    return `
+      <div class="${cls.join(" ")}" data-floor="${floor}" style="height:${ROW_HEIGHT}px;">
+        <span class="ih-mgr-msg-check"><input type="checkbox" data-floor="${floor}" ${isChecked ? "checked" : ""} /></span>
+        <span class="ih-mgr-msg-lead">
+          <button class="ih-mgr-msg-jump" data-floor="${floor}" title="跳转到此消息"><i class="fa-solid fa-location-arrow"></i></button>
+          <span class="ih-mgr-msg-floor">#${floor}</span>
+        </span>
+        <span class="ih-mgr-msg-sender">${sender}</span>
+        <span class="ih-mgr-msg-preview">${preview}${truncate}</span>
+        ${ghost}
+      </div>
+    `;
+  }
+
+  function renderVisible() {
+    const scrollTop = vlistEl.scrollTop;
+    const viewH = vlistEl.clientHeight || 400;
+    const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER);
+    const endIdx = Math.min(
+      total,
+      Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + BUFFER,
+    );
+    spacerTopEl.style.height = startIdx * ROW_HEIGHT + "px";
+    spacerBottomEl.style.height = (total - endIdx) * ROW_HEIGHT + "px";
+    let html = "";
+    for (let i = startIdx; i < endIdx; i++) html += buildRowHtml(i);
+    rowsEl.innerHTML = html;
+  }
+
+  let _renderRaf = null;
+  function scheduleRender() {
+    if (_renderRaf) return;
+    _renderRaf = requestAnimationFrame(() => {
+      _renderRaf = null;
+      renderVisible();
+    });
+  }
+
+  vlistEl.addEventListener("scroll", () => {
+    sharedState.scrollTop = vlistEl.scrollTop;
+    scheduleRender();
   });
+
+  function scrollListToFloor(floor) {
+    if (
+      floor === null ||
+      floor === undefined ||
+      isNaN(floor) ||
+      floor < 0 ||
+      floor >= total
+    )
+      return;
+    const targetTop =
+      floor * ROW_HEIGHT - vlistEl.clientHeight / 2 + ROW_HEIGHT / 2;
+    vlistEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+  }
+
+  function updateCount() {
+    content.find("#ih_mgr_count").text(`已选 ${sharedState.selected.size} 条`);
+    const checkboxes = rowsEl.querySelectorAll("input[type=checkbox]");
+    let allCheckedInView = checkboxes.length > 0;
+    checkboxes.forEach((cb) => {
+      if (!cb.checked) allCheckedInView = false;
+    });
+    const allBtn = content.find("#ih_mgr_select_all");
+    if (sharedState.selected.size === total && total > 0) {
+      allBtn
+        .html('<i class="fa-solid fa-square-xmark"></i>')
+        .attr("title", "取消全选")
+        .addClass("ih-mgr-btn-active");
+    } else {
+      allBtn
+        .html('<i class="fa-solid fa-check-double"></i>')
+        .attr("title", "全选")
+        .removeClass("ih-mgr-btn-active");
+    }
+  }
+
+  function refreshList() {
+    renderVisible();
+    updateCount();
+  }
+
+  setTimeout(() => {
+    renderVisible();
+    if (sharedState.scrollTop > 0) vlistEl.scrollTop = sharedState.scrollTop;
+    updateCount();
+  }, 0);
 
   const closeDialog = () => {
     document.removeEventListener("keydown", escHandler, true);
@@ -5475,27 +5682,47 @@ function openHideManagerPanel() {
     if (e.target === overlay[0]) closeDialog();
   });
   content.find("#ih_mgr_close").on("click", closeDialog);
+
   content.on("click", ".ih-mgr-input-clear-btn", function () {
     const targetsStr = $(this).attr("data-clear-targets") || "";
-    const targets = targetsStr
+    targetsStr
       .split(",")
       .map((s) => s.trim())
-      .filter(Boolean);
-    targets.forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) {
-        el.value = "";
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-    });
+      .filter(Boolean)
+      .forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.value = "";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
   });
 
   content.on("click", ".ih-mgr-tab", function () {
     const tab = $(this).data("tab");
+    sharedState.scrollTop = vlistEl.scrollTop;
+    sharedState.activeTab = tab;
+    sharedState.rangeStart = null;
+    sharedState.rangeMode = false;
     content.find(".ih-mgr-tab").removeClass("ih-mgr-tab-active");
     $(this).addClass("ih-mgr-tab-active");
     content.find(".ih-mgr-tab-panel").hide();
     content.find(`.ih-mgr-tab-panel[data-panel="${tab}"]`).show();
+    content.find(".ih-mgr-footer-actions").hide();
+    if (tab === "hide" || tab === "delete") {
+      content
+        .find(`.ih-mgr-footer-actions[data-footer="${tab}"]`)
+        .css("display", "");
+    }
+    content
+      .find(".ih-mgr-shared-list-area")
+      .toggleClass("ih-mgr-range-mode", false);
+    content.find("#ih_mgr_range_toggle").removeClass("ih-mgr-btn-active");
+    refreshList();
+    setTimeout(() => {
+      vlistEl.scrollTop = sharedState.scrollTop;
+      renderVisible();
+    }, 0);
   });
 
   content.on("click", ".ih-mgr-msg-jump", function (e) {
@@ -5517,46 +5744,144 @@ function openHideManagerPanel() {
     toastr.info(`已跳转到楼层 ${floor}`, "", { timeOut: 1000 });
   });
 
-  const hidePanel = content.find('.ih-mgr-tab-panel[data-panel="hide"]');
-  const delPanel = content.find('.ih-mgr-tab-panel[data-panel="delete"]');
-  const movePanel = content.find('.ih-mgr-tab-panel[data-panel="move"]');
+  rowsEl.addEventListener("click", function (e) {
+    const item = e.target.closest(".ih-mgr-msg-item");
+    if (!item) return;
+    if (e.target.closest(".ih-mgr-msg-jump")) return;
+    const floor = parseInt(item.dataset.floor);
+    if (isNaN(floor)) return;
 
-  function updateSelectAllButton(panel, btnSel) {
-    const checkboxes = panel.find(".ih-mgr-msg-list input[type=checkbox]");
-    const t = checkboxes.length;
-    const c = checkboxes.filter(":checked").length;
-    const btn = panel.find(btnSel);
-    if (t > 0 && c === t) {
-      btn.html('<i class="fa-solid fa-square-xmark"></i>');
-      btn.attr("title", "取消全选");
-      btn.addClass("ih-mgr-btn-active");
-    } else {
-      btn.html('<i class="fa-solid fa-check-double"></i>');
-      btn.attr("title", "全选");
-      btn.removeClass("ih-mgr-btn-active");
+    if (sharedState.rangeMode) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (sharedState.rangeStart === null) {
+        sharedState.rangeStart = floor;
+        renderVisible();
+      } else {
+        const a = Math.min(sharedState.rangeStart, floor);
+        const b = Math.max(sharedState.rangeStart, floor);
+        for (let i = a; i <= b; i++) sharedState.selected.add(i);
+        sharedState.rangeStart = null;
+        sharedState.rangeMode = false;
+        content
+          .find(".ih-mgr-shared-list-area")
+          .removeClass("ih-mgr-range-mode");
+        content.find("#ih_mgr_range_toggle").removeClass("ih-mgr-btn-active");
+        refreshList();
+      }
+      return;
     }
-  }
 
-  function getSelectedFloors(panel) {
-    const arr = [];
-    panel
-      .find(".ih-mgr-msg-list input[type=checkbox]:checked")
-      .each(function () {
-        arr.push(parseInt($(this).data("floor")));
+    if (e.target.matches("input[type=checkbox]")) {
+      if (e.target.checked) sharedState.selected.add(floor);
+      else sharedState.selected.delete(floor);
+      item.classList.toggle("ih-mgr-msg-checked", e.target.checked);
+      updateCount();
+      return;
+    }
+
+    if (sharedState.selected.has(floor)) sharedState.selected.delete(floor);
+    else sharedState.selected.add(floor);
+    refreshList();
+  });
+
+  content.find("#ih_mgr_select_all").on("click", () => {
+    if (sharedState.selected.size === total) {
+      sharedState.selected.clear();
+    } else {
+      for (let i = 0; i < total; i++) sharedState.selected.add(i);
+    }
+    refreshList();
+  });
+
+  content.find("#ih_mgr_invert").on("click", () => {
+    for (let i = 0; i < total; i++) {
+      if (sharedState.selected.has(i)) sharedState.selected.delete(i);
+      else sharedState.selected.add(i);
+    }
+    refreshList();
+  });
+
+  content.find("#ih_mgr_clear").on("click", () => {
+    sharedState.selected.clear();
+    refreshList();
+  });
+
+  content.find("#ih_mgr_range_toggle").on("click", function () {
+    sharedState.rangeMode = !sharedState.rangeMode;
+    if (!sharedState.rangeMode) sharedState.rangeStart = null;
+    $(this).toggleClass("ih-mgr-btn-active", sharedState.rangeMode);
+    content
+      .find(".ih-mgr-shared-list-area")
+      .toggleClass("ih-mgr-range-mode", sharedState.rangeMode);
+    if (sharedState.rangeMode) {
+      toastr.info("范围选择：点起点，再点终点，中间自动勾选", "", {
+        timeOut: 1500,
       });
-    return arr.sort((a, b) => a - b);
+    }
+    renderVisible();
+  });
+
+  function bindHighlightInput(selector) {
+    content.on("input", selector, function () {
+      const v = $(this).val();
+      if (v !== "") scrollListToFloor(parseInt(v));
+      renderVisible();
+    });
+  }
+  bindHighlightInput("#ih_mgr_specific_floor");
+  bindHighlightInput("#ih_mgr_range_from");
+  bindHighlightInput("#ih_mgr_range_to");
+  bindHighlightInput("#ih_mgr_keep_recent");
+  bindHighlightInput("#ih_mgr_del_from");
+  bindHighlightInput("#ih_mgr_del_to");
+  bindHighlightInput("#ih_mgr_mv_target");
+
+  content.on("input", "#ih_mgr_range_from, #ih_mgr_range_to", () => {
+    const fv = content.find("#ih_mgr_range_from").val();
+    const tv = content.find("#ih_mgr_range_to").val();
+    sharedState.selected.clear();
+    if (fv !== "" || tv !== "") {
+      const f = fv === "" ? 0 : parseInt(fv);
+      const t = tv === "" ? total - 1 : parseInt(tv);
+      if (!isNaN(f) && !isNaN(t)) {
+        const lo = Math.max(0, Math.min(f, t));
+        const hi = Math.min(total - 1, Math.max(f, t));
+        for (let i = lo; i <= hi; i++) sharedState.selected.add(i);
+      }
+    }
+    refreshList();
+  });
+
+  content.on("input", "#ih_mgr_del_from, #ih_mgr_del_to", () => {
+    const fv = content.find("#ih_mgr_del_from").val();
+    const tv = content.find("#ih_mgr_del_to").val();
+    sharedState.selected.clear();
+    if (fv !== "" || tv !== "") {
+      const f = fv === "" ? 0 : parseInt(fv);
+      const t = tv === "" ? total - 1 : parseInt(tv);
+      if (!isNaN(f) && !isNaN(t)) {
+        const lo = Math.max(0, Math.min(f, t));
+        const hi = Math.min(total - 1, Math.max(f, t));
+        for (let i = lo; i <= hi; i++) sharedState.selected.add(i);
+      }
+    }
+    refreshList();
+  });
+
+  function getSortedSelected() {
+    return Array.from(sharedState.selected).sort((a, b) => a - b);
   }
 
   function mergeToRanges(floors) {
     if (floors.length === 0) return [];
     const sorted = [...floors].sort((a, b) => a - b);
     const ranges = [];
-    let start = sorted[0];
-    let end = sorted[0];
+    let start = sorted[0],
+      end = sorted[0];
     for (let i = 1; i < sorted.length; i++) {
-      if (sorted[i] === end + 1) {
-        end = sorted[i];
-      } else {
+      if (sorted[i] === end + 1) end = sorted[i];
+      else {
         ranges.push([start, end]);
         start = sorted[i];
         end = sorted[i];
@@ -5566,464 +5891,37 @@ function openHideManagerPanel() {
     return ranges;
   }
 
-  function setupRangeSelection(panel, toggleBtnId) {
-    const state = { rangeMode: false, rangeStart: null };
-
-    panel.find(toggleBtnId).on("click", function () {
-      state.rangeMode = !state.rangeMode;
-      if (state.rangeMode) {
-        const checked = getSelectedFloors(panel);
-        if (checked.length === 1) {
-          state.rangeStart = checked[0];
-        } else {
-          state.rangeStart = null;
-        }
-      } else {
-        state.rangeStart = null;
-      }
-      $(this).toggleClass("ih-mgr-btn-active", state.rangeMode);
-      panel.toggleClass("ih-mgr-range-mode", state.rangeMode);
-      applyRangeStartHighlight(panel, state.rangeStart);
-      if (state.rangeMode) {
-        if (state.rangeStart !== null) {
-          toastr.info(
-            `已将 #${state.rangeStart} 设为起点，再点一条作为终点`,
-            "",
-            { timeOut: 1500 },
-          );
-        } else {
-          toastr.info("范围选择：点起点，再点终点，中间自动勾选", "", {
-            timeOut: 1500,
-          });
-        }
-      }
-    });
-
-    return state;
-  }
-
-  function applyRangeStartHighlight(panel, startFloor) {
-    panel.find(".ih-mgr-msg-item").removeClass("ih-mgr-range-start");
-    if (startFloor !== null && startFloor !== undefined) {
-      panel
-        .find(`.ih-mgr-msg-item[data-floor="${startFloor}"]`)
-        .addClass("ih-mgr-range-start");
-    }
-  }
-
-  function handleListClick(panel, state, onChange) {
-    panel.on("click", ".ih-mgr-msg-item", function (e) {
-      const floor = parseInt($(this).data("floor"));
-
-      if (state.rangeMode) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (state.rangeStart === null) {
-          state.rangeStart = floor;
-          applyRangeStartHighlight(panel, state.rangeStart);
-        } else {
-          const a = Math.min(state.rangeStart, floor);
-          const b = Math.max(state.rangeStart, floor);
-          for (let i = a; i <= b; i++) {
-            panel
-              .find(`.ih-mgr-msg-list input[data-floor="${i}"]`)
-              .prop("checked", true);
-            panel
-              .find(`.ih-mgr-msg-list .ih-mgr-msg-item[data-floor="${i}"]`)
-              .addClass("ih-mgr-msg-checked");
-          }
-          state.rangeStart = null;
-          state.rangeMode = false;
-          panel.find(".ih-mgr-btn-active").each(function () {
-            if (
-              $(this).attr("id") &&
-              $(this).attr("id").endsWith("_range_toggle")
-            ) {
-              $(this).removeClass("ih-mgr-btn-active");
-            }
-          });
-          panel.removeClass("ih-mgr-range-mode");
-          applyRangeStartHighlight(panel, null);
-          onChange();
-        }
-        return;
-      }
-
-      if ($(e.target).is("input[type=checkbox]")) return;
-
-      const cb = $(this).find("input[type=checkbox]")[0];
-      if (cb) {
-        cb.checked = !cb.checked;
-        $(this).toggleClass("ih-mgr-msg-checked", cb.checked);
-      }
-      onChange();
-    });
-
-    panel.on("change", ".ih-mgr-msg-list input[type=checkbox]", function () {
-      if (state.rangeMode) return;
-      $(this)
-        .closest(".ih-mgr-msg-item")
-        .toggleClass("ih-mgr-msg-checked", this.checked);
-      onChange();
-    });
-  }
-
-  const hideState = setupRangeSelection(hidePanel, "#ih_mgr_hide_range_toggle");
-  const delState = setupRangeSelection(delPanel, "#ih_mgr_del_range_toggle");
-  const mvState = setupRangeSelection(movePanel, "#ih_mgr_mv_range_toggle");
-
-  function scrollListToFloor(listEl, floor) {
-    if (floor === null || floor === undefined || isNaN(floor) || floor < 0)
-      return;
-    const list = listEl[0];
-    if (!list) return;
-    const item = list.querySelector(`.ih-mgr-msg-item[data-floor="${floor}"]`);
-    if (!item) return;
-    const listRect = list.getBoundingClientRect();
-    const itemRect = item.getBoundingClientRect();
-    const listH = list.clientHeight;
-    const itemH = itemRect.height;
-    const itemTopInList = itemRect.top - listRect.top + list.scrollTop;
-    const scrollTop = list.scrollTop;
-    if (
-      itemTopInList >= scrollTop &&
-      itemTopInList + itemH <= scrollTop + listH
-    )
-      return;
-    const targetTop = itemTopInList - (listH - itemH) / 2;
-    list.scrollTo({
-      top: Math.max(0, targetTop),
-      behavior: "smooth",
-    });
-  }
-
-  function applyHideRangeInputHighlight() {
-    const list = hidePanel.find(".ih-mgr-msg-list");
-    list
-      .find(".ih-mgr-msg-item")
-      .removeClass(
-        "ih-mgr-highlight ih-mgr-highlight-single ih-mgr-highlight-keep",
-      );
-
-    const single = hidePanel.find("#ih_mgr_specific_floor").val();
-    if (single !== "") {
-      const f = parseInt(single);
-      if (!isNaN(f) && f >= 0 && f < total) {
-        list
-          .find(`.ih-mgr-msg-item[data-floor="${f}"]`)
-          .addClass("ih-mgr-highlight-single");
-      }
-    }
-
-    const fv = hidePanel.find("#ih_mgr_range_from").val();
-    const tv = hidePanel.find("#ih_mgr_range_to").val();
-    if (fv !== "" || tv !== "") {
-      const f = fv === "" ? 0 : parseInt(fv);
-      const t = tv === "" ? total - 1 : parseInt(tv);
-      if (!isNaN(f) && !isNaN(t)) {
-        const lo = Math.max(0, Math.min(f, t));
-        const hi = Math.min(total - 1, Math.max(f, t));
-        for (let i = lo; i <= hi; i++) {
-          list
-            .find(`.ih-mgr-msg-item[data-floor="${i}"]`)
-            .addClass("ih-mgr-highlight");
-        }
-      }
-    }
-
-    const keepVal = hidePanel.find("#ih_mgr_keep_recent").val();
-    if (keepVal !== "") {
-      const n = parseInt(keepVal);
-      if (!isNaN(n) && n > 0 && n < total) {
-        const start = total - n;
-        for (let i = start; i < total; i++) {
-          list
-            .find(`.ih-mgr-msg-item[data-floor="${i}"]`)
-            .addClass("ih-mgr-highlight-keep");
-        }
-      }
-    }
-  }
-
-  function applyDelRangeInputHighlight() {
-    const list = delPanel.find(".ih-mgr-msg-list");
-    list.find(".ih-mgr-msg-item").removeClass("ih-mgr-highlight");
-    const fv = delPanel.find("#ih_mgr_del_from").val();
-    const tv = delPanel.find("#ih_mgr_del_to").val();
-    if (fv === "" && tv === "") return;
-    const f = fv === "" ? 0 : parseInt(fv);
-    const t = tv === "" ? total - 1 : parseInt(tv);
-    if (isNaN(f) || isNaN(t)) return;
-    const lo = Math.max(0, Math.min(f, t));
-    const hi = Math.min(total - 1, Math.max(f, t));
-    for (let i = lo; i <= hi; i++) {
-      list
-        .find(`.ih-mgr-msg-item[data-floor="${i}"]`)
-        .addClass("ih-mgr-highlight");
-    }
-  }
-
-  function applyMoveTargetHighlight() {
-    const list = movePanel.find(".ih-mgr-msg-list");
-    list.find(".ih-mgr-msg-item").removeClass("ih-mgr-move-target");
-    const tv = movePanel.find("#ih_mgr_mv_target").val();
-    if (tv === "") return;
-    const t = parseInt(tv);
-    if (!isNaN(t) && t >= 0 && t < total) {
-      list
-        .find(`.ih-mgr-msg-item[data-floor="${t}"]`)
-        .addClass("ih-mgr-move-target");
-    }
-  }
-
-  hidePanel.on("input", "input[type=number]", applyHideRangeInputHighlight);
-  delPanel.on("input", "input[type=number]", applyDelRangeInputHighlight);
-  movePanel.on("input", "input[type=number]", applyMoveTargetHighlight);
-  hidePanel.on("input", "#ih_mgr_range_from, #ih_mgr_range_to", () => {
-    const fv = hidePanel.find("#ih_mgr_range_from").val();
-    const tv = hidePanel.find("#ih_mgr_range_to").val();
-    const list = hidePanel.find(".ih-mgr-msg-list");
-    list.find("input[type=checkbox]").prop("checked", false);
-    list.find(".ih-mgr-msg-item").removeClass("ih-mgr-msg-checked");
-    if (fv !== "" || tv !== "") {
-      const f = fv === "" ? 0 : parseInt(fv);
-      const t = tv === "" ? total - 1 : parseInt(tv);
-      if (!isNaN(f) && !isNaN(t)) {
-        const lo = Math.max(0, Math.min(f, t));
-        const hi = Math.min(total - 1, Math.max(f, t));
-        for (let i = lo; i <= hi; i++) {
-          list
-            .find(`input[type=checkbox][data-floor="${i}"]`)
-            .prop("checked", true);
-          list
-            .find(`.ih-mgr-msg-item[data-floor="${i}"]`)
-            .addClass("ih-mgr-msg-checked");
-        }
-      }
-    }
-    updateHideCount();
-  });
-
-  delPanel.on("input", "#ih_mgr_del_from, #ih_mgr_del_to", () => {
-    const fv = delPanel.find("#ih_mgr_del_from").val();
-    const tv = delPanel.find("#ih_mgr_del_to").val();
-    const list = delPanel.find(".ih-mgr-msg-list");
-    list.find("input[type=checkbox]").prop("checked", false);
-    list.find(".ih-mgr-msg-item").removeClass("ih-mgr-msg-checked");
-    if (fv !== "" || tv !== "") {
-      const f = fv === "" ? 0 : parseInt(fv);
-      const t = tv === "" ? total - 1 : parseInt(tv);
-      if (!isNaN(f) && !isNaN(t)) {
-        const lo = Math.max(0, Math.min(f, t));
-        const hi = Math.min(total - 1, Math.max(f, t));
-        for (let i = lo; i <= hi; i++) {
-          list
-            .find(`input[type=checkbox][data-floor="${i}"]`)
-            .prop("checked", true);
-          list
-            .find(`.ih-mgr-msg-item[data-floor="${i}"]`)
-            .addClass("ih-mgr-msg-checked");
-        }
-      }
-    }
-    updateDelCount();
-  });
-  hidePanel.on("input", "#ih_mgr_specific_floor", function () {
-    const v = $(this).val();
-    if (v !== "")
-      scrollListToFloor(hidePanel.find(".ih-mgr-msg-list"), parseInt(v));
-  });
-  hidePanel.on("input", "#ih_mgr_range_from", function () {
-    const v = $(this).val();
-    if (v !== "")
-      scrollListToFloor(hidePanel.find(".ih-mgr-msg-list"), parseInt(v));
-  });
-  hidePanel.on("input", "#ih_mgr_range_to", function () {
-    const v = $(this).val();
-    if (v !== "")
-      scrollListToFloor(hidePanel.find(".ih-mgr-msg-list"), parseInt(v));
-  });
-  hidePanel.on("input", "#ih_mgr_keep_recent", function () {
-    const v = $(this).val();
-    if (v === "") return;
-    const n = parseInt(v);
-    if (!isNaN(n) && n > 0) {
-      scrollListToFloor(
-        hidePanel.find(".ih-mgr-msg-list"),
-        Math.max(0, total - n),
-      );
-    }
-  });
-  delPanel.on("input", "#ih_mgr_del_from", function () {
-    const v = $(this).val();
-    if (v !== "")
-      scrollListToFloor(delPanel.find(".ih-mgr-msg-list"), parseInt(v));
-  });
-  delPanel.on("input", "#ih_mgr_del_to", function () {
-    const v = $(this).val();
-    if (v !== "")
-      scrollListToFloor(delPanel.find(".ih-mgr-msg-list"), parseInt(v));
-  });
-  movePanel.on("input", "#ih_mgr_mv_target", function () {
-    const v = $(this).val();
-    if (v !== "")
-      scrollListToFloor(movePanel.find(".ih-mgr-msg-list"), parseInt(v));
-  });
-
-  function updateHideCount() {
-    const n = hidePanel.find(
-      ".ih-mgr-msg-list input[type=checkbox]:checked",
-    ).length;
-    hidePanel.find("#ih_mgr_hide_count").text(`已选 ${n} 条`);
-    updateSelectAllButton(hidePanel, "#ih_mgr_hide_select_all");
-  }
-  function updateDelCount() {
-    const n = delPanel.find(
-      ".ih-mgr-msg-list input[type=checkbox]:checked",
-    ).length;
-    delPanel.find("#ih_mgr_del_count").text(`已选 ${n} 条`);
-    updateSelectAllButton(delPanel, "#ih_mgr_del_select_all");
-  }
-  function updateMvCount() {
-    const n = movePanel.find(
-      ".ih-mgr-msg-list input[type=checkbox]:checked",
-    ).length;
-    movePanel.find("#ih_mgr_mv_count").text(`已选 ${n} 条`);
-    updateSelectAllButton(movePanel, "#ih_mgr_mv_select_all");
-  }
-
-  handleListClick(hidePanel, hideState, updateHideCount);
-  handleListClick(delPanel, delState, updateDelCount);
-  handleListClick(movePanel, mvState, updateMvCount);
-
-  function bindSelectAll(
-    panel,
-    selectBtnId,
-    invertBtnId,
-    clearBtnId,
-    updateFn,
-  ) {
-    panel.find(selectBtnId).on("click", () => {
-      const checkboxes = panel.find(".ih-mgr-msg-list input[type=checkbox]");
-      const t = checkboxes.length;
-      const c = checkboxes.filter(":checked").length;
-      const shouldCheck = !(t > 0 && c === t);
-      checkboxes.prop("checked", shouldCheck);
-      panel
-        .find(".ih-mgr-msg-list .ih-mgr-msg-item")
-        .toggleClass("ih-mgr-msg-checked", shouldCheck);
-      updateFn();
-    });
-    panel.find(invertBtnId).on("click", () => {
-      panel.find(".ih-mgr-msg-list input[type=checkbox]").each(function () {
-        this.checked = !this.checked;
-        $(this)
-          .closest(".ih-mgr-msg-item")
-          .toggleClass("ih-mgr-msg-checked", this.checked);
-      });
-      updateFn();
-    });
-    panel.find(clearBtnId).on("click", () => {
-      panel
-        .find(".ih-mgr-msg-list input[type=checkbox]")
-        .prop("checked", false);
-      panel
-        .find(".ih-mgr-msg-list .ih-mgr-msg-item")
-        .removeClass("ih-mgr-msg-checked");
-      updateFn();
-    });
-  }
-
-  bindSelectAll(
-    hidePanel,
-    "#ih_mgr_hide_select_all",
-    "#ih_mgr_hide_invert",
-    "#ih_mgr_hide_clear",
-    updateHideCount,
-  );
-  bindSelectAll(
-    delPanel,
-    "#ih_mgr_del_select_all",
-    "#ih_mgr_del_invert",
-    "#ih_mgr_del_clear",
-    updateDelCount,
-  );
-  bindSelectAll(
-    movePanel,
-    "#ih_mgr_mv_select_all",
-    "#ih_mgr_mv_invert",
-    "#ih_mgr_mv_clear",
-    updateMvCount,
-  );
-
-  function refreshAllLists() {
-    const hideSaved = new Set(getSelectedFloors(hidePanel));
-    const delSaved = new Set(getSelectedFloors(delPanel));
-    const mvSaved = new Set(getSelectedFloors(movePanel));
-
-    const newHTML = buildMessageListHTML();
-    hidePanel.find(".ih-mgr-msg-list").html(newHTML);
-    delPanel.find(".ih-mgr-msg-list").html(newHTML);
-    movePanel.find(".ih-mgr-msg-list").html(newHTML);
-
-    const restore = (panel, saved) => {
-      saved.forEach((f) => {
-        if (f >= 0 && f < chat.length) {
-          panel
-            .find(`.ih-mgr-msg-list input[data-floor="${f}"]`)
-            .prop("checked", true);
-          panel
-            .find(`.ih-mgr-msg-list .ih-mgr-msg-item[data-floor="${f}"]`)
-            .addClass("ih-mgr-msg-checked");
-        }
-      });
-    };
-    restore(hidePanel, hideSaved);
-    restore(delPanel, delSaved);
-    restore(movePanel, mvSaved);
-
-    const s = getHiddenStatus();
-    content.find("#ih_mgr_hide_status span").text(s.summary);
-
-    applyHideRangeInputHighlight();
-    applyDelRangeInputHighlight();
-    applyMoveTargetHighlight();
-    applyRangeStartHighlight(hidePanel, hideState.rangeStart);
-    applyRangeStartHighlight(delPanel, delState.rangeStart);
-    applyRangeStartHighlight(movePanel, mvState.rangeStart);
-
-    updateHideCount();
-    updateDelCount();
-    updateMvCount();
-  }
-
-  hidePanel.find("#ih_mgr_hide_one").on("click", async () => {
-    const v = hidePanel.find("#ih_mgr_specific_floor").val();
+  content.find("#ih_mgr_hide_one").on("click", async () => {
+    const v = content.find("#ih_mgr_specific_floor").val();
     if (v === "") {
       toastr.warning("请输入楼层号", "", { timeOut: 1000 });
       return;
     }
     await doHideOne(v);
-    refreshAllLists();
+    const s = getHiddenStatus();
+    content.find("#ih_mgr_hide_status span").text(s.summary);
+    refreshList();
   });
-  hidePanel.find("#ih_mgr_unhide_one").on("click", async () => {
-    const v = hidePanel.find("#ih_mgr_specific_floor").val();
+  content.find("#ih_mgr_unhide_one").on("click", async () => {
+    const v = content.find("#ih_mgr_specific_floor").val();
     if (v === "") {
       toastr.warning("请输入楼层号", "", { timeOut: 1000 });
       return;
     }
     await doUnhideOne(v);
-    refreshAllLists();
+    const s = getHiddenStatus();
+    content.find("#ih_mgr_hide_status span").text(s.summary);
+    refreshList();
   });
-  hidePanel.find("#ih_mgr_jump_one").on("click", () => {
-    const v = hidePanel.find("#ih_mgr_specific_floor").val();
+  content.find("#ih_mgr_jump_one").on("click", () => {
+    const v = content.find("#ih_mgr_specific_floor").val();
     if (v === "") {
       toastr.warning("请输入楼层号", "", { timeOut: 1000 });
       return;
     }
     const floor = parseInt(v);
     if (isNaN(floor) || floor < 0 || floor >= chat.length) {
-      toastr.error(`无效楼层: ${v}（范围 0~${chat.length - 1}）`, "", {
+      toastr.error(`无效楼层（范围 0~${chat.length - 1}）`, "", {
         timeOut: 2000,
       });
       return;
@@ -6041,35 +5939,45 @@ function openHideManagerPanel() {
     }
     toastr.info(`已跳转到楼层 ${floor}`, "", { timeOut: 1000 });
   });
-  hidePanel.find("#ih_mgr_do_range_hide").on("click", async () => {
+  content.find("#ih_mgr_do_range_hide").on("click", async () => {
     await doHideRange(
-      hidePanel.find("#ih_mgr_range_from").val(),
-      hidePanel.find("#ih_mgr_range_to").val(),
+      content.find("#ih_mgr_range_from").val(),
+      content.find("#ih_mgr_range_to").val(),
     );
-    refreshAllLists();
+    const s = getHiddenStatus();
+    content.find("#ih_mgr_hide_status span").text(s.summary);
+    refreshList();
   });
-  hidePanel.find("#ih_mgr_do_range_unhide").on("click", async () => {
+  content.find("#ih_mgr_do_range_unhide").on("click", async () => {
     await doUnhideRange(
-      hidePanel.find("#ih_mgr_range_from").val(),
-      hidePanel.find("#ih_mgr_range_to").val(),
+      content.find("#ih_mgr_range_from").val(),
+      content.find("#ih_mgr_range_to").val(),
     );
-    refreshAllLists();
+    const s = getHiddenStatus();
+    content.find("#ih_mgr_hide_status span").text(s.summary);
+    refreshList();
   });
-  hidePanel.find("#ih_mgr_do_keep").on("click", async () => {
-    await doKeepRecent(hidePanel.find("#ih_mgr_keep_recent").val());
-    refreshAllLists();
+  content.find("#ih_mgr_do_keep").on("click", async () => {
+    await doKeepRecent(content.find("#ih_mgr_keep_recent").val());
+    const s = getHiddenStatus();
+    content.find("#ih_mgr_hide_status span").text(s.summary);
+    refreshList();
   });
-  hidePanel.find("#ih_mgr_do_hide_all").on("click", async () => {
+  content.find("#ih_mgr_do_hide_all").on("click", async () => {
     await doHideAll();
-    refreshAllLists();
+    const s = getHiddenStatus();
+    content.find("#ih_mgr_hide_status span").text(s.summary);
+    refreshList();
   });
-  hidePanel.find("#ih_mgr_do_unhide_all").on("click", async () => {
+  content.find("#ih_mgr_do_unhide_all").on("click", async () => {
     await doUnhideAll();
-    refreshAllLists();
+    const s = getHiddenStatus();
+    content.find("#ih_mgr_hide_status span").text(s.summary);
+    refreshList();
   });
 
-  async function batchHideUnhide(panel, isHide) {
-    const selected = getSelectedFloors(panel);
+  async function batchHideUnhide(isHide) {
+    const selected = getSortedSelected();
     if (selected.length === 0) {
       toastr.warning("还没选中任何消息哦", "", { timeOut: 1000 });
       return;
@@ -6077,11 +5985,8 @@ function openHideManagerPanel() {
     const ranges = mergeToRanges(selected);
     const cmdName = isHide ? "/hide" : "/unhide";
     for (const [a, b] of ranges) {
-      if (a === b) {
-        await executeSlashCommandsWithOptions(`${cmdName} ${a}`);
-      } else {
-        await executeSlashCommandsWithOptions(`${cmdName} ${a}-${b}`);
-      }
+      if (a === b) await executeSlashCommandsWithOptions(`${cmdName} ${a}`);
+      else await executeSlashCommandsWithOptions(`${cmdName} ${a}-${b}`);
     }
     await new Promise((r) => setTimeout(r, 200));
     toastr.success(
@@ -6089,19 +5994,21 @@ function openHideManagerPanel() {
       "",
       { timeOut: 1500 },
     );
-    refreshAllLists();
+    const s = getHiddenStatus();
+    content.find("#ih_mgr_hide_status span").text(s.summary);
+    refreshList();
   }
 
-  hidePanel.find("#ih_mgr_hide_selected").on("click", () => {
-    batchHideUnhide(hidePanel, true);
-  });
-  hidePanel.find("#ih_mgr_unhide_selected").on("click", () => {
-    batchHideUnhide(hidePanel, false);
-  });
+  content
+    .find("#ih_mgr_hide_selected")
+    .on("click", () => batchHideUnhide(true));
+  content
+    .find("#ih_mgr_unhide_selected")
+    .on("click", () => batchHideUnhide(false));
 
-  delPanel.find("#ih_mgr_del_range_confirm").on("click", async () => {
-    const fv = delPanel.find("#ih_mgr_del_from").val();
-    const tv = delPanel.find("#ih_mgr_del_to").val();
+  content.find("#ih_mgr_del_range_confirm").on("click", async () => {
+    const fv = content.find("#ih_mgr_del_from").val();
+    const tv = content.find("#ih_mgr_del_to").val();
     if (fv === "" || tv === "") {
       toastr.warning("请输入起始和结束楼层", "", { timeOut: 1200 });
       return;
@@ -6129,8 +6036,8 @@ function openHideManagerPanel() {
     });
   });
 
-  delPanel.find("#ih_mgr_del_confirm").on("click", async () => {
-    const selected = getSelectedFloors(delPanel);
+  content.find("#ih_mgr_del_confirm").on("click", async () => {
+    const selected = getSortedSelected();
     if (selected.length === 0) {
       toastr.warning("还没选中任何消息哦", "", { timeOut: 1000 });
       return;
@@ -6152,13 +6059,13 @@ function openHideManagerPanel() {
     });
   });
 
-  movePanel.find("#ih_mgr_mv_confirm").on("click", async () => {
-    const selected = getSelectedFloors(movePanel);
+  content.find("#ih_mgr_mv_confirm").on("click", async () => {
+    const selected = getSortedSelected();
     if (selected.length === 0) {
       toastr.warning("请至少勾选一条要移动的消息", "", { timeOut: 1200 });
       return;
     }
-    const tv = movePanel.find("#ih_mgr_mv_target").val();
+    const tv = content.find("#ih_mgr_mv_target").val();
     if (tv === "") {
       toastr.warning("请输入目标楼层", "", { timeOut: 1200 });
       return;
@@ -6181,18 +6088,12 @@ function openHideManagerPanel() {
         return;
     }
     chatUndoManager.save();
-
     const toMove = selected.map((f) => chat[f]);
-    for (let i = selected.length - 1; i >= 0; i--) {
-      chat.splice(selected[i], 1);
-    }
+    for (let i = selected.length - 1; i >= 0; i--) chat.splice(selected[i], 1);
     let newTarget = target;
-    for (const f of selected) {
-      if (f < target) newTarget--;
-    }
+    for (const f of selected) if (f < target) newTarget--;
     newTarget = Math.max(0, Math.min(chat.length, newTarget));
     chat.splice(newTarget, 0, ...toMove);
-
     closeDialog();
     try {
       await executeSlashCommandsWithOptions("/forcesave");
@@ -6207,10 +6108,6 @@ function openHideManagerPanel() {
       toastr.error("移动失败，请尝试撤回", "", { timeOut: 1500 });
     }
   });
-
-  updateHideCount();
-  updateDelCount();
-  updateMvCount();
 }
 
 function doChatManager() {
@@ -6584,6 +6481,32 @@ const floatingPanelController = {
       );
     }
     buttons.forEach((bKey) => {
+      if (bKey.startsWith("folder_")) {
+        const fi = parseInt(bKey.replace("folder_", ""));
+        const folder = (getSettings().folders || [])[fi];
+        if (!folder) return;
+        let iconHtml;
+        if (folder.icon)
+          iconHtml = `<i class="${ihEscapeAttr(folder.icon)}"></i>`;
+        else if (folder.display) iconHtml = ihEscapeHtml(folder.display);
+        else iconHtml = `<i class="fa-solid fa-folder"></i>`;
+        const folderLabel = folder.name || "文件夹";
+        const btn = $(
+          `<button class="input-helper-btn ih-fp-btn ih-folder-btn" data-button-key="${ihEscapeAttr(bKey)}" data-folder-index="${fi}" title="${ihEscapeAttr(folderLabel)}">${iconHtml}</button>`,
+        );
+        btn.on("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          const existing = $(
+            `.ih-folder-dropdown-portal[data-folder-index="${fi}"]`,
+          );
+          if (existing.length) closeAllFolderDropdowns();
+          else openFolderDropdown($(this), fi, true);
+        });
+        this._applyButtonSize(btn[0], fp.buttonSize || 12);
+        panel.append(btn);
+        return;
+      }
       const displayHtml = getButtonDisplayHtml(bKey);
       const label = getButtonLabel(bKey);
       const btn = $(
@@ -8401,7 +8324,7 @@ function closeAllFolderDropdowns() {
   portals.forEach((el) => el.remove());
 }
 
-function openFolderDropdown(folderBtn, fi) {
+function openFolderDropdown(folderBtn, fi, fromFloating) {
   closeAllFolderDropdowns();
   const settings = getSettings();
   const buttons = settings.buttons;
@@ -8410,12 +8333,23 @@ function openFolderDropdown(folderBtn, fi) {
   const dropdown = $(
     `<div class="ih-folder-dropdown-portal" data-folder-index="${fi}"></div>`,
   );
-  const floatingButtons = floatingPanelController.getFloatingButtons();
+  const floatingButtons = fromFloating
+    ? new Set()
+    : floatingPanelController.getFloatingButtons();
   (folder.buttons || []).forEach((bKey) => {
     if (buttons[bKey] === false) return;
     if (floatingButtons.has(bKey)) return;
-    const displayHtml = getButtonDisplayHtml(bKey);
+    let displayHtml = getButtonDisplayHtml(bKey);
     const label = getButtonLabel(bKey);
+    if (bKey.startsWith("custom_")) {
+      const idx = parseInt(bKey.replace("custom_", ""));
+      const sym = (getSettings().customSymbols || [])[idx];
+      if (sym && sym.icon && sym.display) {
+        displayHtml = `<i class="${ihEscapeAttr(sym.icon)}"></i> <span style="margin-left:2px;">${ihEscapeHtml(sym.display)}</span>`;
+      } else if (sym && sym.icon && !sym.display) {
+        displayHtml = `<i class="${ihEscapeAttr(sym.icon)}"></i> <span style="margin-left:2px;">${ihEscapeHtml(sym.name || "")}</span>`;
+      }
+    }
     const btn = $(
       `<button class="input-helper-btn" data-button-key="${ihEscapeAttr(bKey)}" title="${ihEscapeAttr(label)}" data-norefocus="true">${displayHtml}</button>`,
     );
@@ -8435,12 +8369,67 @@ function openFolderDropdown(folderBtn, fi) {
   const btnRect = folderBtn[0].getBoundingClientRect();
   const ddWidth = dropdown.outerWidth();
   const ddHeight = dropdown.outerHeight();
-  let left = btnRect.left + btnRect.width / 2 - ddWidth / 2;
-  let top = btnRect.top - ddHeight - 6;
-  if (left < 4) left = 4;
-  if (left + ddWidth > window.innerWidth - 4)
-    left = window.innerWidth - ddWidth - 4;
-  if (top < 4) top = btnRect.bottom + 6;
+  let left, top;
+  if (fromFloating) {
+    const fpOrientation = getSettings().floatingPanel.orientation || "vertical";
+    const goVertical =
+      fpOrientation === "horizontal" || fpOrientation === "vertical-down";
+    if (goVertical) {
+      // 横向面板/上下展开竖向：根据上下空间决定弹出方向
+      left = btnRect.left + btnRect.width / 2 - ddWidth / 2;
+      const spaceBelow = window.innerHeight - btnRect.bottom - 8;
+      const spaceAbove = btnRect.top - 8;
+      if (spaceBelow >= ddHeight) {
+        top = btnRect.bottom + 6;
+      } else if (spaceAbove >= ddHeight) {
+        top = btnRect.top - ddHeight - 6;
+      } else if (spaceBelow >= spaceAbove) {
+        top = btnRect.bottom + 6;
+        if (top + ddHeight > window.innerHeight - 4) {
+          dropdown.css("max-height", window.innerHeight - top - 8 + "px");
+          dropdown.css("overflow-y", "auto");
+        }
+      } else {
+        top = Math.max(4, btnRect.top - ddHeight - 6);
+        if (top < 4) {
+          top = 4;
+          dropdown.css("max-height", btnRect.top - 12 + "px");
+          dropdown.css("overflow-y", "auto");
+        }
+      }
+    } else {
+      const spaceLeft = btnRect.left;
+      const spaceRight = window.innerWidth - btnRect.right;
+      if (spaceRight >= ddWidth + 8) {
+        left = btnRect.right + 6;
+      } else if (spaceLeft >= ddWidth + 8) {
+        left = btnRect.left - ddWidth - 6;
+      } else {
+        left = Math.max(
+          4,
+          Math.min(
+            window.innerWidth - ddWidth - 4,
+            btnRect.left + btnRect.width / 2 - ddWidth / 2,
+          ),
+        );
+      }
+      top = btnRect.top;
+      if (top + ddHeight > window.innerHeight - 4) {
+        top = window.innerHeight - ddHeight - 4;
+      }
+      if (top < 4) top = 4;
+    }
+    if (left < 4) left = 4;
+    if (left + ddWidth > window.innerWidth - 4)
+      left = window.innerWidth - ddWidth - 4;
+  } else {
+    left = btnRect.left + btnRect.width / 2 - ddWidth / 2;
+    top = btnRect.top - ddHeight - 6;
+    if (left < 4) left = 4;
+    if (left + ddWidth > window.innerWidth - 4)
+      left = window.innerWidth - ddWidth - 4;
+    if (top < 4) top = btnRect.bottom + 6;
+  }
   dropdown.css({
     position: "fixed",
     left: left + "px",
@@ -9075,6 +9064,8 @@ function renderFloatingPanelSettings() {
   const allKeys = [...ALL_BUTTON_KEYS];
   const customSymbols = getSettings().customSymbols || [];
   customSymbols.forEach((_, i) => allKeys.push(`custom_${i}`));
+  const allFolders = getSettings().folders || [];
+  allFolders.forEach((_, i) => allKeys.push(`folder_${i}`));
   const content = $(`
         <div class="ih-fp-settings-body">
             <div class="ih-hm-group" style="border-bottom:none;">
@@ -9476,32 +9467,105 @@ function renderFloatingPanelSettings() {
   });
   container.on("click", "#ih_fp_add_button", function () {
     const fpButtons = new Set(getSettings().floatingPanel.buttons || []);
-    const available = allKeys.filter((k) => !fpButtons.has(k));
+    const fpFolders = getSettings().folders || [];
+    const allSubButtons = new Set();
+    fpFolders.forEach((f) => {
+      (f.buttons || []).forEach((bk) => allSubButtons.add(bk));
+    });
+    const standaloneAvailable = allKeys.filter(
+      (k) =>
+        !k.startsWith("folder_") && !fpButtons.has(k) && !allSubButtons.has(k),
+    );
+    const folderAvailable = fpFolders
+      .map((f, i) => ({ folder: f, index: i, key: `folder_${i}` }))
+      .filter((o) => !fpButtons.has(o.key));
+
+    const standaloneHtml = standaloneAvailable
+      .map(
+        (k) => `
+          <div class="ih-picker-item" data-key="${k}" data-selected="false">
+            <input type="checkbox" style="margin:0;flex-shrink:0;pointer-events:none;" />
+            <span class="bp-preview">${getButtonDisplayHtml(k)}</span>
+            <span>${getButtonLabel(k)}</span>
+          </div>
+        `,
+      )
+      .join("");
+
+    const foldersHtml = folderAvailable
+      .map(({ folder, key }) => {
+        const iconHtml = folder.icon
+          ? `<i class="${ihEscapeAttr(folder.icon)}"></i>`
+          : folder.display
+            ? ihEscapeHtml(folder.display)
+            : '<i class="fa-solid fa-folder"></i>';
+        let addedCount = 0;
+        const subItems = (folder.buttons || [])
+          .map((subKey) => {
+            const alreadyAdded = fpButtons.has(subKey);
+            if (alreadyAdded) addedCount++;
+            const disabledAttr = alreadyAdded ? 'data-disabled="true"' : "";
+            const styleAttr = alreadyAdded
+              ? 'style="opacity:0.45;pointer-events:none;"'
+              : "";
+            const cbDisabled = alreadyAdded ? "disabled" : "";
+            const addedTag = alreadyAdded
+              ? '<span class="ih-picker-already-added">已在面板</span>'
+              : "";
+            return `
+              <div class="ih-picker-item ih-picker-sub-item" data-key="${ihEscapeAttr(subKey)}" data-parent-folder="${key}" data-selected="false" ${disabledAttr} ${styleAttr}>
+                <input type="checkbox" ${cbDisabled} style="margin:0;flex-shrink:0;pointer-events:none;" />
+                <span class="bp-preview" style="margin-left:14px;">${getButtonDisplayHtml(subKey)}</span>
+                <span>${getButtonLabel(subKey)}</span>
+                ${addedTag}
+              </div>
+            `;
+          })
+          .join("");
+        const totalSub = (folder.buttons || []).length;
+        const subCountText =
+          addedCount > 0
+            ? `${totalSub - addedCount}/${totalSub} 个可选`
+            : `${totalSub} 个`;
+        return `
+          <div class="ih-picker-folder-group" data-folder-key="${key}">
+            <div class="ih-picker-folder-header">
+              <button class="ih-picker-folder-toggle" data-folder-key="${key}" type="button" title="展开/折叠子按钮">
+                <i class="fa-solid fa-chevron-right"></i>
+              </button>
+              <div class="ih-picker-item ih-picker-folder-row" data-key="${key}" data-selected="false">
+                <input type="checkbox" style="margin:0;flex-shrink:0;pointer-events:none;" />
+                <span class="bp-preview">${iconHtml}</span>
+                <span>${ihEscapeHtml(folder.name || "文件夹")}</span>
+                <span class="ih-picker-folder-count">${subCountText}</span>
+              </div>
+            </div>
+            <div class="ih-picker-folder-children" data-folder-key="${key}" style="display:none;">
+              ${subItems || '<div style="padding:6px 12px;font-size:11px;opacity:0.5;">空文件夹</div>'}
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    const isEmpty = !standaloneHtml && !foldersHtml;
     const { overlay, escHandler } = createDialogOverlay();
     const pickerContent = $(`
-            <div class="ih-picker-dialog-content">
-                <h4 style="margin:0 0 12px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px;">
-                    <i class="fa-solid fa-circle-plus"></i> 添加按钮到悬浮面板
-                </h4>
-                <div class="ih-picker-list">
-                    ${available
-                      .map(
-                        (k) => `
-                        <div class="ih-picker-item" data-key="${k}" data-selected="false">
-                            <input type="checkbox" style="margin:0;flex-shrink:0;pointer-events:none;" />
-                            <span class="bp-preview">${getButtonDisplayHtml(k)}</span>
-                            <span>${getButtonLabel(k)}</span>
-                        </div>
-                    `,
-                      )
-                      .join("")}
-                    ${available.length === 0 ? '<div style="padding:8px;opacity:0.6;font-size:12px;">没有可用的按钮了</div>' : ""}
-                </div>
-                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
-                    <button class="ih-picker-confirm-btn" style="padding:5px 16px;border:1px solid rgba(100,149,237,0.5);background-color:rgba(100,149,237,0.3);color:var(--SmartThemeBodyColor);border-radius:5px;cursor:pointer;font-size:12px;">确定</button>
-                </div>
-            </div>
-        `);
+      <div class="ih-picker-dialog-content">
+        <h4 style="margin:0 0 12px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px;">
+          <i class="fa-solid fa-circle-plus"></i> 添加按钮到悬浮面板
+        </h4>
+        <div class="ih-picker-list">
+          ${standaloneHtml}
+          ${standaloneHtml && foldersHtml ? '<div class="ih-picker-divider"></div>' : ""}
+          ${foldersHtml}
+          ${isEmpty ? '<div style="padding:8px;opacity:0.6;font-size:12px;">没有可用的按钮了</div>' : ""}
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+          <button class="ih-picker-confirm-btn" style="padding:5px 16px;border:1px solid rgba(100,149,237,0.5);background-color:rgba(100,149,237,0.3);color:var(--SmartThemeBodyColor);border-radius:5px;cursor:pointer;font-size:12px;">确定</button>
+        </div>
+      </div>
+    `);
     overlay.append(pickerContent);
     syncDialogTheme(pickerContent[0]);
     pickerContent.on("click", (e) => e.stopPropagation());
@@ -9512,19 +9576,78 @@ function renderFloatingPanelSettings() {
     overlay.off("click").on("click", (e) => {
       if (e.target === overlay[0]) closePicker();
     });
-    pickerContent.on("click", ".ih-picker-item", function () {
+
+    pickerContent.on("click", ".ih-picker-folder-toggle", function (e) {
+      e.stopPropagation();
+      const fkey = $(this).attr("data-folder-key");
+      const childrenEl = pickerContent.find(
+        `.ih-picker-folder-children[data-folder-key="${fkey}"]`,
+      );
+      const icon = $(this).find("i");
+      if (childrenEl.is(":visible")) {
+        childrenEl.hide();
+        icon.removeClass("fa-chevron-down").addClass("fa-chevron-right");
+      } else {
+        childrenEl.show();
+        icon.removeClass("fa-chevron-right").addClass("fa-chevron-down");
+      }
+    });
+
+    pickerContent.on("click", ".ih-picker-item", function (e) {
+      if ($(this).attr("data-disabled") === "true") return;
       const isSel = $(this).attr("data-selected") === "true";
       $(this).attr("data-selected", String(!isSel));
       $(this).find("input[type='checkbox']").prop("checked", !isSel);
       $(this).css("background-color", !isSel ? "rgba(100,149,237,0.2)" : "");
+      if ($(this).hasClass("ih-picker-folder-row")) {
+        const fkey = $(this).attr("data-key");
+        const childrenEl = pickerContent.find(
+          `.ih-picker-folder-children[data-folder-key="${fkey}"]`,
+        );
+        const subItems = childrenEl.find(".ih-picker-sub-item");
+        if (!isSel) {
+          subItems.each(function () {
+            $(this).attr("data-locked-by-folder", "true");
+            $(this).css({ opacity: "0.4", "pointer-events": "none" });
+            const cb = $(this).find("input[type='checkbox']");
+            cb.prop("disabled", true);
+            if ($(this).attr("data-selected") === "true") {
+              $(this).attr("data-selected", "false");
+              cb.prop("checked", false);
+              $(this).css("background-color", "");
+            }
+          });
+        } else {
+          subItems.each(function () {
+            if ($(this).attr("data-locked-by-folder") === "true") {
+              $(this).removeAttr("data-locked-by-folder");
+              $(this).css({ opacity: "", "pointer-events": "" });
+              $(this).find("input[type='checkbox']").prop("disabled", false);
+            }
+          });
+        }
+      }
     });
+
     pickerContent.find(".ih-picker-confirm-btn").on("click", function () {
-      const selected = [];
+      const rawSelected = [];
       pickerContent
         .find(".ih-picker-item[data-selected='true']")
         .each(function () {
-          selected.push($(this).data("key"));
+          rawSelected.push($(this).attr("data-key"));
         });
+      const selectedFolderKeys = rawSelected.filter((k) =>
+        k.startsWith("folder_"),
+      );
+      const subToExclude = new Set();
+      selectedFolderKeys.forEach((fk) => {
+        const fi = parseInt(fk.replace("folder_", ""));
+        const folder = fpFolders[fi];
+        if (folder && Array.isArray(folder.buttons)) {
+          folder.buttons.forEach((sub) => subToExclude.add(sub));
+        }
+      });
+      const selected = rawSelected.filter((k) => !subToExclude.has(k));
       if (selected.length > 0) {
         if (!getSettings().floatingPanel.buttons)
           getSettings().floatingPanel.buttons = [];
@@ -10572,6 +10695,7 @@ async function loadSettings() {
     }
   } catch (e) {}
   floatingPanelController.init();
+  chatUndoManager.startWatcher();
 }
 
 function setupTextareaFocusTracking() {
@@ -10586,8 +10710,13 @@ function setupTextareaFocusTracking() {
     if (!$("#send_form").hasClass("textarea-focused"))
       $("#send_form").addClass("textarea-focused");
   });
+  let _ihPageReadyAt = Date.now();
   textarea.addEventListener("focus", function () {
-    if (userInitiatedFocus) $("#send_form").addClass("textarea-focused");
+    if (userInitiatedFocus) {
+      $("#send_form").addClass("textarea-focused");
+    } else if (Date.now() - _ihPageReadyAt < 1500) {
+      return;
+    }
     userInitiatedFocus = false;
   });
   textarea.addEventListener("blur", function () {
@@ -10620,7 +10749,11 @@ function setupTextareaFocusTracking() {
       e.preventDefault();
     });
   }
-  if (textarea && document.activeElement === textarea) {
+  if (
+    textarea &&
+    document.activeElement === textarea &&
+    getSettings().toolbarPinned
+  ) {
     $("#send_form").addClass("textarea-focused");
   }
 }
@@ -11089,11 +11222,11 @@ jQuery(async () => {
     });
   }
 
-  if (!$("#input_find_replace_btn").length) {
-    const findReplBtn = $(
-      '<button id="input_find_replace_btn" class="input-helper-btn" title="查找替换" data-norefocus="true"><i class="fa-solid fa-magnifying-glass"></i></button>',
+  if (!$("#input_edit_last_msg_btn").length) {
+    const editLastBtn = $(
+      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息" data-norefocus="true"><i class="fa-solid fa-pen-to-square"></i></button>',
     );
-    $("#input_helper_toolbar").append(findReplBtn);
+    $("#input_helper_toolbar").append(editLastBtn);
   }
   if (!$("#input_generate_swipe_btn").length) {
     const generateSwipeBtn = $(
@@ -11632,6 +11765,7 @@ jQuery(async () => {
       if (!chatUndoManager._isUndoing) {
         chatUndoManager.clear();
       }
+      chatUndoManager._lastWatchedLength = chat.length;
       if (shiftMode.active) shiftMode.deactivate();
       if (autoScrollController.active) autoScrollController.stop();
       if (findReplaceController.active) findReplaceController.close();

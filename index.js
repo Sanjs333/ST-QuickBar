@@ -3998,7 +3998,7 @@ function getButtonDisplayHtml(key) {
     const sym = getSettings().customSymbols[idx];
     if (!sym) return "?";
     if (sym.icon) return `<i class="${ihEscapeAttr(sym.icon)}"></i>`;
-    return ihEscapeHtml(sym.display || sym.symbol || "?");
+    return ihEscapeHtml(sym.display || sym.name || "?");
   }
   if (key.startsWith("folder_")) {
     const idx = parseInt(key.replace("folder_", ""));
@@ -8333,9 +8333,16 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
   const dropdown = $(
     `<div class="ih-folder-dropdown-portal" data-folder-index="${fi}"></div>`,
   );
-  const floatingButtons = fromFloating
-    ? new Set()
-    : floatingPanelController.getFloatingButtons();
+  let floatingButtons;
+  if (fromFloating) {
+    const fpBtns = floatingPanelController.getFloatingButtons();
+    floatingButtons = new Set();
+    fpBtns.forEach((bk) => {
+      if (!bk.startsWith("folder_")) floatingButtons.add(bk);
+    });
+  } else {
+    floatingButtons = floatingPanelController.getFloatingButtons();
+  }
   (folder.buttons || []).forEach((bKey) => {
     if (buttons[bKey] === false) return;
     if (floatingButtons.has(bKey)) return;
@@ -8345,13 +8352,14 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
       const idx = parseInt(bKey.replace("custom_", ""));
       const sym = (getSettings().customSymbols || [])[idx];
       if (sym) {
-        const nameText = sym.name || "";
-        if (sym.icon && nameText) {
-          displayHtml = `<i class="${ihEscapeAttr(sym.icon)}"></i> <span style="margin-left:2px;">${ihEscapeHtml(nameText)}</span>`;
+        const displayText = sym.display || "";
+        const fallbackText = displayText || sym.name || "";
+        if (sym.icon && displayText) {
+          displayHtml = `<i class="${ihEscapeAttr(sym.icon)}"></i> <span style="margin-left:2px;">${ihEscapeHtml(displayText)}</span>`;
         } else if (sym.icon) {
           displayHtml = `<i class="${ihEscapeAttr(sym.icon)}"></i>`;
-        } else if (nameText) {
-          displayHtml = ihEscapeHtml(nameText);
+        } else if (fallbackText) {
+          displayHtml = ihEscapeHtml(fallbackText);
         }
       }
     }
@@ -10256,7 +10264,7 @@ function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
   $("#custom_symbol_save").on("click", function () {
     const name = $("#custom_symbol_name").val().trim();
     const symbol = $("#custom_symbol_symbol").val();
-    const display = $("#custom_symbol_display").val() || symbol;
+    const display = $("#custom_symbol_display").val();
     const icon = $("#custom_symbol_icon").val() || "";
     let cursorPos = $("#custom_symbol_cursor").val();
     if (cursorPos === "custom")

@@ -5405,7 +5405,7 @@ function openHideManagerPanel() {
           </div>
         </div>
 
-        <div class="ih-mgr-inline-row">
+        <div class="ih-mgr-inline-row ih-mgr-inline-row-oneline">
           <label class="ih-mgr-inline-label">保留最近</label>
           <input type="number" id="ih_mgr_keep_recent" class="ih-mgr-input" placeholder="条数" min="1" />
           <span class="ih-mgr-hint-inline">条可见</span>
@@ -5469,7 +5469,7 @@ function openHideManagerPanel() {
           </div>
         </div>
 
-        <div class="ih-mgr-footer-actions" data-footer="hide">
+        <div class="ih-mgr-footer-actions ih-mgr-footer-split" data-footer="hide">
           <div class="ih-mgr-action-group">
             <div class="ih-mgr-btn-group">
               <button class="ih-mgr-btn ih-mgr-btn-ghost ih-mgr-btn-ghost-warn" id="ih_mgr_do_hide_all"><i class="fa-solid fa-eye-slash"></i> 全部隐藏</button>
@@ -8344,10 +8344,15 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
     if (bKey.startsWith("custom_")) {
       const idx = parseInt(bKey.replace("custom_", ""));
       const sym = (getSettings().customSymbols || [])[idx];
-      if (sym && sym.icon && sym.display) {
-        displayHtml = `<i class="${ihEscapeAttr(sym.icon)}"></i> <span style="margin-left:2px;">${ihEscapeHtml(sym.display)}</span>`;
-      } else if (sym && sym.icon && !sym.display) {
-        displayHtml = `<i class="${ihEscapeAttr(sym.icon)}"></i> <span style="margin-left:2px;">${ihEscapeHtml(sym.name || "")}</span>`;
+      if (sym) {
+        const nameText = sym.name || "";
+        if (sym.icon && nameText) {
+          displayHtml = `<i class="${ihEscapeAttr(sym.icon)}"></i> <span style="margin-left:2px;">${ihEscapeHtml(nameText)}</span>`;
+        } else if (sym.icon) {
+          displayHtml = `<i class="${ihEscapeAttr(sym.icon)}"></i>`;
+        } else if (nameText) {
+          displayHtml = ihEscapeHtml(nameText);
+        }
       }
     }
     const btn = $(
@@ -10784,7 +10789,14 @@ function setupInputTracking() {
 }
 
 function setupGlobalDropdownClose() {
+  let lastViewportChangeTime = 0;
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", function () {
+      lastViewportChangeTime = Date.now();
+    });
+  }
   $(document).on("click", function (e) {
+    if (Date.now() - lastViewportChangeTime < 500) return;
     if (
       !$(e.target).closest(".ih-folder-btn").length &&
       !$(e.target).closest(".ih-folder-dropdown-portal").length

@@ -3334,9 +3334,23 @@ const chatUndoManager = {
   startWatcher() {
     if (this._watchTimer) return;
     this._lastWatchedLength = chat.length;
+    try {
+      this._lastWatchedChatId = SillyTavern.getContext().getCurrentChatId();
+    } catch (e) {
+      this._lastWatchedChatId = null;
+    }
     const self = this;
     this._watchTimer = setInterval(function () {
       if (self._isUndoing) return;
+      let curChatId = null;
+      try {
+        curChatId = SillyTavern.getContext().getCurrentChatId();
+      } catch (e) {}
+      if (curChatId !== self._lastWatchedChatId) {
+        self._lastWatchedChatId = curChatId;
+        self._lastWatchedLength = chat.length;
+        return;
+      }
       const cur = chat.length;
       const prev = self._lastWatchedLength;
       if (
@@ -3347,9 +3361,6 @@ const chatUndoManager = {
         try {
           const snap = JSON.parse(JSON.stringify(self._stableSnapshot));
           self._pushSnapshot(snap);
-          toastr.info(`检测到外部删除了 ${prev - cur} 条消息，已保存快照`, "", {
-            timeOut: 1500,
-          });
         } catch (e) {}
       }
       self._lastWatchedLength = cur;
@@ -11787,6 +11798,12 @@ jQuery(async () => {
         chatUndoManager.clear();
       }
       chatUndoManager._lastWatchedLength = chat.length;
+      try {
+        chatUndoManager._lastWatchedChatId =
+          SillyTavern.getContext().getCurrentChatId();
+      } catch (e) {
+        chatUndoManager._lastWatchedChatId = null;
+      }
       if (shiftMode.active) shiftMode.deactivate();
       if (autoScrollController.active) autoScrollController.stop();
       if (findReplaceController.active) findReplaceController.close();

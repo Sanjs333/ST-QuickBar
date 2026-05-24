@@ -72,7 +72,7 @@ const BUTTON_DEFS = {
   },
   editLastMsg: {
     label: "编辑最后消息",
-    icon: "fa-solid fa-pen-to-square",
+    icon: "fa-solid fa-pencil",
     text: null,
   },
   generateSwipe: {
@@ -11245,7 +11245,7 @@ jQuery(async () => {
 
   if (!$("#input_edit_last_msg_btn").length) {
     const editLastBtn = $(
-      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息" data-norefocus="true"><i class="fa-solid fa-pen-to-square"></i></button>',
+      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息" data-norefocus="true"><i class="fa-solid fa-pencil"></i></button>',
     );
     $("#input_helper_toolbar").append(editLastBtn);
   }

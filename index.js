@@ -5626,18 +5626,33 @@ function openHideManagerPanel() {
   }
 
   let _renderRaf = null;
+  let _isRendering = false;
   function scheduleRender() {
     if (_renderRaf) return;
+    if (_isRendering) return;
     _renderRaf = requestAnimationFrame(() => {
       _renderRaf = null;
+      _isRendering = true;
+      const prevScrollTop = vlistEl.scrollTop;
       renderVisible();
+      if (Math.abs(vlistEl.scrollTop - prevScrollTop) > 2) {
+        vlistEl.scrollTop = prevScrollTop;
+      }
+      requestAnimationFrame(() => {
+        _isRendering = false;
+      });
     });
   }
 
-  vlistEl.addEventListener("scroll", () => {
-    sharedState.scrollTop = vlistEl.scrollTop;
-    scheduleRender();
-  });
+  vlistEl.addEventListener(
+    "scroll",
+    () => {
+      if (_isRendering) return;
+      sharedState.scrollTop = vlistEl.scrollTop;
+      scheduleRender();
+    },
+    { passive: true },
+  );
 
   function scrollListToFloor(floor) {
     if (

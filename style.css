@@ -3599,6 +3599,16 @@ body.ih-find-active input::-moz-selection {
   flex-shrink: 0;
 }
 
+.ih-mgr-vlist {
+  overflow-anchor: none;
+}
+
+.ih-mgr-vlist-spacer-top,
+.ih-mgr-vlist-spacer-bottom,
+.ih-mgr-vlist-rows {
+  overflow-anchor: none;
+}
+
 .ih-mgr-shared-list-area {
   display: flex;
   flex-direction: column;

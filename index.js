@@ -293,6 +293,7 @@ const defaultSettings = {
   enabled: true,
   confirmDangerousActions: false,
   toolbarPinned: false,
+  toolbarBtnSize: 12,
   lastSeenChangelogVersion: "",
   autoScrollSpeed: 50,
   pagingScrollRatio: 0.93,
@@ -5209,119 +5210,249 @@ function openHelpPanel() {
     <i class="fa-solid fa-circle-question"></i> 快捷工具栏 使用说明
 </h3>
 <div style="font-size:12px;line-height:1.8;opacity:0.92;">
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-globe"></i> 外部输入框支持</h4>
-<p>工具栏不只服务于聊天输入框，当你编辑聊天中的消息、点击酒馆沙盒网页、iframe 中的输入框、CodeMirror 编辑器、contentEditable 区域时，工具栏也会自动展开，此时点击符号按钮或自定义内容按钮会插入到你正在编辑的外部输入框中。</p>
-<p>这意味着你可以在编辑角色卡定义、世界书条目、预设内容等场景中，也能使用撤回/重做、查找替换、shift选中模式、符号插入等功能。</p>
-<p>此外，当光标在设置面板、世界书编辑器等非聊天区域的输入框中时，回顶/回底/翻页等滚动功能会自动作用于光标所在的可滚动容器，而不是默认的聊天区。</p>
-<p>点击工具栏上的符号按钮（如 <b>**</b>、<b>""</b>、<b>()</b>、<b>「」</b> 等），会在输入框光标处插入对应符号，并自动将光标定位在符号中间，方便直接输入内容。</p>
-<p><i class="fa-solid fa-copy"></i> <b>复制</b>：复制当前输入框或编辑区域中选中的文本。<i class="fa-solid fa-paste"></i> <b>粘贴</b>：读取系统剪贴板内容并插入到当前光标位置。粘贴功能需要浏览器允许剪贴板权限，通常要求 HTTPS 或 localhost 环境。</p>
-<p style="opacity:0.7;font-size:11px;">💡 这两个按钮默认是关闭的，可以在「按钮管理」里勾上它们让它们出现在工具栏；也可以在按钮管理里给它们绑快捷键。</p>
-<p>如果先选中文本再点击符号按钮，选中的文本会被符号包裹。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-thumbtack"></i> 工具栏固定展开</h4>
-<p>开启设置面板顶部的「工具栏固定展开」开关后，工具栏会一直保持展开，不再随发送框聚焦/失焦自动收起。适合经常用工具栏按钮、不想反复点输入框的场景。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-rotate-left"></i> 撤回 / 重做</h4>
-<p>对输入框的编辑操作支持多步撤回和重做（最多 50 步历史），点击相应按钮或使用快捷键均可。</p>
-<p>外部编辑框也会单独记录历史，例如角色卡字段、世界书、预设编辑器、全局 CSS、自定义拓展渲染出的普通输入框等。插件会在聚焦时识别当前编辑框内容，如果同一个 textarea 被酒馆复用来编辑另一份内容，会自动重建历史，避免不同页面或不同美化方案之间撤回串台。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-up-down-left-right"></i> 选中模式</h4>
-<p>移动端文本选择辅助工具。开启后，先在输入框中点击一个位置作为起点，再点击另一个位置，插件会自动把这两点之间的文本全部选中，方便批量操作。再次点击按钮可关闭该模式。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-caret-left"></i><i class="fa-solid fa-caret-right"></i> 光标左移 / 右移</h4>
-<p>移动端精确移动光标的辅助按钮。点击一下移动一个字符，<b>按住不放可连续移动</b>（约 0.35 秒后开始连续触发，松手停止）。</p>
-<p>支持所有编辑场景：聊天输入框、消息编辑框、设置面板里的输入框、世界书 / 角色卡定义、CodeMirror 代码编辑器、contentEditable 富文本区域。光标移动不会触发输入事件，<b>不会污染撤销历史</b>，可以放心连按。</p>
-<p style="opacity:0.7;font-size:11px;">💡 默认是关闭状态，可以在「按钮管理」里勾上它们让按钮出现在工具栏；移动端用户也可以放进悬浮面板里使用。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-object-group"></i> 选中包裹模式（全局）</h4>
-<p>开启后，自定义按钮的"插入内容"会按照设置的"光标位置"切成左右两半，自动包裹住你已选中的文本。例如自定义内容是 <code>**粗体**</code>、光标位置=中间，开启此模式选中"abc"再点按钮，会变成 <code>**abc**</code>。原生的 **、""、() 等内置符号按钮本来就是包裹模式，不受这个开关影响。</p>
-<p>如果只想给个别按钮启用而不想全局开启，可以在编辑该自定义按钮时勾选下方的"选中包裹"选项。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-compass"></i> 导航功能</h4>
-<ul style="margin:4px 0;padding-left:18px;list-style:none;">
-    <li><i class="fa-solid fa-angles-up"></i> <b>跳转聊天顶部</b>：一键滚动到聊天最顶端</li>
-    <li><i class="fa-solid fa-arrow-down"></i> <b>跳转聊天底部</b>：一键滚动到聊天最底端</li>
-    <li><i class="fa-solid fa-arrow-up"></i> <b>跳转AI消息顶部</b>：滚动到最新一条AI回复的顶部</li>
-    <li><i class="fa-solid fa-chevron-up"></i>/<i class="fa-solid fa-chevron-down"></i> <b>上/下一条AI消息</b>：在AI消息之间快速跳转。开启「包含用户消息导航」后会一并跳转到用户消息</li>
-    <li><i class="fa-solid fa-book-open"></i> <b>翻页模式</b>：开启后，上/下导航变为翻页（也支持音量键翻页，需安装Key Mapper）；双击音量上键跳到最新AI消息顶部，双击音量下键跳到聊天底部。开启翻页模式后，点击聊天区域上半部分向上翻页，下半部分向下翻页。可以在设置里的「翻页滚动高度」调整每次翻页的距离，100% 约等于一屏高度，数值越小翻得越细，数值越大翻得越快。开启翻页模式时，如果悬浮球设置了"自动隐藏"会自动出现以方便操作，关闭翻页后再隐藏。</li>
-    <li><i class="fa-solid fa-gauge-high"></i> <b>自动滚动</b>：以设定速度自动向下滚动，适合阅读长文；用户手动滚动时暂停，2秒后恢复</li>
-    <li><i class="fa-solid fa-angle-double-down"></i> <b>底部跳转模式</b>：开启后，上/下一条消息跳转改为对齐消息底部，而不是顶部。适合从底部往上浏览的阅读习惯</li>
-    <li><i class="fa-solid fa-arrows-up-down"></i> <b>包含用户消息导航</b>：默认上/下一条按钮只在 AI 消息间跳转，开启此模式后会一并跳转到用户消息。可以和「底部跳转模式」叠加使用</li>
+
+<h4 style="margin:8px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-info-circle"></i> 关于工具栏</h4>
+<p>工具栏默认在聚焦聊天输入框时展开，离开后自动收起。可在设置面板顶部开启<q>「工具栏固定展开」</q>让其始终保持展开状态。</p>
+<p>开启<q>「双栏模式」</q>后，工具栏分为上下两行：符号输入按钮一行，功能按钮一行，两行各自支持横向滚动。可在设置中切换两行的上下顺序。</p>
+
+<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-globe"></i> 外部输入框支持</h4>
+<p>工具栏不仅作用于聊天输入框。当光标位于以下位置时，符号按钮、撤回/重做、查找替换等功能会作用于该位置：</p>
+<ul>
+    <li>聊天消息的编辑框</li>
+    <li>角色卡定义、世界书条目、预设内容等编辑器</li>
+    <li>酒馆沙盒网页或 iframe 中的输入框</li>
+    <li>CodeMirror 代码编辑器</li>
+    <li>contentEditable 区域</li>
 </ul>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-wand-magic-sparkles"></i> 消息操作</h4>
-<ul style="margin:4px 0;padding-left:18px;list-style:none;">
+<p>滚动类功能（跳转顶部/底部、翻页等）会自动作用于光标所在的可滚动容器，而不是默认的聊天区。</p>
+
+<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-pen"></i> 编辑功能</h4>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-rotate-left"></i> 撤回 / 重做</p>
+<p>支持多步撤回和重做，最多保留 50 步历史。外部编辑框拥有独立的历史记录。如果同一个 textarea 被酒馆复用来编辑不同内容，插件会自动重建历史，避免不同页面之间的撤回串台。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-up-down-left-right"></i> 选中模式</p>
+<p>移动端文本选择辅助工具。开启后，先在输入框中点击一个位置作为起点，再点击另一个位置，插件会将这两点之间的文本全部选中。再次点击按钮关闭该模式。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-caret-left"></i><i class="fa-solid fa-caret-right"></i> 光标左移 / 右移</p>
+<p>移动端精确移动光标的辅助按钮。点击一下移动一个字符，按住不放可连续移动（约 0.35 秒后开始连续触发，松手停止）。光标移动不会触发输入事件，不会污染撤销历史。默认关闭，可在<q>「按钮管理」</q>中启用。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-object-group"></i> 选中包裹模式</p>
+<p>全局开关。开启后，自定义按钮的<q>「插入内容」</q>会按照设置的<q>「光标位置」</q>切成左右两半，自动包裹选中的文本。例如：自定义内容是 <code>**粗体**</code>，光标位置设为<q>「中间」</q>，开启此模式选中 abc 再点按钮，会变成 <code>**abc**</code>。</p>
+<p>原生的 **、<q>""</q>、() 等内置符号按钮本身就是包裹模式，不受此开关影响。如果只想给个别按钮启用，可以在编辑该自定义按钮时勾选其专属的<q>「选中包裹」</q>选项。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-copy"></i> 复制 / 粘贴</p>
+<p><b>复制</b>：复制当前输入框或编辑区域中选中的文本。</p>
+<p><b>粘贴</b>：读取系统剪贴板内容并插入到当前光标位置。需要浏览器允许剪贴板权限，通常要求 HTTPS 或 localhost 环境。</p>
+<p>两个按钮默认关闭，可在<q>「按钮管理」</q>中启用，也支持绑定快捷键。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-magnifying-glass"></i> 查找替换</p>
+<p>在输入框、正在编辑的消息、以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）中查找和替换文本。</p>
+<p>键盘操作：</p>
+<ul>
+    <li>Enter：跳转到下一个匹配项</li>
+    <li>Shift+Enter：跳转到上一个匹配项</li>
+    <li>Esc：关闭查找栏</li>
+    <li>点击 Aa：切换是否区分大小写</li>
+</ul>
+<p>普通 textarea 中查找到的当前匹配会显示可视高亮。即使点击<q>「替换为」</q>输入框，当前匹配位置也会保持标记。</p>
+<p><b>移动端折叠模式</b>：点击替换行最右侧的折叠按钮（双左箭头），可将整个查找框收成屏幕左侧的窄竖条，只保留展开按钮、上/下导航、当前/总数。点击展开按钮（双右箭头）恢复完整面板。折叠状态下搜索状态、匹配位置、跨弹窗跟随等行为完全保留。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-puzzle-piece"></i> 自定义内容</p>
+<p>在设置面板中可以添加自己的快捷输入按钮，点击后在输入框中插入预设内容。</p>
+<p><b>插入内容</b>支持多种形式：</p>
+<ul>
+    <li>短符号：如 <code>**</code>、<code><q>「」</q></code>、<code><br></code></li>
+    <li>宏或标签：如 <code>{{user}}</code>、<code><request:></code></li>
+    <li>常用短语：签名、固定问候语等</li>
+    <li>整段模板：剧情模板、人设片段、格式化指令等（支持多行）</li>
+</ul>
+<p>插入长段落时，建议给<q>「按钮显示」</q>填简短文字或选择 Font Awesome 图标，避免按钮过宽。</p>
+<p><b>光标位置</b>可设为开头/中间/结尾/自定义偏移。对模板文本来说，自定义偏移能让光标自动定位到需要补充内容的位置。</p>
+<p><b>选中包裹</b>勾选后：当输入框已经选中文本时点这个按钮，会按<q>「光标位置」</q>把插入内容切成左右两段包裹选区。例如内容是 <code>**符号**</code>、光标位置=中间，选中 hello 点按钮变成 <code>**hello**</code>。没选中文本时按正常方式插入。这是按钮专属设置，无需打开全局的<q>「选中包裹模式」</q>。</p>
+
+<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-compass"></i> 导航功能</h4>
+
+<p style="margin:10px 0 4px;font-weight:600;">跳转按钮</p>
+<ul>
+    <li><i class="fa-solid fa-angles-up"></i> 跳转聊天顶部</li>
+    <li><i class="fa-solid fa-arrow-down"></i> 跳转聊天底部</li>
+    <li><i class="fa-solid fa-arrow-up"></i> 跳转 AI 消息顶部：滚动到最新一条 AI 回复的顶部</li>
+    <li><i class="fa-solid fa-chevron-up"></i> / <i class="fa-solid fa-chevron-down"></i> 上 / 下一条 AI 消息</li>
+</ul>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-book-open"></i> 翻页模式</p>
+<p>开启后，上/下一条按钮变为翻页操作。</p>
+<ul>
+    <li><b>移动端</b>：点击聊天区域上半部分向上翻页，下半部分向下翻页</li>
+    <li><b>音量键</b>：单击音量上/下键翻页（需安装 Key Mapper），双击音量上键跳到最新 AI 消息顶部，双击音量下键跳到聊天底部</li>
+</ul>
+<p>可在设置中通过<q>「翻页滚动高度」</q>调整每次翻页的距离，100% 约等于一屏高度，数值越小翻得越细，数值越大翻得越快。</p>
+<p>翻页模式开启时，如果悬浮球设置了<q>「自动隐藏」</q>会自动出现以方便操作，关闭翻页后再隐藏。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-gauge-high"></i> 自动滚动</p>
+<p>以设定速度自动向下滚动，适合阅读长文。可在设置中调整<q>「自动滚动速度」</q>（单位 px/s）。用户手动滚动时自动暂停，2 秒后恢复。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-angle-double-down"></i> 底部跳转模式</p>
+<p>开启后，上/下一条消息跳转改为对齐消息底部，而不是顶部。适合从底部往上浏览的阅读习惯。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-arrows-up-down"></i> 包含用户消息导航</p>
+<p>默认上/下一条按钮只在 AI 消息间跳转。开启此模式后会一并跳转到用户消息。可与<q>「底部跳转模式」</q>叠加使用。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;">非流自动跳转至 AI 消息顶部</p>
+<p>在设置中开启此选项后，非流式模式下 AI 生成回复完毕会自动滚动到该条消息的顶部，方便从头阅读长回复。流式输出时不受影响。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-lock"></i> 续写时锁定滚动位置</p>
+<p>在设置中开启此选项后，使用<q>「继续回复」</q>续写期间，聊天区域的滚动位置会被锁定。普通生成、重新生成、切换备选等其他场景不受影响。手动滚动（滑动或滚轮）会解除锁定。</p>
+
+<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-wand-magic-sparkles"></i> 消息操作</h4>
+
+<p style="margin:10px 0 4px;font-weight:600;">基础操作按钮</p>
+<ul>
     <li><i class="fa-solid fa-trash"></i> <b>删除最后消息</b>：删除聊天中的最后一条消息</li>
     <li><i class="fa-solid fa-scissors"></i> <b>删除当前备选</b>：删除最后一条消息的当前 Swipe</li>
-    <li><i class="fa-solid fa-forward"></i> <b>继续回复</b>：让AI继续生成上一条回复</li>
-    <li><i class="fa-solid fa-pen-to-square"></i> <b>编辑最后消息</b>：一键让最后一条消息进入编辑模式，相当于自动滚动到底再点小铅笔图标</li>
-    <li><i class="fa-solid fa-rotate"></i> <b>重新生成</b>：重新生成最后一条AI回复</li>
-    <li><i class="fa-solid fa-shuffle"></i> <b>生成备选回复</b>：为最后一条AI消息生成一条新的备选回复（Swipe）</li>
-    <li><i class="fa-solid fa-trash-arrow-up"></i> <b>撤回删除</b>：在执行删除消息或删除备选等操作后，点击此按钮可以撤回到操作前的状态。快照保留 5 分钟，过期或切换聊天后自动清除</li>
-    <li><i class="fa-solid fa-trash-can"></i> <b>进入删除模式</b>：一键进入/退出酒馆原生的消息多选删除模式。进入后可以勾选多条消息批量删除</li>
-    <li><i class="fa-solid fa-magnifying-glass"></i> <b>查找替换</b>：在输入框、正在编辑中的消息、以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）里查找和替换文本，支持 Enter 跳转下一个、Shift+Enter 跳转上一个、Esc 关闭；点击 Aa 可以切换是否区分大小写。普通 textarea 中查找到的当前匹配会显示可视高亮，即使点击「替换为」输入框，当前匹配位置也会继续标出，方便确认替换目标。<br>移动端嫌占地方？点击替换行最右侧的折叠按钮（双左箭头），可以把整个查找框收成屏幕左侧的一条窄竖条，只保留展开按钮、上/下导航、当前/总数；点击展开按钮（双右箭头）即可恢复完整面板，搜索状态、匹配位置、跨弹窗跟随等行为完全保留。切换酒馆主题时查找框的颜色也会自动同步更新，跟悬浮面板一样跟着主题走。</li>
+    <li><i class="fa-solid fa-forward"></i> <b>继续回复</b>：让 AI 继续生成上一条回复</li>
+    <li><i class="fa-solid fa-pencil"></i> <b>编辑最后消息</b>：自动滚动到底并进入编辑模 式，相当于自动点击该消息的编辑按钮</li>
+    <li><i class="fa-solid fa-rotate"></i> <b>重新生成</b>：重新生成最后一条 AI 回复</li>
+    <li><i class="fa-solid fa-shuffle"></i> <b>生成备选回复</b>：为最后一条 AI 消息生成一条新的备选回复（Swipe）</li>
 </ul>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-address-book"></i> 聊天管理</h4>
-<ul style="margin:4px 0;padding-left:18px;list-style:none;">
-    <li><i class="fa-solid fa-address-book"></i> <b>聊天管理器</b>：打开当前角色/群聊的聊天列表，方便切换或管理历史聊天</li>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-trash-arrow-up"></i> 撤回删除</p>
+<p>在执行删除消息或删除备选等操作后，点击此按钮可撤回到操作前的状态。快照保留 5 分钟，过期或切换聊天后自动清除。最多保留 20 步快照，可连续撤回多次操作。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-trash-can"></i> 进入删除模式</p>
+<p>一键进入或退出酒馆原生的消息多选删除模式。进入后可以勾选多条消息批量删除。再次点击按钮退出删除模式。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-triangle-exclamation"></i> 删除操作前弹窗确认</p>
+<p>在设置中开启此选项后，所有涉及删除的操作（删除最后消息、删除备选、批量删除、删除聊天等）执行前会弹出二次确认弹窗，避免误操作。</p>
+
+<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-ghost"></i> 消息管理面板</h4>
+<p>统一的消息管理面板，包含三个标签页：</p>
+
+<p style="margin:10px 0 4px;font-weight:600;">隐藏</p>
+<p>管理哪些消息对 AI 可见。支持单条隐藏/显示/跳转、范围隐藏/显示、保留最近 N 条可见、勾选多条批量隐藏/显示。隐藏的消息不会发送给 AI。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;">删除</p>
+<p>可勾选任意多条消息（包括不连续楼层），或按范围批量删除。删除前会自动保存快照，5 分钟内可用<q>「撤回删除」</q>恢复。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;">移动</p>
+<p>勾选多条消息，按原顺序一次性移动到指定楼层。移动前会自动保存快照，方便撤回。目标位置上方显示呼吸横线和<q>「↓ 插入到这里 ↓」</q>标签作为视觉指示。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;">共享行为</p>
+<ul>
+    <li>三个标签页共用同一个工具栏：全选、反选、范围选择、清除</li>
+    <li>勾选状态和滚动位置在标签页之间保留，切换标签不会丢失</li>
+    <li>输入楼层号时列表会实时高亮对应消息：单条用强色、范围用主题色、保留最近用绿色</li>
+    <li>每条消息前的箭头按钮可一键跳转到原聊天位置</li>
+    <li>采用按需渲染，大量消息时也能保持流畅</li>
+</ul>
+
+<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-address-book"></i> 聊天管理</h4>
+<ul>
+    <li><i class="fa-solid fa-address-book"></i> <b>聊天管理器</b>：打开当前角色或群聊的聊天列表</li>
     <li><i class="fa-solid fa-comments"></i> <b>新建聊天</b>：和当前角色开启一个全新的聊天</li>
-    <li><i class="fa-solid fa-pen-to-square"></i> <b>重命名聊天</b>：弹窗输入新名字，回车或点确定即可重命名当前聊天</li>
-    <li><i class="fa-solid fa-comment-slash"></i> <b>删除聊天</b>：删除当前聊天，删除前会自动保存快照。删除后会弹出"点此撤回"的提示（5 分钟内有效），点击即可恢复刚刚删除的聊天，避免手滑误删丢失记录</li>
+    <li><i class="fa-solid fa-pen-to-square"></i> <b>重命名聊天</b>：弹窗输入新名字，回车或点确定即可重命名</li>
+    <li><i class="fa-solid fa-comment-slash"></i> <b>删除聊天</b>：删除当前聊天，删除前自动保存快照</li>
     <li><i class="fa-solid fa-xmark"></i> <b>关闭聊天</b>：关闭当前聊天回到角色选择页</li>
 </ul>
-<p style="opacity:0.7;font-size:11px;">⚠️ 删除聊天会真实从酒馆里删掉文件，5 分钟撤回窗口过后无法再恢复哦，重要聊天建议先备份</p>
-<p style="opacity:0.7;font-size:11px;">⚠️ 删除类操作可在设置中开启"删除操作前弹窗确认"来防止误操作。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-ghost"></i> 消息管理</h4>
-<p>统一的消息管理面板（原「消息隐藏管理」和「多选删除」已合并），内含三个标签页：</p>
-<ul style="margin:4px 0;padding-left:18px;">
-    <li><b>隐藏</b>：管理哪些消息对 AI 可见。支持单条隐藏/显示/跳转、范围隐藏/显示、保留最近 N 条、勾选多条批量隐藏/显示。输入楼层号后点"跳转"可直接定位到该消息；隐藏的消息不会发送给 AI</li>
-    <li><b>删除</b>：可勾选任意多条消息（包括不连续楼层），或按范围批量删除。删除前会自动保存快照，5 分钟内可用「撤回删除」恢复</li>
-    <li><b>移动</b>：勾选多条消息，一次性按原顺序移动到指定楼层。移动前也会自动保存快照，方便撤回</li>
+<p><b>删除聊天的撤回机制</b>：删除后会弹出<q>「点此撤回」</q>的提示（5 分钟内有效），点击即可恢复。</p>
+<p><b>注意</b>：删除聊天会真实从酒馆里删除文件，5 分钟撤回窗口过后无法再恢复。重要聊天建议先备份。</p>
+
+<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-folder"></i> 按钮分组</h4>
+<p>可以将按钮收纳到文件夹中，工具栏只显示一个折叠按钮，点击展开内部按钮。</p>
+<p><b>设置方式</b>：在设置中拖动按钮到文件夹上方可放入文件夹，从文件夹中的按钮拖出可移回主工具栏。也可以使用<q>「移出文件夹」</q>的小按钮快速移回。</p>
+<p>文件夹按钮放入悬浮面板后，展开子菜单会自动选择弹出方向并避开屏幕边缘。</p>
+
+<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-circle-dot"></i> 悬浮面板</h4>
+
+<p style="margin:10px 0 4px;font-weight:600;">基础说明</p>
+<p>开启后会出现一个可拖拽的悬浮球或固定面板。可以把导航跳转等功能按钮放进去。放进悬浮面板的按钮不会在主工具栏中重复显示。面板中的按钮可拖拽排序。</p>
+<ul>
+    <li><b>悬浮球模式</b>：点击展开面板，点击其他区域自动收起</li>
+    <li><b>固定面板模式</b>：常驻显示，可拖动手柄移动位置</li>
 </ul>
-<p>三个标签页共用工具栏：全选、反选、范围选择、清除。输入楼层号时列表会实时高亮对应消息（单条用强色、范围用主题色、保留最近用绿色、移动目标在两条消息中间显示"插入到这里"的紫线）。每条消息前的小箭头按钮可以一键跳转到原聊天位置～</p>
-<p><b>勾选 / 滚动跨标签共享</b>：在「隐藏」勾选了几条之后再切到「删除」或「移动」，勾选状态和滚动位置都会保留，不用重新选一遍。</p><h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-puzzle-piece"></i> 自定义内容</h4>
-<p>在设置面板中可以添加自己常用的自定义按钮，点击按钮会在输入框中插入预设内容。</p>
-<p><b>插入内容</b>支持多种形式：</p>
-<ul style="margin:4px 0;padding-left:18px;">
-    <li>短符号：如 <code>**</code>、<code>「」</code>、<code><br></code></li>
-    <li>宏或标签：如 <code>{{random:A,B,C}}</code>、<code><thinking></code></li>
-    <li>常用短语：如签名、固定问候语等</li>
-    <li>整段模板：如剧情模板、人设片段、格式化指令等（支持多行）</li>
+
+<p style="margin:10px 0 4px;font-weight:600;">面板方向</p>
+<ul>
+    <li><b>竖向（侧边展开）</b>：按钮竖向排列，面板优先向悬浮球左右两侧展开</li>
+    <li><b>竖向（上下展开）</b>：按钮竖向排列，面板根据空间向上或向下展开</li>
+    <li><b>横向（上下展开）</b>：按钮横向排列，面板根据空间向上或向下展开</li>
 </ul>
-<p>插入长段落时，建议给「按钮显示」填简短文字或选择 Font Awesome 图标，避免按钮过宽。</p>
-<p><b>光标位置</b>可设为开头/中间/结尾/自定义偏移。对模板文本来说，自定义偏移能让光标自动定位到需要补充内容的位置，非常方便～</p>
-<p><b>选中包裹</b>勾选后：当输入框已经选中文本时点这个按钮，会按"光标位置"把插入内容切成左右两段包裹选区。例如内容是 <code>**符号**</code>、光标位置=中间，选中"hello"点按钮 → 变成 <code>**hello**</code>。没选中文本时则按正常方式插入。这是这个按钮专属的设置，不需要打开全局的"选中包裹模式"。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-folder"></i> 按钮分组</h4>
-<p>可以将按钮收纳到文件夹中，工具栏只显示一个折叠按钮。在设置中拖动按钮到文件夹上方可放入文件夹，从文件夹中的按钮拖出则会移回主工具栏。也可以使用"移出文件夹"的小按钮快速移回。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-table-columns"></i> 双栏模式</h4>
-<p>开启后，工具栏分为上下两行：一行是符号输入按钮，一行是功能按钮。两行各自可以左右滚动，方便快速找到常用按钮。可在设置中切换两行的上下顺序。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-circle-dot"></i> 悬浮面板</h4>
-<p>开启后会出现一个可拖拽的悬浮球或固定面板。可以把导航跳转等功能按钮放进去。悬浮球模式下点击展开面板，点击其他区域自动收起；固定面板模式下常驻显示。支持自定义悬浮球样式（包括GIF）、面板方向（竖向侧边展开 / 竖向上下展开 / 横向上下展开）。放进悬浮面板的按钮不会在主工具栏中重复显示。面板中的按钮可拖拽排序。</p>
-<p><b>透明背景</b>选项仅在上传了自定义图片时生效，开启后悬浮球的默认边框、阴影、背景色都会隐藏，只显示图片本身。</p>
-<p><b>面板方案</b>：可以创建多套面板按钮配置（比如"全屏模式"用翻页按钮、"编辑模式"用符号按钮），通过设置面板里的方案管理器切换，或者把<i class="fa-solid fa-layer-group"></i>「切换面板方案」按钮放到工具栏或悬浮面板里，一键循环切换不同布局，也支持绑定快捷键。</p>
-<p><b>面板方案保存内容</b>：每个面板方案保存五项设置——<b>面板按钮列表</b>（哪些按钮、排列顺序）、<b>面板方向</b>（竖向/横向）、<b>面板按钮大小</b>、<b>面板宽度</b>、<b>面板最大高度</b>。切换方案时会立即应用这些设置。注意：悬浮球的图片/大小/形状等外观设置由单独的「图片方案」管理，不包含在面板方案内。</p>
-<p><b>图片方案保存内容</b>：每个图片方案保存六项设置——悬浮球图片 URL、展开状态图片 URL、球大小、球形状（圆形/方形）、透明背景开关、跟随美化开关。</p>
-<p>开启「自动隐藏」后，悬浮球/面板平时隐藏，点击屏幕任意空白位置即可切换显示/隐藏（包括聊天区域、抽屉空白处等）。点击悬浮球/面板自身、输入框、按钮、链接、弹窗等交互元素时不会触发切换。翻页模式开启时会自动显示悬浮球，关闭翻页后自动隐藏回去。</p>
-<p><b>移动端使用提示</b>：</p>
-<ul style="margin:4px 0;padding-left:18px;">
-    <li>悬浮球可以自由拖到屏幕任意位置，下次会记住</li>
-    <li>设置面板顶部"重置位置"按钮（图钉图标）可以把悬浮球/面板拉回默认位置，遇到拖到屏幕外找不回来时使用</li>
-    <li>面板会自动避开手机软键盘，键盘弹起时如果面板太长，会自动加上滚动条而不是被裁切</li>
-    <li>展开后的面板会自动选择有空间的方向（左/右/上/下），如果上下空间都不够，会限制最大高度并加滚动条</li>
-    <li>悬浮球与展开后的面板默认会自动绑定到当前打开的弹窗内，关闭弹窗后会回到主界面</li>
-    <li>开启「自动隐藏」时，翻页模式自动让球出现；切换聊天 / 切换角色等操作会保持当前的隐藏/显示状态</li>
+
+<p style="margin:10px 0 4px;font-weight:600;">悬浮球外观</p>
+<ul>
+    <li>支持自定义图片 URL（GIF / JPG / PNG）</li>
+    <li>支持单独设置展开状态的图片，留空则使用默认图片</li>
+    <li>形状可选圆形或方形</li>
+    <li>大小可在 32~80px 范围调整</li>
+    <li><b>透明背景</b>：仅在上传了自定义图片时生效，开启后悬浮球的边框、阴影、背景色都会隐藏，只显示图片本身</li>
+    <li><b>跟随美化</b>：开启后全局 CSS 可控制悬浮球外观；关闭后插件自定义设置优先于美化 CSS</li>
 </ul>
-<p><b>常见问题</b>：</p>
-<ul style="margin:4px 0;padding-left:18px;">
-    <li>球点了之后面板闪一下就消失？这是移动端 touchend+click 双重触发导致的，插件已自带 400ms 防抖，正常情况下不会出现</li>
-    <li>键盘弹起或收起时面板意外关闭？插件会忽略键盘动画期间（600ms 内）的关闭操作，避免误触</li>
-    <li>面板看不见但球还在？检查是不是开了自动隐藏，再点一下聊天区域即可显示</li>
-    <li>美化 CSS 控制不了悬浮球？开启设置里的"跟随美化"开关</li>
+
+<p style="margin:10px 0 4px;font-weight:600;">面板方案</p>
+<p>可创建多套面板按钮配置（例如<q>「全屏模式」</q>用翻页按钮、<q>「编辑模式」</q>用符号按钮），通过设置面板里的方案管理器切换，或将<q>「切换面板方案」</q>按钮放到工具栏或悬浮面板中循环切换，也支持绑定快捷键。</p>
+<p><b>面板方案保存以下五项设置</b>：</p>
+<ul>
+    <li>面板按钮列表（哪些按钮、排列顺序）</li>
+    <li>面板方向（竖向 / 横向）</li>
+    <li>面板按钮大小</li>
+    <li>面板宽度</li>
+    <li>面板最大高度</li>
 </ul>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-bolt"></i> 自动跳转</h4>
-<p>开启"非流自动跳转至AI消息顶部"后，非流式模式下 AI 生成回复完毕会自动滚动到该条消息的顶部，方便从头阅读长回复。流式输出时不受影响。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-lock"></i> 续写时锁定滚动</h4>
-<p>开启"续写时锁定滚动位置"后，使用「继续回复」续写期间，聊天区域的滚动位置会被锁定，方便你边看边续写。普通生成、重新生成、切换备选等其他场景不受影响，跳转和自动滚动都正常。手动滚动（滑动或滚轮）会解除锁定。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-rocket"></i> QR 助手面板</h4>
-<p>点击 QR 助手按钮可以快速打开 Quick Reply 助手面板（需要安装 QR 助手插件）。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-palette"></i> 美化指南</h4>
-<p>在设置面板底部点击「美化指南」按钮，可以获取一段提示词。将提示词复制给 AI 并填写你的配色风格描述，即可生成匹配你主题的快捷工具栏美化 CSS。</p>
-<h4 style="margin:12px 0 6px;font-size:13px;"><i class="fa-solid fa-keyboard"></i> 快捷键</h4>
+
+<p style="margin:10px 0 4px;font-weight:600;">图片方案</p>
+<p>悬浮球的外观由独立的图片方案管理，与面板方案分开切换。</p>
+<p><b>图片方案保存以下六项设置</b>：</p>
+<ul>
+    <li>悬浮球图片 URL</li>
+    <li>展开状态图片 URL</li>
+    <li>球大小</li>
+    <li>球形状（圆形 / 方形）</li>
+    <li>透明背景开关</li>
+    <li>跟随美化开关</li>
+</ul>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-eye-slash"></i> 自动隐藏</p>
+<p>开启后悬浮球或面板平时隐藏，点击屏幕任意空白位置即可切换显示或隐藏（包括聊天区域、抽屉空白处等）。点击悬浮球、面板自身、输入框、按钮、链接、弹窗等交互元素时不会触发切换。</p>
+<p>翻页模式开启时会自动显示悬浮球，关闭翻页后自动隐藏。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;">移动端使用提示</p>
+<ul>
+    <li>悬浮球可自由拖到屏幕任意位置，下次会记住</li>
+    <li>设置面板顶部的<q>「重置位置」</q>按钮（图钉图标）可将悬浮球或面板拉回默认位置，遇到拖到屏幕外找不回来时使用</li>
+    <li>面板会自动避开手机软键盘，键盘弹起时如果面板太长会自动加滚动条而不是被裁切</li>
+    <li>展开后的面板会自动选择有空间的方向（左 / 右 / 上 / 下）</li>
+    <li>如果上下空间都不够，会限制最大高度并加滚动条</li>
+    <li>悬浮球与展开后的面板默认会自动绑定到当前打开的弹窗内，关闭弹窗后回到主界面</li>
+    <li>开启<q>「自动隐藏」</q>时，切换聊天或切换角色等操作会保持当前的隐藏 / 显示状态</li>
+</ul>
+
+<p style="margin:10px 0 4px;font-weight:600;">常见问题</p>
+<ul>
+    <li><b>球点击后面板闪一下消失</b>：移动端 touchend + click 双重触发导致，插件已自带 400ms 防抖，正常情况下不会出现</li>
+    <li><b>键盘弹起或收起时面板意外关闭</b>：插件会忽略键盘动画期间（600ms 内）的关闭操作</li>
+    <li><b>面板看不见但球还在</b>：检查是否开启了自动隐藏，再点一下聊天区域即可显示</li>
+    <li><b>美化 CSS 控制不了悬浮球</b>：在设置里开启<q>「跟随美化」</q>开关</li>
+</ul>
+
+<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-rocket"></i> 其他功能</h4>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-rocket"></i> QR 助手面板</p>
+<p>点击 QR 助手按钮可快速打开 Quick Reply 助手面板（需要安装 QR 助手插件）。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-palette"></i> 美化指南</p>
+<p>在设置面板底部点击<q>「美化指南」</q>按钮，可获取一段提示词。将提示词复制给 AI 并填写配色风格描述，即可生成匹配主题的快捷工具栏美化 CSS。</p>
+
+<h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-keyboard"></i> 快捷键</h4>
 <p>在按钮管理中，点击每个按钮右边的快捷键输入框，按下想要的组合键即可绑定。按 Esc 清除。</p>
-<p><b>生效范围</b>：符号插入、撤回重做等输入类快捷键仅在发送输入框聚焦时生效；翻页、滚动、删除等导航/操作类快捷键在聊天界面全局生效（在设置面板等其他输入框中打字时不会误触）。移动端不显示快捷键设置。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;">生效范围</p>
+<ul>
+    <li><b>输入类快捷键</b>（符号插入、撤回重做等）：仅在发送输入框聚焦时生效</li>
+    <li><b>导航 / 操作类快捷键</b>（翻页、滚动、删除等）：在聊天界面全局生效</li>
+    <li>在设置面板等其他输入框中打字时不会误触</li>
+</ul>
+<p>移动端不显示快捷键设置。</p>
 </div>
 `;
   const content = $(`
@@ -8484,23 +8615,23 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
     .toggleClass("input-helper-btn-active", autoScrollController.active);
 }
 
-function applyCJKNarrowToToolbar() {
+function applyToolbarButtonSize() {
+  const size = getSettings().toolbarBtnSize || 12;
   const toolbar = document.getElementById("input_helper_toolbar");
   if (!toolbar) return;
-  const cjkRegex =
-    /[\u3000-\u303f\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\uff00-\uffef]/;
-  toolbar
-    .querySelectorAll(
-      ".input-helper-btn:not(.ih-folder-btn):not([data-cjk-done])",
-    )
-    .forEach((btn) => {
-      if (btn.querySelector("i")) return;
-      const text = btn.textContent || "";
-      if (cjkRegex.test(text)) {
-        btn.style.setProperty("padding", "3px", "important");
-      }
-      btn.setAttribute("data-cjk-done", "1");
+  const pv = Math.max(2, Math.round(size * 0.25));
+  const ph = Math.max(4, Math.round(size * 0.5));
+  toolbar.querySelectorAll(".input-helper-btn").forEach((btn) => {
+    btn.style.setProperty("font-size", size + "px", "important");
+    btn.querySelectorAll("i").forEach((icon) => {
+      icon.style.setProperty("font-size", size + "px", "important");
     });
+    const isCJKNarrow = btn.dataset.cjkDone === "1" && !btn.querySelector("i");
+    if (!isCJKNarrow) {
+      btn.style.setProperty("padding", `${pv}px ${ph}px`, "important");
+    }
+  });
+  updateToolbarMaxHeight();
 }
 
 function buildToolbar() {
@@ -8638,6 +8769,7 @@ function buildToolbar() {
   else toolbarParent.append(toolbar);
   generateFaIconProtectionCSS();
   applyCJKNarrowToToolbar();
+  applyToolbarButtonSize();
   updateToolbarMaxHeight();
   $("#input_bottom_nav_mode_btn").toggleClass(
     "input-helper-btn-active",
@@ -10619,7 +10751,7 @@ async function loadSettings() {
   if (s.confirmDangerousActions === undefined)
     s.confirmDangerousActions = false;
   if (s.toolbarPinned === undefined) s.toolbarPinned = false;
-  if (s.autoScrollSpeed === undefined) s.autoScrollSpeed = 50;
+  if (s.toolbarBtnSize === undefined) s.toolbarBtnSize = 12;
   if (s.pagingScrollRatio === undefined) s.pagingScrollRatio = 0.93;
   if (s.autoScrollToAiOnStream === undefined) s.autoScrollToAiOnStream = false;
   if (s.lockScrollOnGeneration === undefined) s.lockScrollOnGeneration = false;
@@ -10711,8 +10843,8 @@ async function loadSettings() {
   $("#enable_input_helper").prop("checked", s.enabled);
   $("#enable_confirm_dangerous").prop("checked", s.confirmDangerousActions);
   $("#enable_toolbar_pinned").prop("checked", s.toolbarPinned);
-  $("#auto_scroll_speed").val(s.autoScrollSpeed);
-  $("#auto_scroll_speed_input").val(s.autoScrollSpeed);
+  $("#toolbar_btn_size").val(s.toolbarBtnSize);
+  $("#toolbar_btn_size_input").val(s.toolbarBtnSize);
   $("#paging_scroll_ratio").val(
     Math.round((s.pagingScrollRatio || 0.93) * 100),
   );
@@ -11521,15 +11653,25 @@ jQuery(async () => {
     autoScrollController._speed = val;
   });
 
-  $(document).on("input change", "#auto_scroll_speed_input", function () {
+  $(document).on("input", "#toolbar_btn_size", function () {
     let val = parseInt($(this).val());
-    if (isNaN(val)) val = 50;
-    val = Math.max(1, Math.min(500, val));
-    $(this).val(val);
-    getSettings().autoScrollSpeed = val;
-    $("#auto_scroll_speed").val(val);
+    if (isNaN(val)) val = 12;
+    val = Math.max(8, Math.min(24, val));
+    getSettings().toolbarBtnSize = val;
+    $("#toolbar_btn_size_input").val(val);
     saveSettingsDebounced();
-    autoScrollController._speed = val;
+    applyToolbarButtonSize();
+  });
+
+  $(document).on("input change", "#toolbar_btn_size_input", function () {
+    let val = parseInt($(this).val());
+    if (isNaN(val)) val = 12;
+    val = Math.max(8, Math.min(24, val));
+    $(this).val(val);
+    getSettings().toolbarBtnSize = val;
+    $("#toolbar_btn_size").val(Math.max(10, Math.min(20, val)));
+    saveSettingsDebounced();
+    applyToolbarButtonSize();
   });
 
   $(document).on("input", "#paging_scroll_ratio", function () {

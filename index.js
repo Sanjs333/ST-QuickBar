@@ -105,6 +105,11 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-rocket",
     text: null,
   },
+  openChatU8: {
+    label: "智绘姬面板",
+    icon: "fa-solid fa-paintbrush",
+    text: null,
+  },
   switchPanelProfile: {
     label: "切换面板方案",
     icon: "fa-solid fa-layer-group",
@@ -343,6 +348,7 @@ const defaultSettings = {
       k === "autoScroll" ||
       k === "findReplace" ||
       k === "openQRAssistant" ||
+      k === "openChatU8" ||
       k === "switchPanelProfile" ||
       k === "bottomNavMode" ||
       k === "includeUserNavMode" ||
@@ -396,6 +402,7 @@ const shortcutFunctionMap = {
   hideManager: openHideManagerPanel,
   findReplace: () => findReplaceController.toggle(),
   openQRAssistant: doOpenQRAssistant,
+  openChatU8: doOpenChatU8,
   switchPanelProfile: () => switchToNextPanelProfile(),
   bottomNavMode: () => bottomNavController.toggle(),
   includeUserNavMode: () => includeUserNavController.toggle(),
@@ -3986,6 +3993,7 @@ function getButtonIdFromKey(key) {
     hideManager: "input_hide_manager_btn",
     findReplace: "input_find_replace_btn",
     openQRAssistant: "input_open_qr_assistant_btn",
+    openChatU8: "input_open_chatu8_btn",
     switchPanelProfile: "input_switch_panel_profile_btn",
     bottomNavMode: "input_bottom_nav_mode_btn",
     includeUserNavMode: "input_include_user_nav_mode_btn",
@@ -4515,6 +4523,29 @@ function doOpenQRAssistant() {
   }
 }
 
+function doOpenChatU8() {
+  const selectors = [
+    "#st-chatu8-fab",
+    'button[title*="悬浮球"]',
+    "#st-chatu8-settings-btn",
+    "#ch-settings-modal-open",
+    "#st-chatu8-ai-settings-btn",
+    'button[id*="chatu8"][class*="fab"]',
+  ];
+
+  for (const selector of selectors) {
+    const btn = document.querySelector(selector);
+    if (btn) {
+      btn.click();
+      return;
+    }
+  }
+
+  toastr.warning("未检测到 智绘姬 插件，请确认已安装并启用", "", {
+    timeOut: 3000,
+  });
+}
+
 function doRegenerateReply() {
   if (chat.length === 0) return;
   Generate("regenerate");
@@ -4960,9 +4991,9 @@ function openBeautyPromptPanel() {
    如果用户需要用 CSS 实现纯图片球，需要注意：
    - 不要在插件设置里填图片URL（否则 <img> 会和 background-image 重复显示）
    - 不要勾选透明背景（CSS 自己处理）
-   - 必须同时关闭 background、border、box-shadow、backdrop-filter、outline 全家桶，
-     否则会看到一圈"透明背景板"或光晕
+   - 必须同时关闭 background、border、box-shadow、backdrop-filter、outline 全家桶，否则会看到一圈"透明背景板"或光晕
    - background-size 用 contain 保持图片原比例不裁切，用 cover 会裁切两侧
+   - 如果发现圆形悬浮球的图片四个角被圆形边界裁掉了一圈，是因为 background-size: contain 会让图片贴着容器边缘铺满，而圆形容器会切掉超出圆形的四角。解决办法是把 background-size 改成一个百分比（如 90%），主动让图片缩小、四周留出安全边距，数值越小留白越多。插件内置图片方式默认就是让图片只占圆形球的 90% 来留边，CSS 方式需要你自己加这个边距
    - 需要隐藏默认省略号图标：\`.ih-floating-ball > i { display: none !important; }\`（如果发现三个点仍未隐藏，说明选择器权重不够，改用更具体的写法：\`.ih-floating-ball i[class*="fa-"] { display: none !important; }\`）
    - 如果要给展开状态使用另一张图，请写 \`.ih-floating-ball.ih-ball-expanded { background-image: url("展开图") !important; }\`
    - 如果当前美化不想区分展开状态，可以不要写 \`.ih-ball-expanded\`，插件会继续使用默认球图
@@ -5439,6 +5470,12 @@ function openHelpPanel() {
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-rocket"></i> QR 助手面板</p>
 <p>点击 QR 助手按钮可快速打开 Quick Reply 助手面板（需要安装 QR 助手插件）。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;">
+  <i class="fa-solid fa-paintbrush"></i>
+  智绘姬面板
+</p>
+<p>点击 智绘姬面板 按钮可快速打开智绘姬生图插件面板（需要先安装并启用 <a href="https://github.com/damoshen123/st-chatu8" target="_blank">智绘姬</a> 插件）。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-palette"></i> 美化指南</p>
 <p>在设置面板底部点击<q>「美化指南」</q>按钮，可获取一段提示词。将提示词复制给 AI 并填写配色风格描述，即可生成匹配主题的快捷工具栏美化 CSS。</p>
@@ -6533,7 +6570,7 @@ const floatingPanelController = {
     const _shouldUseCssOnly = !!(fp.followTheme && _userHasBgImage);
 
     if (fp.ballImage && !_shouldUseCssOnly) {
-      const imgSizePercent = isSquare ? 100 : 71;
+      const imgSizePercent = isSquare ? 100 : 90;
       const safeBallImage = ihEscapeAttr(fp.ballImage);
       innerHtml = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:${ballRadius};"><img src="${safeBallImage}" draggable="false" ondragstart="return false;" style="width:${imgSizePercent}%;height:${imgSizePercent}%;object-fit:contain;pointer-events:none;-webkit-user-drag:none;user-drag:none;" /></div>`;
       _ballUseCustomClass = true;
@@ -11418,6 +11455,12 @@ jQuery(async () => {
       '<button id="input_open_qr_assistant_btn" class="input-helper-btn" title="QR助手面板" data-norefocus="true"><i class="fa-solid fa-rocket"></i></button>',
     );
     $("#input_helper_toolbar").append(qrAssistantBtn);
+  }
+  if (!$("#input_open_chatu8_btn").length) {
+    const chatU8Btn = $(
+      '<button id="input_open_chatu8_btn" class="input-helper-btn" title="智绘姬面板" data-norefocus="true"><i class="fa-solid fa-paintbrush"></i></button>',
+    );
+    $("#input_helper_toolbar").append(chatU8Btn);
   }
   if (!$("#input_switch_panel_profile_btn").length) {
     const switchPanelBtn = $(

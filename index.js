@@ -967,10 +967,7 @@ const pagingController = {
     );
     if (this.active) {
       this._setupTapPaging();
-      const _isMob =
-        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-          navigator.userAgent,
-        );
+      const _isMob = ihIsMobileDevice();
       toastr.info(
         _isMob
           ? "翻页模式已开启，点击屏幕上/下半区翻页"
@@ -2058,10 +2055,6 @@ const findReplaceController = {
       if (self._barEl[0].parentNode !== topHost) {
         topHost.appendChild(self._barEl[0]);
       }
-    });
-    this._barObserver.observe(document.body, {
-      childList: true,
-      subtree: false,
     });
     this._barObserver.observe(document.body, {
       childList: true,
@@ -3289,22 +3282,24 @@ const chatUndoManager = {
       await executeSlashCommandsWithOptions("/chat-reload");
       const remaining = this._snapshots.length;
       if (remaining > 0) {
-        toastr.success(`已撤回（还可撤回 ${remaining} 步）`, "", {
-          timeOut: 800,
+        toastr.success(`已撤回 1 步，还能撤回 ${remaining} 步`, "", {
+          timeOut: 900,
         });
       } else {
-        toastr.success("已撤回", "", { timeOut: 500 });
+        toastr.success("已撤回 1 步，无多余可撤回步骤", "", {
+          timeOut: 900,
+        });
       }
     } catch (e) {
       console.error("快捷工具栏: 撤回失败", e);
-      toastr.error("撤回失败，请尝试手动恢复", "", { timeOut: 1000 });
+      toastr.error("撤回失败", "", { timeOut: 1000 });
     } finally {
       const self = this;
       setTimeout(function () {
         self._isUndoing = false;
         self.updateStableSnapshot(true);
         self.updateButton();
-      }, 800);
+      }, 1500);
     }
   },
 
@@ -4501,6 +4496,22 @@ function doEditLastMsg() {
     toastr.warning("找不到最后一条消息", "", { timeOut: 800 });
     return;
   }
+
+  const editingTextarea = lastMes.find("textarea:visible").first();
+  if (editingTextarea.length) {
+    const doneBtn = lastMes.find(".mes_edit_done").filter(":visible").first();
+
+    if (doneBtn.length) {
+      doneBtn.trigger("click");
+      return;
+    }
+
+    toastr.warning("当前消息正在编辑，但找不到完成编辑按钮", "", {
+      timeOut: 1200,
+    });
+    return;
+  }
+
   const editBtn = lastMes.find(".mes_edit").first();
   if (!editBtn.length || !editBtn.is(":visible")) {
     toastr.warning("找不到编辑按钮", "", { timeOut: 800 });
@@ -5158,18 +5169,17 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.7";
+const CHANGELOG_VERSION = "2.8";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.7.0</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.8.0</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>消息列表性能</b>：改为按需渲染，大量消息也不卡。隐藏、删除、移动三个标签共享列表，切换时保留勾选和滚动位置。</li>
-  <li><b>移动位置更直观</b>：目标位置上方显示呼吸横线和“↓ 插入到这里 ↓”标签。</li>
-  <li><b>新增编辑最后消息按钮</b>：一键编辑最新消息。默认关闭，可在按钮管理中开启或绑定快捷键。</li>
-  <li><b>文件夹按钮支持悬浮面板</b>：放入面板后，展开子菜单会自动选择弹出方向并避开屏幕边缘。</li>
-  <li><b>添加按钮界面优化</b>：文件夹与独立按钮分组显示，可展开预览；勾选文件夹会智能避免子按钮重复；已在面板的按钮会标注且无法重复添加。</li>
-  <li><b>文件夹下拉同时显示图标和名称</b>：不再只显图标，辨识更轻松。</li>
-  <li><b>删除保护增强</b>：能检测其他扩展悄悄删除的消息，自动保存快照，可一键恢复。</li>
-  <li><b>修复工具栏误展开</b>：启动后 1.5 秒内忽略非手动聚焦，避免刷新页面后工具栏自动弹出。</li>
+  <li><b>新增自定义换行面板</b>：悬浮面板新增“自定义换行（侧边展开）”和“自定义换行（上下展开）”两种方向，可配合面板宽度/高度实现多按钮自动换行排列。</li>
+  <li><b>悬浮面板布局更稳定</b>：横向面板强制保持单行滚动，换行面板强制按设定宽度换行，避免被主题或美化 CSS 挤成两排三排。</li>
+  <li><b>撤回删除优化</b>：每次撤回后会明确提示“已撤回 1 步，还能撤回几步”。</li>
+  <li><b>撤回快照保护增强</b>：同一聊天内删除、重载或撤回时不再误清空快照，只有真正切换聊天才会清除撤回记录。</li>
+  <li><b>编辑最后消息增强</b>：如果最后一条消息已经处于编辑状态，再次点击“编辑最后消息”会尝试完成编辑。</li>
+  <li><b>悬浮面板文件夹适配</b>：文件夹子菜单会根据新面板方向选择侧边或上下弹出，减少遮挡和越界。</li>
+  <li><b>面板方案兼容新增方向</b>：面板方案可保存自定义换行方向、按钮大小、面板宽度和面板高度，方便为阅读、编辑、移动端分别配置不同布局。</li>
 </ul>
 `;
 
@@ -5407,7 +5417,9 @@ function openHelpPanel() {
 <ul>
     <li><b>竖向（侧边展开）</b>：按钮竖向排列，面板优先向悬浮球左右两侧展开</li>
     <li><b>竖向（上下展开）</b>：按钮竖向排列，面板根据空间向上或向下展开</li>
-    <li><b>横向（上下展开）</b>：按钮横向排列，面板根据空间向上或向下展开</li>
+    <li><b>横向（上下展开）</b>：按钮横向单行排列，面板根据空间向上或向下展开，按钮过多时横向滚动</li>
+    <li><b>自定义（侧边展开）</b>：面板使用设定宽度/高度，按钮按多列多行自动换行，优先向悬浮球左右两侧展开</li>
+    <li><b>自定义（上下展开）</b>：面板使用设定宽度/高度，按钮按多列多行自动换行，并根据空间向上或向下展开</li>
 </ul>
 
 <p style="margin:10px 0 4px;font-weight:600;">悬浮球外观</p>
@@ -5425,7 +5437,7 @@ function openHelpPanel() {
 <p><b>面板方案保存以下五项设置</b>：</p>
 <ul>
     <li>面板按钮列表（哪些按钮、排列顺序）</li>
-    <li>面板方向（竖向 / 横向）</li>
+    <li>面板方向（竖向 / 横向 / 自定义）</li>
     <li>面板按钮大小</li>
     <li>面板宽度</li>
     <li>面板最大高度</li>
@@ -6644,17 +6656,104 @@ const floatingPanelController = {
     });
   },
 
+  _isWrapPanelOrientation(orientation) {
+    return orientation === "wrap-side" || orientation === "wrap-down";
+  },
+
+  _getPanelDisplayValue() {
+    return "flex";
+  },
+
+  _applyWrapPanelGrid(panel, fp) {
+    if (!panel || !panel[0]) return;
+    const size = fp.buttonSize || 12;
+    const gap = Math.max(4, Math.round(size * 0.35));
+    const ph = Math.max(4, Math.round(size * 0.5));
+    const textMaxWidth = Math.ceil(size * 2.1 + ph * 2 + 4);
+
+    panel[0].style.setProperty("display", "flex", "important");
+    panel[0].style.setProperty("flex-direction", "row", "important");
+    panel[0].style.setProperty("flex-wrap", "wrap", "important");
+    panel[0].style.setProperty("gap", `${gap}px`, "important");
+    panel[0].style.setProperty("align-items", "flex-start", "important");
+    panel[0].style.setProperty("align-content", "flex-start", "important");
+    panel[0].style.removeProperty("grid-template-columns");
+    panel[0].style.removeProperty("grid-auto-rows");
+    panel[0].style.removeProperty("justify-items");
+
+    panel.find(".ih-fp-btn").each(function () {
+      const hasIcon = !!this.querySelector("i");
+      const hasText = Array.from(this.childNodes).some(function (n) {
+        return n.nodeType === 3 && n.textContent.trim().length > 0;
+      });
+      const isIconOnly = hasIcon && !hasText;
+
+      this.style.setProperty("width", "auto", "important");
+      this.style.setProperty("height", "auto", "important");
+      this.style.removeProperty("min-width");
+      this.style.setProperty("box-sizing", "border-box", "important");
+      this.style.setProperty("justify-content", "center", "important");
+      this.style.setProperty("align-items", "center", "important");
+      this.style.setProperty("border-radius", "8px", "important");
+
+      if (isIconOnly) {
+        this.style.removeProperty("max-width");
+        this.style.setProperty("white-space", "nowrap", "important");
+        this.style.setProperty("overflow", "visible", "important");
+        this.style.removeProperty("overflow-wrap");
+        this.style.removeProperty("word-break");
+        this.style.removeProperty("text-overflow");
+        this.style.removeProperty("line-height");
+        this.style.removeProperty("text-align");
+      } else {
+        const btnText = (this.textContent || "").trim();
+        const isCjkText = /[\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/.test(
+          btnText,
+        );
+        const maxWidthForThisBtn = isCjkText
+          ? Math.ceil(size * 2.1 + ph * 2)
+          : textMaxWidth;
+
+        this.style.setProperty(
+          "max-width",
+          `${maxWidthForThisBtn}px`,
+          "important",
+        );
+        this.style.setProperty("white-space", "normal", "important");
+        this.style.setProperty("overflow", "hidden", "important");
+        this.style.setProperty("overflow-wrap", "anywhere", "important");
+        this.style.setProperty("word-break", "break-word", "important");
+        this.style.setProperty("text-overflow", "clip", "important");
+        this.style.setProperty("line-height", "1.25", "important");
+        this.style.setProperty("text-align", "center", "important");
+      }
+    });
+  },
+
   _createPanel() {
     const fp = getSettings().floatingPanel;
+    const isWrapPanel = this._isWrapPanelOrientation(fp.orientation);
     const panelLayoutClass =
-      fp.orientation === "horizontal" ? "ih-fp-horizontal" : "ih-fp-vertical";
+      fp.orientation === "horizontal" || isWrapPanel
+        ? "ih-fp-horizontal"
+        : "ih-fp-vertical";
     const panel = $(
       `<div class="ih-floating-panel ${panelLayoutClass} ${fp.displayMode === "fixed" ? "ih-fp-fixed" : "ih-fp-collapsible"}"></div>`,
     );
-    if (fp.orientation === "horizontal") {
+    if (isWrapPanel) {
+      this._applyWrapPanelGrid(panel, fp);
+      panel[0].style.setProperty("overflow-x", "hidden", "important");
+      panel[0].style.setProperty("overflow-y", "auto", "important");
+    } else if (fp.orientation === "horizontal") {
+      panel[0].style.setProperty("flex-direction", "row", "important");
+      panel[0].style.setProperty("flex-wrap", "nowrap", "important");
+      panel[0].style.setProperty("align-items", "center", "important");
       panel[0].style.setProperty("overflow-x", "auto", "important");
       panel[0].style.setProperty("overflow-y", "hidden", "important");
     } else {
+      panel[0].style.setProperty("flex-direction", "column", "important");
+      panel[0].style.setProperty("flex-wrap", "nowrap", "important");
+      panel[0].style.setProperty("align-items", "stretch", "important");
       panel[0].style.setProperty("overflow-y", "auto", "important");
       panel[0].style.setProperty("overflow-x", "hidden", "important");
     }
@@ -6710,6 +6809,9 @@ const floatingPanelController = {
       this._applyButtonSize(btn[0], fp.buttonSize || 12);
       panel.append(btn);
     });
+    if (isWrapPanel) {
+      this._applyWrapPanelGrid(panel, fp);
+    }
     if (fp.displayMode === "fixed") {
       const handle = $(
         `<div class="ih-fp-handle" title="拖拽移动"><i class="fa-solid fa-grip-vertical"></i></div>`,
@@ -6903,9 +7005,10 @@ const floatingPanelController = {
     this._expanded = !this._expanded;
     if (!this._panelEl || !this._ballEl) return;
     if (this._expanded) {
+      const panelDisplay = this._getPanelDisplayValue();
       this._panelEl.css({
         visibility: "hidden",
-        display: "flex",
+        display: panelDisplay,
         "max-height": "",
       });
       const panelWidth = this._panelEl.outerWidth();
@@ -6937,7 +7040,9 @@ const floatingPanelController = {
       const spaceRightBall = window.innerWidth - ballRect.right - 8;
       const canFitLeft = spaceLeftBall >= panelWidth + 4;
       const canFitRight = spaceRightBall >= panelWidth + 4;
-      if (fp.orientation === "vertical" && (canFitLeft || canFitRight)) {
+      const preferSidePanel =
+        fp.orientation === "vertical" || fp.orientation === "wrap-side";
+      if (preferSidePanel && (canFitLeft || canFitRight)) {
         panelLeft = canFitLeft
           ? ballRect.left - panelWidth - 8
           : ballRect.right + 8;
@@ -7034,7 +7139,11 @@ const floatingPanelController = {
           this._clampMaxH(availableHeight) + "px",
         );
       }
-      this._panelEl.stop(true).fadeIn(60);
+      this._panelEl.stop(true).fadeIn(60, () => {
+        if (this._panelEl && this._panelEl[0]) {
+          this._panelEl.css("display", panelDisplay);
+        }
+      });
       const _selfPanel = this._panelEl[0];
       setTimeout(() => {
         _selfPanel.style.setProperty(
@@ -7066,14 +7175,13 @@ const floatingPanelController = {
     return userH && userH > 0 ? Math.min(clamped, userH) : clamped;
   },
   _applyButtonSize(el, size) {
+    el.style.setProperty("flex-shrink", "0", "important");
+
     const pv = Math.max(2, Math.round(size * 0.25));
     let ph = Math.max(4, Math.round(size * 0.5));
-    const text = el.textContent || "";
-    const hasCJK =
-      /[\u3000-\u303f\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\uff00-\uffef]/.test(
-        text,
-      );
-    if (hasCJK) {
+    const text = (el.textContent || "").trim();
+    const shouldNarrowTextButton = new Set(["「」", "『』", "《》"]).has(text);
+    if (shouldNarrowTextButton) {
       ph = Math.max(2, Math.round(size * 0.17));
     }
 
@@ -7087,8 +7195,29 @@ const floatingPanelController = {
       var pvIcon = Math.max(3, Math.round(size * 0.38));
       var phIcon = Math.max(6, Math.round(size * 0.65));
       el.style.setProperty("padding", `${pvIcon}px ${phIcon}px`, "important");
+      el.style.setProperty("white-space", "nowrap", "important");
+      el.style.removeProperty("min-width");
+      el.style.removeProperty("max-width");
+      el.style.removeProperty("overflow-wrap");
+      el.style.removeProperty("word-break");
+      el.style.removeProperty("line-height");
+      el.style.removeProperty("text-align");
     } else {
+      const maxTextWidth = Math.ceil(size * 3.2 + ph * 2 + 4);
+      const isCjkText = /[\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/.test(text);
+      const maxWidthForThisBtn = isCjkText
+        ? Math.ceil(size * 2.1 + ph * 2)
+        : maxTextWidth;
+
+      el.style.setProperty("box-sizing", "border-box", "important");
       el.style.setProperty("padding", `${pv}px ${ph}px`, "important");
+      el.style.setProperty("white-space", "normal", "important");
+      el.style.setProperty("overflow-wrap", "anywhere", "important");
+      el.style.setProperty("word-break", "break-word", "important");
+      el.style.removeProperty("min-width");
+      el.style.setProperty("max-width", `${maxWidthForThisBtn}px`, "important");
+      el.style.setProperty("line-height", "1.25", "important");
+      el.style.setProperty("text-align", "center", "important");
     }
     el.querySelectorAll("i").forEach(function (icon) {
       icon.style.setProperty("font-size", size + "px", "important");
@@ -7591,8 +7720,11 @@ const floatingPanelController = {
     const spaceLeft = ballRect.left;
     const spaceRight = window.innerWidth - ballRect.right;
 
+    const preferSidePanel =
+      fp.orientation === "vertical" || fp.orientation === "wrap-side";
+
     if (
-      fp.orientation === "vertical" &&
+      preferSidePanel &&
       (spaceLeft >= panelWidth + 12 || spaceRight >= panelWidth + 12)
     ) {
       if (spaceLeft >= panelWidth + 12) {
@@ -8145,10 +8277,7 @@ function getActionForKey(key) {
 }
 
 function bindButtonAction(btn, key) {
-  const isMobile =
-    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-      navigator.userAgent,
-    );
+  const isMobile = ihIsMobileDevice();
   const action = getActionForKey(key);
   if (!action) return;
 
@@ -8417,15 +8546,22 @@ function createDialogOverlay() {
   ].forEach((evt) => {
     el.addEventListener(evt, (e) => e.stopPropagation(), false);
   });
+  let escHandler;
+  const closeOverlay = () => {
+    if (escHandler) {
+      document.removeEventListener("keydown", escHandler, true);
+    }
+    overlay.remove();
+  };
+  overlay[0]._ihCloseOverlay = closeOverlay;
   overlay.on("click", function (e) {
-    if ($(e.target).hasClass("ih-dialog-overlay")) overlay.remove();
+    if ($(e.target).hasClass("ih-dialog-overlay")) closeOverlay();
   });
-  const escHandler = (e) => {
+  escHandler = (e) => {
     if (e.key === "Escape") {
       e.stopImmediatePropagation();
       e.preventDefault();
-      document.removeEventListener("keydown", escHandler, true);
-      overlay.remove();
+      closeOverlay();
     }
   };
   document.addEventListener("keydown", escHandler, true);
@@ -8580,9 +8716,10 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
   if (fromFloating) {
     const fpOrientation = getSettings().floatingPanel.orientation || "vertical";
     const goVertical =
-      fpOrientation === "horizontal" || fpOrientation === "vertical-down";
+      fpOrientation === "horizontal" ||
+      fpOrientation === "vertical-down" ||
+      fpOrientation === "wrap-down";
     if (goVertical) {
-      // 横向面板/上下展开竖向：根据上下空间决定弹出方向
       left = btnRect.left + btnRect.width / 2 - ddWidth / 2;
       const spaceBelow = window.innerHeight - btnRect.bottom - 8;
       const spaceAbove = btnRect.top - 8;
@@ -8650,6 +8787,35 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
   dropdown
     .find("[data-button-key='autoScroll']")
     .toggleClass("input-helper-btn-active", autoScrollController.active);
+}
+
+function applyCJKNarrowToToolbar() {
+  const toolbar = document.getElementById("input_helper_toolbar");
+  if (!toolbar) return;
+
+  const narrowTextButtons = new Set(["「」", "『』", "《》"]);
+
+  toolbar
+    .querySelectorAll(".input-helper-btn, .custom-symbol-button")
+    .forEach((btn) => {
+      const hasIcon = !!btn.querySelector("i");
+      const text = (btn.textContent || "").trim();
+      const shouldNarrow = !hasIcon && narrowTextButtons.has(text);
+
+      if (shouldNarrow) {
+        btn.dataset.cjkDone = "1";
+        btn.style.setProperty("letter-spacing", "-3px", "important");
+        btn.style.setProperty("padding", "3px", "important");
+        btn.style.setProperty("min-width", "0", "important");
+      } else {
+        if (btn.dataset.cjkDone === "1") {
+          delete btn.dataset.cjkDone;
+        }
+        btn.style.removeProperty("letter-spacing");
+        btn.style.removeProperty("min-width");
+        btn.style.removeProperty("padding");
+      }
+    });
 }
 
 function applyToolbarButtonSize() {
@@ -9285,6 +9451,8 @@ function renderFloatingPanelSettings() {
                             <option value="vertical" ${fp.orientation === "vertical" ? "selected" : ""}>竖向（侧边展开）</option>
                             <option value="vertical-down" ${fp.orientation === "vertical-down" ? "selected" : ""}>竖向（上下展开）</option>
                             <option value="horizontal" ${fp.orientation === "horizontal" ? "selected" : ""}>横向（上下展开）</option>
+                            <option value="wrap-side" ${fp.orientation === "wrap-side" ? "selected" : ""}>自定义（侧边展开）</option>
+                            <option value="wrap-down" ${fp.orientation === "wrap-down" ? "selected" : ""}>自定义（上下展开）</option>
                         </select>
                     </div>
                     <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
@@ -9391,7 +9559,7 @@ function renderFloatingPanelSettings() {
                     <input type="number" id="ih_fp_panel_max_height_input" min="0" max="800" value="${fp.panelMaxHeight || 0}" style="width:48px;padding:3px 4px;border:1px solid var(--SmartThemeBorderColor);border-radius:4px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;text-align:center;" />
                     <span style="font-size:11px;flex-shrink:0;opacity:0.6;">px</span>
                 </div>
-                <div style="font-size:10px;opacity:0.5;margin-top:4px;line-height:1.5;">0 = 自动（由内容撑开）。设了高度后内容超出会上下滚动</div>
+                <div style="font-size:10px;opacity:0.5;margin-top:4px;line-height:1.5;">0 = 自动（由内容撑开）。换行模式建议设置宽度；设了高度后内容超出会上下滚动</div>
             </div>
             <div class="ih-hm-group" style="padding-top:0;margin-top:-4px;">
                 <div class="ih-hm-group-label">面板方案</div>
@@ -9502,6 +9670,15 @@ function renderFloatingPanelSettings() {
       panel.find(".ih-fp-btn").each(function () {
         ctrl._applyButtonSize(this, val);
       });
+      if (
+        ctrl._isWrapPanelOrientation(getSettings().floatingPanel.orientation)
+      ) {
+        ctrl._applyWrapPanelGrid(panel, getSettings().floatingPanel);
+      }
+      if (ctrl._expanded) {
+        ctrl._lastRepositionKey = null;
+        ctrl._repositionPanel();
+      }
     }
   }
   container.on("input", "#ih_fp_ball_size", function () {
@@ -9530,6 +9707,20 @@ function renderFloatingPanelSettings() {
         panel.css("width", val + "px");
       } else {
         panel.css("width", "");
+      }
+      if (
+        floatingPanelController._isWrapPanelOrientation(
+          getSettings().floatingPanel.orientation,
+        )
+      ) {
+        floatingPanelController._applyWrapPanelGrid(
+          panel,
+          getSettings().floatingPanel,
+        );
+      }
+      if (floatingPanelController._expanded) {
+        floatingPanelController._lastRepositionKey = null;
+        floatingPanelController._repositionPanel();
       }
     }
   }
@@ -9779,8 +9970,12 @@ function renderFloatingPanelSettings() {
     syncDialogTheme(pickerContent[0]);
     pickerContent.on("click", (e) => e.stopPropagation());
     const closePicker = () => {
-      document.removeEventListener("keydown", escHandler, true);
-      overlay.remove();
+      if (overlay && overlay[0] && overlay[0]._ihCloseOverlay) {
+        overlay[0]._ihCloseOverlay();
+      } else {
+        document.removeEventListener("keydown", escHandler, true);
+        overlay.remove();
+      }
     };
     overlay.off("click").on("click", (e) => {
       if (e.target === overlay[0]) closePicker();
@@ -9857,16 +10052,28 @@ function renderFloatingPanelSettings() {
         }
       });
       const selected = rawSelected.filter((k) => !subToExclude.has(k));
+
+      closePicker();
+
       if (selected.length > 0) {
         if (!getSettings().floatingPanel.buttons)
           getSettings().floatingPanel.buttons = [];
         selected.forEach((k) => getSettings().floatingPanel.buttons.push(k));
         saveSettingsDebounced();
-        renderFloatingPanelSettings();
-        floatingPanelController.refresh();
-        buildToolbar();
+
+        setTimeout(() => {
+          try {
+            renderFloatingPanelSettings();
+            floatingPanelController.refresh();
+            buildToolbar();
+          } catch (e) {
+            console.error("快捷工具栏: 添加悬浮面板按钮后刷新失败", e);
+            toastr.error("按钮已添加，但刷新面板失败，请尝试重新打开设置", "", {
+              timeOut: 1800,
+            });
+          }
+        }, 0);
       }
-      closePicker();
     });
   });
   container.on("click", "#ih_fp_clear_buttons", function () {
@@ -10184,8 +10391,12 @@ function showButtonPicker(folderIndex) {
   });
   generateFaIconProtectionCSS();
   const closeDialog = function () {
-    document.removeEventListener("keydown", escHandler, true);
-    overlay.remove();
+    if (overlay && overlay[0] && overlay[0]._ihCloseOverlay) {
+      overlay[0]._ihCloseOverlay();
+    } else {
+      document.removeEventListener("keydown", escHandler, true);
+      overlay.remove();
+    }
   };
   content.find(".ih-picker-close-btn").on("click", closeDialog);
   overlay.off("click").on("click", function (e) {
@@ -10202,6 +10413,9 @@ function showButtonPicker(folderIndex) {
     content.find(".ih-picker-item[data-selected='true']").each(function () {
       selectedKeys.push($(this).data("key"));
     });
+
+    closeDialog();
+
     if (selectedKeys.length > 0) {
       if (!getSettings().folders[folderIndex].buttons)
         getSettings().folders[folderIndex].buttons = [];
@@ -10209,11 +10423,20 @@ function showButtonPicker(folderIndex) {
         getSettings().folders[folderIndex].buttons.push(key),
       );
       saveSettingsDebounced();
-      renderFolderSettings();
-      renderSettingsPanel();
-      buildToolbar();
+
+      setTimeout(() => {
+        try {
+          renderFolderSettings();
+          renderSettingsPanel();
+          buildToolbar();
+        } catch (e) {
+          console.error("快捷工具栏: 添加文件夹按钮后刷新失败", e);
+          toastr.error("按钮已添加，但刷新设置失败，请尝试重新打开设置", "", {
+            timeOut: 1800,
+          });
+        }
+      }, 0);
     }
-    closeDialog();
   });
 }
 
@@ -10477,9 +10700,20 @@ function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
       getSettings().customSymbols.push(symbolObj);
     }
     saveSettingsDebounced();
-    loadCustomSymbolButtons();
+
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
+
+    setTimeout(() => {
+      try {
+        loadCustomSymbolButtons();
+      } catch (e) {
+        console.error("快捷工具栏: 保存自定义内容后刷新失败", e);
+        toastr.error("内容已保存，但刷新按钮失败，请尝试重新打开设置", "", {
+          timeOut: 1800,
+        });
+      }
+    }, 0);
   });
 }
 
@@ -10674,6 +10908,7 @@ function initSortable() {
             if (childrenDiv.length) $(this).after(childrenDiv);
           });
         setTimeout(() => {
+          renderFolderSettings();
           renderSettingsPanel();
           buildToolbar();
         }, 50);
@@ -11427,10 +11662,7 @@ jQuery(async () => {
     $("#file_form").after(toolbarHtml);
   }
 
-  const isMobile =
-    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-      navigator.userAgent,
-    );
+  const isMobile = ihIsMobileDevice();
   if (isMobile) {
     $("#input_helper_toolbar").on("mousedown", function (e) {
       if ($(e.target).closest(".ih-folder-btn").length) return;
@@ -11879,8 +12111,8 @@ jQuery(async () => {
       typeof window.eventOn === "function" &&
       typeof window.iframe_events !== "undefined"
     ) {
-      eventOn(
-        iframe_events.MESSAGE_IFRAME_RENDER_ENDED,
+      window.eventOn(
+        window.iframe_events.MESSAGE_IFRAME_RENDER_ENDED,
         function (iframe_name) {
           setTimeout(() => {
             document.querySelectorAll("iframe").forEach((ifr) => {
@@ -11994,16 +12226,23 @@ jQuery(async () => {
     eventSource.on(event_types.CHAT_CHANGED, function () {
       historyManager.clear();
       historyManager._sharedHistoriesByKey.clear();
-      if (!chatUndoManager._isUndoing) {
+      let currentChatIdForUndo = null;
+      try {
+        currentChatIdForUndo = SillyTavern.getContext().getCurrentChatId();
+      } catch (e) {
+        currentChatIdForUndo = null;
+      }
+      const previousChatIdForUndo = chatUndoManager._lastWatchedChatId;
+      const chatReallyChanged =
+        previousChatIdForUndo !== null &&
+        previousChatIdForUndo !== undefined &&
+        currentChatIdForUndo !== previousChatIdForUndo;
+
+      if (!chatUndoManager._isUndoing && chatReallyChanged) {
         chatUndoManager.clear();
       }
       chatUndoManager._lastWatchedLength = chat.length;
-      try {
-        chatUndoManager._lastWatchedChatId =
-          SillyTavern.getContext().getCurrentChatId();
-      } catch (e) {
-        chatUndoManager._lastWatchedChatId = null;
-      }
+      chatUndoManager._lastWatchedChatId = currentChatIdForUndo;
       if (shiftMode.active) shiftMode.deactivate();
       if (autoScrollController.active) autoScrollController.stop();
       if (findReplaceController.active) findReplaceController.close();

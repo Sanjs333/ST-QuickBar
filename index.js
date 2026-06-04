@@ -5385,6 +5385,7 @@ function openHelpPanel() {
     <li>勾选状态和滚动位置在标签页之间保留，切换标签不会丢失</li>
     <li>输入楼层号时列表会实时高亮对应消息：单条用强色、范围用主题色、保留最近用绿色</li>
     <li>每条消息前的箭头按钮可一键跳转到原聊天位置</li>
+    <li>消息倒序按钮可切换列表显示方向，方便从最新消息往前管理</li>
     <li>采用按需渲染，大量消息时也能保持流畅</li>
 </ul>
 
@@ -5540,6 +5541,7 @@ function openHideManagerPanel() {
     rangeMode: false,
     activeTab: "hide",
     scrollTop: 0,
+    reverseOrder: false,
   };
 
   const ROW_HEIGHT = 36;
@@ -5644,6 +5646,7 @@ function openHideManagerPanel() {
       <div class="ih-mgr-shared-list-area">
         <div class="ih-mgr-toolbar">
           <div class="ih-mgr-btn-group">
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_reverse_order" title="消息倒序"><i class="fa-solid fa-arrow-down-wide-short"></i></button>
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_select_all" title="全选"><i class="fa-solid fa-check-double"></i></button>
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_invert" title="反选"><i class="fa-solid fa-rotate"></i></button>
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_range_toggle" title="范围选择"><i class="fa-solid fa-arrows-left-right-to-line"></i></button>
@@ -5801,7 +5804,10 @@ function openHideManagerPanel() {
     spacerTopEl.style.height = startIdx * ROW_HEIGHT + "px";
     spacerBottomEl.style.height = (total - endIdx) * ROW_HEIGHT + "px";
     let html = "";
-    for (let i = startIdx; i < endIdx; i++) html += buildRowHtml(i);
+    for (let i = startIdx; i < endIdx; i++) {
+      const floor = sharedState.reverseOrder ? total - 1 - i : i;
+      html += buildRowHtml(floor);
+    }
     rowsEl.innerHTML = html;
   }
 
@@ -5843,13 +5849,17 @@ function openHideManagerPanel() {
       floor >= total
     )
       return;
+    const displayIndex = sharedState.reverseOrder ? total - 1 - floor : floor;
     const targetTop =
-      floor * ROW_HEIGHT - vlistEl.clientHeight / 2 + ROW_HEIGHT / 2;
+      displayIndex * ROW_HEIGHT - vlistEl.clientHeight / 2 + ROW_HEIGHT / 2;
     vlistEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
   }
 
   function updateCount() {
     content.find("#ih_mgr_count").text(`已选 ${sharedState.selected.size} 条`);
+    content
+      .find("#ih_mgr_reverse_order")
+      .toggleClass("ih-mgr-btn-active", sharedState.reverseOrder);
     const checkboxes = rowsEl.querySelectorAll("input[type=checkbox]");
     let allCheckedInView = checkboxes.length > 0;
     checkboxes.forEach((cb) => {
@@ -5988,6 +5998,12 @@ function openHideManagerPanel() {
 
     if (sharedState.selected.has(floor)) sharedState.selected.delete(floor);
     else sharedState.selected.add(floor);
+    refreshList();
+  });
+
+  content.find("#ih_mgr_reverse_order").on("click", () => {
+    sharedState.reverseOrder = !sharedState.reverseOrder;
+    vlistEl.scrollTop = 0;
     refreshList();
   });
 

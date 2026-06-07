@@ -173,6 +173,11 @@ const BUTTON_DEFS = {
     text: null,
   },
   chatClose: { label: "关闭聊天", icon: "fa-solid fa-xmark", text: null },
+  quickHide: {
+    label: "快速隐藏",
+    icon: "fa-solid fa-eye-low-vision",
+    text: null,
+  },
 };
 
 const ALL_BUTTON_KEYS = Object.keys(BUTTON_DEFS);
@@ -361,7 +366,8 @@ const defaultSettings = {
       k === "chatDelete" ||
       k === "chatClose" ||
       k === "cursorLeft" ||
-      k === "cursorRight"
+      k === "cursorRight" ||
+      k === "quickHide"
         ? false
         : true,
     ]),
@@ -417,6 +423,7 @@ const shortcutFunctionMap = {
   chatClose: () => doChatClose(),
   cursorLeft: () => doCursorLeft(),
   cursorRight: () => doCursorRight(),
+  quickHide: () => quickHideController.execute(),
 };
 
 function ihBlurToDismissKeyboard(targetEl) {
@@ -841,6 +848,55 @@ const messageNavigation = {
     }
     this._currentAiIndex = currentIdx;
     this._lastNavTime = Date.now();
+  },
+};
+const quickHideController = {
+  _counter: 0,
+  _timer: null,
+  _TIMEOUT: 5000,
+
+  reset() {
+    this._counter = 0;
+    if (this._timer) {
+      clearTimeout(this._timer);
+      this._timer = null;
+    }
+    this._updateBtnState();
+  },
+
+  execute() {
+    if (chat.length === 0) {
+      toastr.warning("当前没有聊天消息", "", { timeOut: 800 });
+      return;
+    }
+    this._counter++;
+    const targetFloor = chat.length - this._counter;
+    if (targetFloor < 0) {
+      this._counter--;
+      toastr.warning("已经没有更多消息可以隐藏了", "", { timeOut: 1000 });
+      return;
+    }
+    if (this._timer) clearTimeout(this._timer);
+    this._timer = setTimeout(() => {
+      this.reset();
+    }, this._TIMEOUT);
+    executeSlashCommandsWithOptions(`/hide ${targetFloor}`);
+    const msg = chat[targetFloor];
+    const sender = msg ? (msg.is_user ? "用户" : msg.name || "AI") : "";
+    toastr.info(
+      `已隐藏倒数第${this._counter}条 (#${targetFloor} ${sender})`,
+      this._counter > 1 ? "连续隐藏中…" : "",
+      { timeOut: 1500 },
+    );
+    this._updateBtnState();
+  },
+
+  _updateBtnState() {
+    const sel =
+      "#input_quick_hide_btn, " +
+      ".ih-folder-dropdown-portal [data-button-key='quickHide'], " +
+      ".ih-floating-panel [data-button-key='quickHide']";
+    $(sel).toggleClass("input-helper-btn-active", this._counter > 0);
   },
 };
 
@@ -4003,6 +4059,7 @@ function getButtonIdFromKey(key) {
     chatClose: "input_chat_close_btn",
     cursorLeft: "input_cursor_left_btn",
     cursorRight: "input_cursor_right_btn",
+    quickHide: "input_quick_hide_btn",
   };
   return map[key] || "";
 }
@@ -5169,17 +5226,13 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.8";
+const CHANGELOG_VERSION = "2.9";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.8.0</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.0</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>新增自定义换行面板</b>：悬浮面板新增“自定义换行（侧边展开）”和“自定义换行（上下展开）”两种方向，可配合面板宽度/高度实现多按钮自动换行排列。</li>
-  <li><b>悬浮面板布局更稳定</b>：横向面板强制保持单行滚动，换行面板强制按设定宽度换行，避免被主题或美化 CSS 挤成两排三排。</li>
-  <li><b>撤回删除优化</b>：每次撤回后会明确提示“已撤回 1 步，还能撤回几步”。</li>
-  <li><b>撤回快照保护增强</b>：同一聊天内删除、重载或撤回时不再误清空快照，只有真正切换聊天才会清除撤回记录。</li>
-  <li><b>编辑最后消息增强</b>：如果最后一条消息已经处于编辑状态，再次点击“编辑最后消息”会尝试完成编辑。</li>
-  <li><b>悬浮面板文件夹适配</b>：文件夹子菜单会根据新面板方向选择侧边或上下弹出，减少遮挡和越界。</li>
-  <li><b>面板方案兼容新增方向</b>：面板方案可保存自定义换行方向、按钮大小、面板宽度和面板高度，方便为阅读、编辑、移动端分别配置不同布局。</li>
+  <li><b>新增快速隐藏按钮</b>：点击一次隐藏最后一条消息，连续点击依次向前隐藏更多消息。5 秒无操作后自动重置计数，方便快速清理最近的消息上下文。</li>
+  <li><b>新增插入空白消息功能</b>：消息管理面板新增"插入"标签页，可在任意楼层之间插入空白消息，支持指定用户、AI角色或旁白角色。插入后自动跳转并进入编辑状态。</li>
+  <li><b>消息管理面板扩展</b>：新增第四个标签页"插入"，与隐藏/删除/移动并列，操作前自动保存快照以便撤回。</li>
 </ul>
 `;
 
@@ -5360,7 +5413,9 @@ function openHelpPanel() {
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-trash-arrow-up"></i> 撤回删除</p>
 <p>在执行删除消息或删除备选等操作后，点击此按钮可撤回到操作前的状态。快照保留 5 分钟，过期或切换聊天后自动清除。最多保留 20 步快照，可连续撤回多次操作。</p>
-
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-eye-low-vision"></i> 快速隐藏</p>
+<p>一键快速隐藏最近的消息。第一次点击隐藏最后一条消息，继续点击依次向前隐藏倒数第二条、第三条……方便快速清理最近的消息上下文。</p>
+<p>5 秒无操作后计数自动重置，下次点击重新从最后一条开始。切换聊天时也会自动重置。按钮处于激活状态（高亮）时表示当前有连续隐藏记录。</p>
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-trash-can"></i> 进入删除模式</p>
 <p>一键进入或退出酒馆原生的消息多选删除模式。进入后可以勾选多条消息批量删除。再次点击按钮退出删除模式。</p>
 
@@ -5368,7 +5423,7 @@ function openHelpPanel() {
 <p>在设置中开启此选项后，所有涉及删除的操作（删除最后消息、删除备选、批量删除、删除聊天等）执行前会弹出二次确认弹窗，避免误操作。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-ghost"></i> 消息管理面板</h4>
-<p>统一的消息管理面板，包含三个标签页：</p>
+<p>统一的消息管理面板，包含四个标签页：</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">隐藏</p>
 <p>管理哪些消息对 AI 可见。支持单条隐藏/显示/跳转、范围隐藏/显示、保留最近 N 条可见、勾选多条批量隐藏/显示。隐藏的消息不会发送给 AI。</p>
@@ -5376,8 +5431,9 @@ function openHelpPanel() {
 <p style="margin:10px 0 4px;font-weight:600;">删除</p>
 <p>可勾选任意多条消息（包括不连续楼层），或按范围批量删除。删除前会自动保存快照，5 分钟内可用<q>「撤回删除」</q>恢复。</p>
 
-<p style="margin:10px 0 4px;font-weight:600;">移动</p>
-<p>勾选多条消息，按原顺序一次性移动到指定楼层。移动前会自动保存快照，方便撤回。目标位置上方显示呼吸横线和<q>「↓ 插入到这里 ↓」</q>标签作为视觉指示。</p>
+<p style="margin:10px 0 4px;font-weight:600;">插入</p>
+<p>在指定楼层插入一条空白消息，支持选择角色身份（用户、AI角色、旁白/系统）。插入后自动跳转到该楼层并进入编辑状态，可以直接输入内容。操作前自动保存快照，可使用<q>「撤回删除」</q>恢复。</p>
+<p>典型用途：在对话中间补充遗漏的内容、手动添加旁白/系统指令、在特定位置注入上下文等。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">共享行为</p>
 <ul>
@@ -5567,6 +5623,9 @@ function openHideManagerPanel() {
         <button class="ih-mgr-tab" data-tab="move">
           <i class="fa-solid fa-arrows-up-down"></i><span>移动</span>
         </button>
+        <button class="ih-mgr-tab" data-tab="insert">
+          <i class="fa-solid fa-plus-circle"></i><span>插入</span>
+        </button>
       </div>
 
       <div class="ih-mgr-tab-panel" data-panel="hide">
@@ -5642,7 +5701,30 @@ function openHideManagerPanel() {
           </div>
         </div>
       </div>
+      <div class="ih-mgr-tab-panel" data-panel="insert" style="display:none;">
+        <div class="ih-mgr-status">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>在指定楼层插入一条空白消息，插入后自动跳转并进入编辑状态</span>
+        </div>
 
+        <div class="ih-mgr-inline-row">
+          <label class="ih-mgr-inline-label">插入位置</label>
+          <input type="number" id="ih_mgr_insert_floor" class="ih-mgr-input" placeholder="楼层号" min="0" max="${total}" />
+          <span class="ih-mgr-hint-inline">新消息将出现在此楼层</span>
+        </div>
+
+        <div class="ih-mgr-inline-row">
+          <label class="ih-mgr-inline-label">消息角色</label>
+          <select id="ih_mgr_insert_role" style="padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:12px;min-width:100px;">
+            <option value="user">用户</option>
+            <option value="char">AI角色</option>
+            <option value="narrator">旁白/系统</option>
+          </select>
+          <div class="ih-mgr-inline-actions">
+            <button class="ih-mgr-btn ih-mgr-btn-ok ih-mgr-btn-primary" id="ih_mgr_insert_confirm"><i class="fa-solid fa-plus"></i> 插入</button>
+          </div>
+        </div>
+      </div>
       <div class="ih-mgr-shared-list-area">
         <div class="ih-mgr-toolbar">
           <div class="ih-mgr-btn-group">
@@ -5743,6 +5825,14 @@ function openHideManagerPanel() {
       const tv = content.find("#ih_mgr_mv_target").val();
       if (tv !== "") {
         const t = parseInt(tv);
+        if (!isNaN(t) && t >= 0 && t < total) set.insertAbove = t;
+        else if (!isNaN(t) && t >= total && total > 0)
+          set.insertBelow = total - 1;
+      }
+    } else if (sharedState.activeTab === "insert") {
+      const iv = content.find("#ih_mgr_insert_floor").val();
+      if (iv !== "") {
+        const t = parseInt(iv);
         if (!isNaN(t) && t >= 0 && t < total) set.insertAbove = t;
         else if (!isNaN(t) && t >= total && total > 0)
           set.insertBelow = total - 1;
@@ -5922,6 +6012,9 @@ function openHideManagerPanel() {
     sharedState.rangeMode = false;
     content.find(".ih-mgr-tab").removeClass("ih-mgr-tab-active");
     $(this).addClass("ih-mgr-tab-active");
+    content
+      .find(".ih-mgr-shared-list-area")
+      .toggleClass("ih-mgr-insert-mode", tab === "insert");
     content.find(".ih-mgr-tab-panel").hide();
     content.find(`.ih-mgr-tab-panel[data-panel="${tab}"]`).show();
     content.find(".ih-mgr-footer-actions").hide();
@@ -5964,6 +6057,7 @@ function openHideManagerPanel() {
     const item = e.target.closest(".ih-mgr-msg-item");
     if (!item) return;
     if (e.target.closest(".ih-mgr-msg-jump")) return;
+    if (sharedState.activeTab === "insert") return;
     const floor = parseInt(item.dataset.floor);
     if (isNaN(floor)) return;
 
@@ -6058,7 +6152,7 @@ function openHideManagerPanel() {
   bindHighlightInput("#ih_mgr_del_from");
   bindHighlightInput("#ih_mgr_del_to");
   bindHighlightInput("#ih_mgr_mv_target");
-
+  bindHighlightInput("#ih_mgr_insert_floor");
   content.on("input", "#ih_mgr_range_from, #ih_mgr_range_to", () => {
     const fv = content.find("#ih_mgr_range_from").val();
     const tv = content.find("#ih_mgr_range_to").val();
@@ -6328,6 +6422,83 @@ function openHideManagerPanel() {
     } catch (e) {
       console.error("快捷工具栏: 移动失败", e);
       toastr.error("移动失败，请尝试撤回", "", { timeOut: 1500 });
+    }
+  });
+  content.find("#ih_mgr_insert_confirm").on("click", async () => {
+    const floorVal = content.find("#ih_mgr_insert_floor").val();
+    if (floorVal === "") {
+      toastr.warning("请输入插入位置", "", { timeOut: 1200 });
+      return;
+    }
+    const insertAt = parseInt(floorVal);
+    if (isNaN(insertAt) || insertAt < 0 || insertAt > chat.length) {
+      toastr.error(`无效楼层（范围 0~${chat.length}）`, "", { timeOut: 1800 });
+      return;
+    }
+    const role = content.find("#ih_mgr_insert_role").val();
+    let ctx;
+    try {
+      ctx = SillyTavern.getContext();
+    } catch (e) {
+      ctx = {};
+    }
+    const userName = ctx.name1 || "You";
+    const charName = ctx.name2 || "Character";
+    let newMsg;
+    if (role === "user") {
+      newMsg = {
+        name: userName,
+        is_user: true,
+        is_system: false,
+        mes: "",
+        send_date: Date.now(),
+        extra: {},
+      };
+    } else if (role === "char") {
+      newMsg = {
+        name: charName,
+        is_user: false,
+        is_system: false,
+        mes: "",
+        send_date: Date.now(),
+        extra: {},
+      };
+    } else {
+      newMsg = {
+        name: "",
+        is_user: false,
+        is_system: true,
+        mes: "",
+        send_date: Date.now(),
+        extra: { type: "narrator" },
+      };
+    }
+    chatUndoManager.save();
+    chat.splice(insertAt, 0, newMsg);
+    closeDialog();
+    try {
+      await executeSlashCommandsWithOptions("/forcesave");
+      await executeSlashCommandsWithOptions("/chat-reload");
+      toastr.success(`已在楼层 ${insertAt} 插入空白消息`, "", {
+        timeOut: 1500,
+      });
+      setTimeout(() => {
+        const chatEl = document.getElementById("chat");
+        if (!chatEl) return;
+        const mesEl = chatEl.querySelector(`.mes[mesid="${insertAt}"]`);
+        if (mesEl) {
+          scrollChatToElement(mesEl, "smooth", false);
+          setTimeout(() => {
+            const editBtn = $(mesEl).find(".mes_edit").first();
+            if (editBtn.length && editBtn.is(":visible")) {
+              editBtn.trigger("click");
+            }
+          }, 400);
+        }
+      }, 600);
+    } catch (e) {
+      console.error("快捷工具栏: 插入消息失败", e);
+      toastr.error("插入失败，请尝试撤回", "", { timeOut: 1500 });
     }
   });
 }
@@ -11661,6 +11832,16 @@ jQuery(async () => {
             color: inherit !important;
             visibility: visible !important;
         }
+        .ih-mgr-shared-list-area.ih-mgr-insert-mode .ih-mgr-msg-check {
+            display: none !important;
+        }
+        .ih-mgr-shared-list-area.ih-mgr-insert-mode #ih_mgr_select_all,
+        .ih-mgr-shared-list-area.ih-mgr-insert-mode #ih_mgr_invert,
+        .ih-mgr-shared-list-area.ih-mgr-insert-mode #ih_mgr_range_toggle,
+        .ih-mgr-shared-list-area.ih-mgr-insert-mode #ih_mgr_clear,
+        .ih-mgr-shared-list-area.ih-mgr-insert-mode #ih_mgr_count {
+            display: none !important;
+        }
     `;
   document.head.appendChild(hiddenCSS);
   extension_settings[extensionName] = extension_settings[extensionName] || {};
@@ -11793,6 +11974,11 @@ jQuery(async () => {
   if (!$("#input_chat_close_btn").length) {
     $("#input_helper_toolbar").append(
       '<button id="input_chat_close_btn" class="input-helper-btn" title="关闭聊天" data-norefocus="true"><i class="fa-solid fa-xmark"></i></button>',
+    );
+  }
+  if (!$("#input_quick_hide_btn").length) {
+    $("#input_helper_toolbar").append(
+      '<button id="input_quick_hide_btn" class="input-helper-btn" title="快速隐藏（连续点击依次隐藏更多消息）" data-norefocus="true"><i class="fa-solid fa-eye-low-vision"></i></button>',
     );
   }
 
@@ -12267,6 +12453,7 @@ jQuery(async () => {
       messageNavigation._currentAiIndex = -1;
       messageNavigation._lastNavTime = 0;
       messageNavigation._pendingJump = null;
+      quickHideController.reset();
       setupInputTracking();
       _lastFocusedEditable = null;
       _lastFocusedForScroll = null;

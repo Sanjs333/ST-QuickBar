@@ -6344,12 +6344,17 @@ function openHideManagerPanel() {
     }
     chatUndoManager.save();
     closeDialog();
-    const floors = [];
-    for (let i = hi; i >= lo; i--) floors.push(i);
-    await executeSlashCommandsWithOptions("/cut " + floors.join(" "));
-    toastr.success(`已删除 ${count} 条消息（可点撤回按钮还原）`, "", {
-      timeOut: 2000,
-    });
+    for (let i = hi; i >= lo; i--) chat.splice(i, 1);
+    try {
+      await executeSlashCommandsWithOptions("/forcesave");
+      await executeSlashCommandsWithOptions("/chat-reload");
+      toastr.success(`已删除 ${count} 条消息（可点撤回按钮还原）`, "", {
+        timeOut: 2000,
+      });
+    } catch (e) {
+      console.error("快捷工具栏: 删除失败", e);
+      toastr.error("删除失败，请尝试撤回", "", { timeOut: 1500 });
+    }
   });
 
   content.find("#ih_mgr_del_confirm").on("click", async () => {
@@ -6369,10 +6374,17 @@ function openHideManagerPanel() {
     chatUndoManager.save();
     closeDialog();
     const reversed = [...selected].sort((a, b) => b - a);
-    await executeSlashCommandsWithOptions("/cut " + reversed.join(" "));
-    toastr.success(`已删除 ${selected.length} 条消息（可点撤回按钮还原）`, "", {
-      timeOut: 2000,
-    });
+    for (const f of reversed) chat.splice(f, 1);
+    try {
+      await executeSlashCommandsWithOptions("/forcesave");
+      await executeSlashCommandsWithOptions("/chat-reload");
+      toastr.success(`已删除 ${selected.length} 条消息（可点撤回按钮还原）`, "", {
+        timeOut: 2000,
+      });
+    } catch (e) {
+      console.error("快捷工具栏: 删除失败", e);
+      toastr.error("删除失败，请尝试撤回", "", { timeOut: 1500 });
+    }
   });
 
   content.find("#ih_mgr_mv_confirm").on("click", async () => {

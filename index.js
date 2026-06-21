@@ -11405,16 +11405,24 @@ async function loadSettings() {
   chatUndoManager.startWatcher();
 }
 function setupToolbarSwipeCollapse() {
-  const toolbar = document.getElementById("input_helper_toolbar");
-  if (!toolbar) return;
   let startY = 0;
   let startX = 0;
   let tracking = false;
 
-  toolbar.addEventListener(
+  document.addEventListener(
     "touchstart",
     function (e) {
       if (!e.touches || !e.touches[0]) return;
+      const $t = $(e.target);
+      if (
+        $t.closest(
+          ".ih-floating-ball, .ih-floating-panel, .ih-folder-dropdown-portal, " +
+            ".ih-dialog-overlay, .ih-find-bar, dialog[open], .popup, #shadow_popup",
+        ).length
+      ) {
+        tracking = false;
+        return;
+      }
       startY = e.touches[0].clientY;
       startX = e.touches[0].clientX;
       tracking = true;
@@ -11422,23 +11430,27 @@ function setupToolbarSwipeCollapse() {
     { passive: true },
   );
 
-  toolbar.addEventListener(
+  document.addEventListener(
     "touchend",
     function (e) {
       if (!tracking) return;
       tracking = false;
+      if (getSettings().toolbarPinned) return;
+      const sendForm = document.getElementById("send_form");
+      if (!sendForm) return;
+      if (
+        !sendForm.classList.contains("textarea-focused") &&
+        !sendForm.classList.contains("ih-external-focused")
+      ) {
+        return;
+      }
       const t = e.changedTouches && e.changedTouches[0];
       if (!t) return;
       const dy = t.clientY - startY;
       const dx = t.clientX - startX;
-      // 向下滑超过 30px，且竖直幅度明显大于横向（30 和 1.5 都可按手感微调）
-      if (dy > 30 && Math.abs(dy) > Math.abs(dx) * 1.5) {
-        if (getSettings().toolbarPinned) return; // 固定展开时不收起
-        const sendForm = document.getElementById("send_form");
-        if (sendForm) {
-          sendForm.classList.remove("textarea-focused");
-          sendForm.classList.remove("ih-external-focused");
-        }
+      if (dy > 40 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+        sendForm.classList.remove("textarea-focused");
+        sendForm.classList.remove("ih-external-focused");
         const ae = document.activeElement;
         if (
           ae &&

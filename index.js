@@ -178,6 +178,11 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-eye-low-vision",
     text: null,
   },
+  sendStop: {
+    label: "发送/中止",
+    icon: "fa-solid fa-paper-plane",
+    text: null,
+  },
 };
 
 const ALL_BUTTON_KEYS = Object.keys(BUTTON_DEFS);
@@ -367,7 +372,8 @@ const defaultSettings = {
       k === "chatClose" ||
       k === "cursorLeft" ||
       k === "cursorRight" ||
-      k === "quickHide"
+      k === "quickHide" ||
+      k === "sendStop"
         ? false
         : true,
     ]),
@@ -424,6 +430,7 @@ const shortcutFunctionMap = {
   cursorLeft: () => doCursorLeft(),
   cursorRight: () => doCursorRight(),
   quickHide: () => quickHideController.execute(),
+  sendStop: () => sendStopController.execute(),
 };
 
 function ihBlurToDismissKeyboard(targetEl) {
@@ -897,6 +904,58 @@ const quickHideController = {
       ".ih-folder-dropdown-portal [data-button-key='quickHide'], " +
       ".ih-floating-panel [data-button-key='quickHide']";
     $(sel).toggleClass("input-helper-btn-active", this._counter > 0);
+  },
+};
+
+const sendStopController = {
+  _generating: false,
+
+  _isGeneratingNow() {
+    const stopBtn = document.getElementById("mes_stop");
+    return !!(stopBtn && $(stopBtn).is(":visible"));
+  },
+
+  setGenerating(v) {
+    this._generating = !!v;
+    this._update();
+    if (v) {
+      setTimeout(() => this._update(), 100);
+    }
+  },
+
+  execute() {
+    if (this._isGeneratingNow()) {
+      const stopBtn = document.getElementById("mes_stop");
+      if (stopBtn) {
+        stopBtn.click();
+      } else {
+        toastr.warning("找不到停止按钮", "", { timeOut: 1000 });
+      }
+    } else {
+      const sendBtn = document.getElementById("send_but");
+      if (sendBtn) {
+        sendBtn.click();
+      } else {
+        toastr.warning("找不到发送按钮", "", { timeOut: 1000 });
+      }
+    }
+  },
+
+  _update() {
+    const gen = this._isGeneratingNow();
+    const html = gen
+      ? '<i class="fa-solid fa-stop"></i>'
+      : '<i class="fa-solid fa-paper-plane"></i>';
+    const title = gen ? "停止生成" : "发送";
+    const sel =
+      "#input_send_stop_btn, " +
+      ".ih-folder-dropdown-portal [data-button-key='sendStop'], " +
+      ".ih-floating-panel [data-button-key='sendStop']";
+    $(sel).each(function () {
+      this.innerHTML = html;
+      this.setAttribute("title", title);
+      this.classList.toggle("input-helper-btn-active", gen);
+    });
   },
 };
 
@@ -4060,6 +4119,7 @@ function getButtonIdFromKey(key) {
     cursorLeft: "input_cursor_left_btn",
     cursorRight: "input_cursor_right_btn",
     quickHide: "input_quick_hide_btn",
+    sendStop: "input_send_stop_btn",
   };
   return map[key] || "";
 }
@@ -5226,13 +5286,12 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.9";
+const CHANGELOG_VERSION = "2.9.2";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.0</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.2</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>新增快速隐藏按钮</b>：点击一次隐藏最后一条消息，连续点击依次向前隐藏更多消息。5 秒无操作后自动重置计数，方便快速清理最近的消息上下文。</li>
-  <li><b>新增插入空白消息功能</b>：消息管理面板新增"插入"标签页，可在任意楼层之间插入空白消息，支持指定用户、AI角色或旁白角色。插入后自动跳转并进入编辑状态。</li>
-  <li><b>消息管理面板扩展</b>：新增第四个标签页"插入"，与隐藏/删除/移动并列，操作前自动保存快照以便撤回。</li>
+  <li><b>新增发送/中止二合一按钮</b>：空闲时显示发送图标，点击即发送消息；生成回复时自动变为高亮停止图标，点击则中断生成。状态实时跟随酒馆的生成状态，无需手动切换。该功能默认关闭，可在“按钮管理”中开启，建议与全屏插件的全屏模式搭配使用。</li>
+  <li><b>工具栏支持下滑收回</b>：移动端在工具栏上向下滑动即可收起工具栏并收回键盘，配合原有的上滑展开，开合更顺手。固定展开模式下不受影响。</li>
 </ul>
 `;
 
@@ -5307,7 +5366,7 @@ function openHelpPanel() {
 
 <h4 style="margin:8px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-info-circle"></i> 关于工具栏</h4>
 <p>工具栏默认在聚焦聊天输入框时展开，离开后自动收起。可在设置面板顶部开启<q>「工具栏固定展开」</q>让其始终保持展开状态。</p>
-<p>开启<q>「双栏模式」</q>后，工具栏分为上下两行：符号输入按钮一行，功能按钮一行，两行各自支持横向滚动。可在设置中切换两行的上下顺序。</p>
+<p><b>移动端开合手势</b>：点击输入框时工具栏会展开。在工具栏上向上滑动可展开、向下滑动可收起并收回键盘，方便单手操作。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-globe"></i> 外部输入框支持</h4>
 <p>工具栏不仅作用于聊天输入框。当光标位于以下位置时，符号按钮、撤回/重做、查找替换等功能会作用于该位置：</p>
@@ -5409,6 +5468,7 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-pencil"></i> <b>编辑最后消息</b>：自动滚动到底并进入编辑模 式，相当于自动点击该消息的编辑按钮</li>
     <li><i class="fa-solid fa-rotate"></i> <b>重新生成</b>：重新生成最后一条 AI 回复</li>
     <li><i class="fa-solid fa-shuffle"></i> <b>生成备选回复</b>：为最后一条 AI 消息生成一条新的备选回复（Swipe）</li>
+    <li><i class="fa-solid fa-paper-plane"></i> <b>发送 / 中止</b>：发送和停止合并成一个按钮。空闲时显示发送图标，点击等同于点酒馆原生发送键，把输入框内容发出去；AI 生成中时自动变成停止图标并高亮，点击即中止生成。图标会实时跟随酒馆的真实状态自动切换。默认关闭，可在<q>「按钮管理」</q>中开启。</li>
 </ul>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-trash-arrow-up"></i> 撤回删除</p>
@@ -6378,9 +6438,13 @@ function openHideManagerPanel() {
     try {
       await executeSlashCommandsWithOptions("/forcesave");
       await executeSlashCommandsWithOptions("/chat-reload");
-      toastr.success(`已删除 ${selected.length} 条消息（可点撤回按钮还原）`, "", {
-        timeOut: 2000,
-      });
+      toastr.success(
+        `已删除 ${selected.length} 条消息（可点撤回按钮还原）`,
+        "",
+        {
+          timeOut: 2000,
+        },
+      );
     } catch (e) {
       console.error("快捷工具栏: 删除失败", e);
       toastr.error("删除失败，请尝试撤回", "", { timeOut: 1500 });
@@ -11340,6 +11404,55 @@ async function loadSettings() {
   floatingPanelController.init();
   chatUndoManager.startWatcher();
 }
+function setupToolbarSwipeCollapse() {
+  const toolbar = document.getElementById("input_helper_toolbar");
+  if (!toolbar) return;
+  let startY = 0;
+  let startX = 0;
+  let tracking = false;
+
+  toolbar.addEventListener(
+    "touchstart",
+    function (e) {
+      if (!e.touches || !e.touches[0]) return;
+      startY = e.touches[0].clientY;
+      startX = e.touches[0].clientX;
+      tracking = true;
+    },
+    { passive: true },
+  );
+
+  toolbar.addEventListener(
+    "touchend",
+    function (e) {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+      const dy = t.clientY - startY;
+      const dx = t.clientX - startX;
+      // 向下滑超过 30px，且竖直幅度明显大于横向（30 和 1.5 都可按手感微调）
+      if (dy > 30 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+        if (getSettings().toolbarPinned) return; // 固定展开时不收起
+        const sendForm = document.getElementById("send_form");
+        if (sendForm) {
+          sendForm.classList.remove("textarea-focused");
+          sendForm.classList.remove("ih-external-focused");
+        }
+        const ae = document.activeElement;
+        if (
+          ae &&
+          (ae.tagName === "TEXTAREA" ||
+            ae.tagName === "INPUT" ||
+            ae.isContentEditable)
+        ) {
+          ae.blur();
+        }
+      }
+    },
+    { passive: true },
+  );
+}
 
 function setupTextareaFocusTracking() {
   const textarea = document.getElementById("send_textarea");
@@ -11993,6 +12106,11 @@ jQuery(async () => {
       '<button id="input_quick_hide_btn" class="input-helper-btn" title="快速隐藏（连续点击依次隐藏更多消息）" data-norefocus="true"><i class="fa-solid fa-eye-low-vision"></i></button>',
     );
   }
+  if (!$("#input_send_stop_btn").length) {
+    $("#input_helper_toolbar").append(
+      '<button id="input_send_stop_btn" class="input-helper-btn" title="发送" data-norefocus="true"><i class="fa-solid fa-paper-plane"></i></button>',
+    );
+  }
 
   ALL_BUTTON_KEYS.forEach((key) => {
     const btnId = getButtonIdFromKey(key);
@@ -12287,6 +12405,7 @@ jQuery(async () => {
   }
 
   setupTextareaFocusTracking();
+  setupToolbarSwipeCollapse();
   setupGlobalDropdownClose();
   setupGlobalFocusTracking();
   try {
@@ -12515,18 +12634,21 @@ jQuery(async () => {
       autoScrollController.setStreaming(true);
       streamScrollController.onStreamStart(type);
       scrollLockController.onGenerationStart(type);
+      sendStopController.setGenerating(true);
     });
 
     eventSource.on(event_types.GENERATION_ENDED, function () {
       autoScrollController.setStreaming(false);
       scrollLockController.onGenerationEnd();
       streamScrollController.onStreamEnd();
+      sendStopController.setGenerating(false);
     });
 
     eventSource.on(event_types.GENERATION_STOPPED, function () {
       autoScrollController.setStreaming(false);
       streamScrollController.onGenerationStopped();
       scrollLockController.release();
+      sendStopController.setGenerating(false);
     });
 
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, function () {

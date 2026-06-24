@@ -4652,6 +4652,17 @@ function doOpenQRAssistant() {
 }
 
 function doOpenChatU8() {
+  const modal = document.querySelector("#ch-settings-modal");
+  const isModalOpen = modal && $(modal).is(":visible");
+
+  if (isModalOpen) {
+    const closeBtn = document.querySelector("#ch-settings-modal-close");
+    if (closeBtn) {
+      closeBtn.click();
+      return;
+    }
+  }
+
   const selectors = [
     "#st-chatu8-fab",
     'button[title*="悬浮球"]',
@@ -5286,12 +5297,11 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.9.2";
+const CHANGELOG_VERSION = "2.9.3";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.2</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.3</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>新增发送/中止二合一按钮</b>：空闲时显示发送图标，点击即发送消息；生成回复时自动变为高亮停止图标，点击则中断生成。状态实时跟随酒馆的生成状态，无需手动切换。该功能默认关闭，可在“按钮管理”中开启，建议与全屏插件的全屏模式搭配使用。</li>
-  <li><b>工具栏支持下滑收回</b>：移动端在工具栏上向下滑动即可收起工具栏并收回键盘，配合原有的上滑展开，开合更顺手。固定展开模式下不受影响。</li>
+  <li><b>智绘姬面板一开关</b>：由于部分美化下智慧姬面板关闭按钮存在被遮挡的问题，现在点击插件按钮即可打开或关闭面板，无需手动找关闭按钮。</li>
 </ul>
 `;
 

@@ -221,6 +221,15 @@ function ensureFeatherLoaded() {
   document.head.appendChild(s);
 }
 
+function ensureBoxiconsLoaded() {
+  if (document.getElementById("ih-boxicons-css")) return;
+  const link = document.createElement("link");
+  link.id = "ih-boxicons-css";
+  link.rel = "stylesheet";
+  link.href = "https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css";
+  document.head.appendChild(link);
+}
+
 function getFeatherSendSvg() {
   try {
     if (window.feather && window.feather.icons && window.feather.icons.send) {
@@ -232,23 +241,6 @@ function getFeatherSendSvg() {
     }
   } catch (e) {}
   return '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-send"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 15 22 2"></polygon></svg>';
-}
-
-function getFeatherEditSvg() {
-  try {
-    if (
-      window.feather &&
-      window.feather.icons &&
-      window.feather.icons["edit-2"]
-    ) {
-      return window.feather.icons["edit-2"].toSvg({
-        width: "1em",
-        height: "1em",
-        "stroke-width": 2,
-      });
-    }
-  } catch (e) {}
-  return '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-edit-2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>';
 }
 
 let _lastFocusedEditable = null;
@@ -4182,7 +4174,7 @@ function getButtonDisplayHtml(key) {
     return getFeatherSendSvg();
   }
   if (key === "editLastMsg") {
-    return getFeatherEditSvg();
+    return '<i class="bx bxs-pencil"></i>';
   }
   const def = BUTTON_DEFS[key];
   if (!def) return "?";
@@ -9312,7 +9304,7 @@ function makeSettingsRow(key, opts) {
   let extraBtns = "";
   if (opts.isCustom) {
     extraBtns = `
-            <button class="custom-edit-btn" title="编辑" data-index="${opts.customIndex}">${getFeatherEditSvg()}</button>
+            <button class="custom-edit-btn" title="编辑" data-index="${opts.customIndex}"><i class="fa-solid fa-pen"></i></button>
             <button class="custom-delete-btn" title="删除" data-index="${opts.customIndex}"><i class="fa-solid fa-trash"></i></button>
         `;
   }
@@ -12025,6 +12017,7 @@ jQuery(async () => {
         }
     `;
   ensureFeatherLoaded();
+  ensureBoxiconsLoaded();
   extension_settings[extensionName] = extension_settings[extensionName] || {};
   const settingsHtml = await $.get(`${extensionFolderPath}/settings.html`);
   $("#extensions_settings2").prepend(settingsHtml);
@@ -12050,7 +12043,7 @@ jQuery(async () => {
 
   if (!$("#input_edit_last_msg_btn").length) {
     const editLastBtn = $(
-      `<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息" data-norefocus="true">${getFeatherEditSvg()}</button>`,
+      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息" data-norefocus="true"><i class="bx bxs-pencil"></i></button>',
     );
     $("#input_helper_toolbar").append(editLastBtn);
   }

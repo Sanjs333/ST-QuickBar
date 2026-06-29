@@ -205,10 +205,33 @@ const INPUT_BUTTON_KEYS = new Set([
   "cursorRight",
 ]);
 
-function isInputButton(key) {
-  if (INPUT_BUTTON_KEYS.has(key)) return true;
-  if (key.startsWith("custom_")) return true;
-  return false;
+function ensureFeatherLoaded() {
+  if (window.feather) return;
+  if (window._ihFeatherLoading) return;
+  window._ihFeatherLoading = true;
+  const s = document.createElement("script");
+  s.src =
+    "https://cdn.jsdelivr.net/npm/feather-icons@4.29.2/dist/feather.min.js";
+  s.async = true;
+  s.onload = function () {
+    try {
+      sendStopController._update();
+    } catch (e) {}
+  };
+  document.head.appendChild(s);
+}
+
+function getFeatherSendSvg() {
+  try {
+    if (window.feather && window.feather.icons && window.feather.icons.send) {
+      return window.feather.icons.send.toSvg({
+        width: "1em",
+        height: "1em",
+        "stroke-width": 2,
+      });
+    }
+  } catch (e) {}
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-send"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 15 22 2"></polygon></svg>';
 }
 
 let _lastFocusedEditable = null;
@@ -943,9 +966,7 @@ const sendStopController = {
 
   _update() {
     const gen = this._isGeneratingNow();
-    const html = gen
-      ? '<i class="fa-solid fa-stop"></i>'
-      : '<i class="fa-solid fa-paper-plane"></i>';
+    const html = gen ? '<i class="fa-solid fa-stop"></i>' : getFeatherSendSvg();
     const title = gen ? "停止生成" : "发送";
     const sel =
       "#input_send_stop_btn, " +
@@ -4140,6 +4161,9 @@ function getButtonDisplayHtml(key) {
     if (folder.display) return ihEscapeHtml(folder.display);
     return '<i class="fa-solid fa-folder"></i>';
   }
+  if (key === "sendStop") {
+    return getFeatherSendSvg();
+  }
   const def = BUTTON_DEFS[key];
   if (!def) return "?";
   if (def.icon) return `<i class="${def.icon}"></i>`;
@@ -5297,11 +5321,12 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.9.3";
+const CHANGELOG_VERSION = "2.9.4";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.3</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.4</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>智绘姬面板一开关</b>：由于部分美化下智慧姬面板关闭按钮存在被遮挡的问题，现在点击插件按钮即可打开或关闭面板，无需手动找关闭按钮。</li>
+  <li><b>发送图标更换</b>：发送/中止按钮图标改用 Feather Icons 的 send，避免全局美化css影响。</li>
+  <li><b>悬浮面板文件夹优化</b>：文件夹会根据屏幕空间自动在左侧或右侧展开，不再被悬浮栏遮挡；收起悬浮球会自动关闭文件夹面板。</li>
 </ul>
 `;
 
@@ -6955,7 +6980,7 @@ const floatingPanelController = {
     panel[0].style.removeProperty("justify-items");
 
     panel.find(".ih-fp-btn").each(function () {
-      const hasIcon = !!this.querySelector("i");
+      const hasIcon = !!this.querySelector("i, svg");
       const hasText = Array.from(this.childNodes).some(function (n) {
         return n.nodeType === 3 && n.textContent.trim().length > 0;
       });
@@ -7195,6 +7220,7 @@ const floatingPanelController = {
             if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
             this._updateBallImage();
             this._removeOutsideClose();
+            closeAllFolderDropdowns();
           }
         }
         e2.preventDefault();
@@ -7439,6 +7465,7 @@ const floatingPanelController = {
       this._panelEl.stop(true).fadeOut(50);
       this._removeOutsideClose();
       if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
+      closeAllFolderDropdowns();
     }
     this._updateBallImage();
   },
@@ -7459,7 +7486,7 @@ const floatingPanelController = {
     }
 
     el.style.setProperty("font-size", `${size}px`, "important");
-    var _hasIcon = el.querySelector("i");
+    var _hasIcon = el.querySelector("i, svg");
     var _hasText = Array.from(el.childNodes).some(function (n) {
       return n.nodeType === 3 && n.textContent.trim().length > 0;
     });
@@ -7819,6 +7846,7 @@ const floatingPanelController = {
       if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
       this._updateBallImage();
       this._removeOutsideClose();
+      closeAllFolderDropdowns();
     }
     const target = this._ballEl || this._panelEl;
     if (target) {
@@ -8987,54 +9015,34 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
   const ddHeight = dropdown.outerHeight();
   let left, top;
   if (fromFloating) {
-    const fpOrientation = getSettings().floatingPanel.orientation || "vertical";
-    const goVertical =
-      fpOrientation === "horizontal" ||
-      fpOrientation === "vertical-down" ||
-      fpOrientation === "wrap-down";
-    if (goVertical) {
-      left = btnRect.left + btnRect.width / 2 - ddWidth / 2;
-      const spaceBelow = window.innerHeight - btnRect.bottom - 8;
-      const spaceAbove = btnRect.top - 8;
-      if (spaceBelow >= ddHeight) {
-        top = btnRect.bottom + 6;
-      } else if (spaceAbove >= ddHeight) {
-        top = btnRect.top - ddHeight - 6;
-      } else if (spaceBelow >= spaceAbove) {
-        top = btnRect.bottom + 6;
-        if (top + ddHeight > window.innerHeight - 4) {
-          dropdown.css("max-height", window.innerHeight - top - 8 + "px");
-          dropdown.css("overflow-y", "auto");
-        }
-      } else {
-        top = Math.max(4, btnRect.top - ddHeight - 6);
-        if (top < 4) {
-          top = 4;
-          dropdown.css("max-height", btnRect.top - 12 + "px");
-          dropdown.css("overflow-y", "auto");
-        }
-      }
+    const panelEl =
+      floatingPanelController._panelEl && floatingPanelController._panelEl[0];
+    const anchorRect = panelEl ? panelEl.getBoundingClientRect() : btnRect;
+    const spaceLeft = anchorRect.left;
+    const spaceRight = window.innerWidth - anchorRect.right;
+    const canFitRight = spaceRight >= ddWidth + 12;
+    const canFitLeft = spaceLeft >= ddWidth + 12;
+    if (canFitRight && spaceRight >= spaceLeft) {
+      left = anchorRect.right + 6;
+    } else if (canFitLeft) {
+      left = anchorRect.left - ddWidth - 6;
+    } else if (canFitRight) {
+      left = anchorRect.right + 6;
+    } else if (spaceRight >= spaceLeft) {
+      left = window.innerWidth - ddWidth - 4;
     } else {
-      const spaceLeft = btnRect.left;
-      const spaceRight = window.innerWidth - btnRect.right;
-      if (spaceRight >= ddWidth + 8) {
-        left = btnRect.right + 6;
-      } else if (spaceLeft >= ddWidth + 8) {
-        left = btnRect.left - ddWidth - 6;
-      } else {
-        left = Math.max(
-          4,
-          Math.min(
-            window.innerWidth - ddWidth - 4,
-            btnRect.left + btnRect.width / 2 - ddWidth / 2,
-          ),
-        );
+      left = 4;
+    }
+    top = btnRect.top;
+    if (top + ddHeight > window.innerHeight - 4) {
+      top = window.innerHeight - ddHeight - 4;
+    }
+    if (top < 4) {
+      top = 4;
+      if (ddHeight > window.innerHeight - 8) {
+        dropdown.css("max-height", window.innerHeight - 8 + "px");
+        dropdown.css("overflow-y", "auto");
       }
-      top = btnRect.top;
-      if (top + ddHeight > window.innerHeight - 4) {
-        top = window.innerHeight - ddHeight - 4;
-      }
-      if (top < 4) top = 4;
     }
     if (left < 4) left = 4;
     if (left + ddWidth > window.innerWidth - 4)
@@ -9071,7 +9079,7 @@ function applyCJKNarrowToToolbar() {
   toolbar
     .querySelectorAll(".input-helper-btn, .custom-symbol-button")
     .forEach((btn) => {
-      const hasIcon = !!btn.querySelector("i");
+      const hasIcon = !!btn.querySelector("i, svg");
       const text = (btn.textContent || "").trim();
       const shouldNarrow = !hasIcon && narrowTextButtons.has(text);
 
@@ -11990,7 +11998,7 @@ jQuery(async () => {
             display: none !important;
         }
     `;
-  document.head.appendChild(hiddenCSS);
+  ensureFeatherLoaded();
   extension_settings[extensionName] = extension_settings[extensionName] || {};
   const settingsHtml = await $.get(`${extensionFolderPath}/settings.html`);
   $("#extensions_settings2").prepend(settingsHtml);
@@ -12130,7 +12138,7 @@ jQuery(async () => {
   }
   if (!$("#input_send_stop_btn").length) {
     $("#input_helper_toolbar").append(
-      '<button id="input_send_stop_btn" class="input-helper-btn" title="发送" data-norefocus="true"><i class="fa-solid fa-paper-plane"></i></button>',
+      `<button id="input_send_stop_btn" class="input-helper-btn" title="发送" data-norefocus="true">${getFeatherSendSvg()}</button>`,
     );
   }
 

@@ -234,6 +234,23 @@ function getFeatherSendSvg() {
   return '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-send"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 15 22 2"></polygon></svg>';
 }
 
+function getFeatherEditSvg() {
+  try {
+    if (
+      window.feather &&
+      window.feather.icons &&
+      window.feather.icons["edit-2"]
+    ) {
+      return window.feather.icons["edit-2"].toSvg({
+        width: "1em",
+        height: "1em",
+        "stroke-width": 2,
+      });
+    }
+  } catch (e) {}
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-edit-2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>';
+}
+
 let _lastFocusedEditable = null;
 let _savedRange = null;
 let _lastFocusedForScroll = null;
@@ -8777,6 +8794,12 @@ function syncDialogTheme(contentEl, options) {
         "input[type='text'], input[type='number'], textarea, .ih-hm-status, .ih-beauty-prompt-box, .shortcut-input",
       )
       .forEach(function (el) {
+        if (el.classList && el.classList.contains("ih-fp-transparent-input")) {
+          if (s.inputColor)
+            el.style.setProperty("color", s.inputColor, "important");
+          el.style.setProperty("background-color", "transparent", "important");
+          return;
+        }
         if (s.inputColor)
           el.style.setProperty("color", s.inputColor, "important");
         if (
@@ -9286,7 +9309,7 @@ function makeSettingsRow(key, opts) {
   let extraBtns = "";
   if (opts.isCustom) {
     extraBtns = `
-            <button class="custom-edit-btn" title="编辑" data-index="${opts.customIndex}"><i class="fa-solid fa-pen"></i></button>
+            <button class="custom-edit-btn" title="编辑" data-index="${opts.customIndex}">${getFeatherEditSvg()}</button>
             <button class="custom-delete-btn" title="删除" data-index="${opts.customIndex}"><i class="fa-solid fa-trash"></i></button>
         `;
   }
@@ -9771,10 +9794,10 @@ function renderFloatingPanelSettings() {
                     <span style="font-size:11px;flex-shrink:0;opacity:0.6;">px</span>
                 </div>
                 <div class="ih-hm-row" style="margin-top:6px;">
-                    <input type="text" id="ih_fp_ball_image" placeholder="自定义图片URL（支持 GIF / JPG / PNG）" value="${fp.ballImage || ""}" style="flex:1;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;" />
+                    <input type="text" id="ih_fp_ball_image" class="ih-fp-transparent-input" placeholder="自定义图片URL（支持 GIF / JPG / PNG）" value="${fp.ballImage || ""}" style="flex:1;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:transparent;color:var(--SmartThemeBodyColor);font-size:11px;" />
                 </div>
                 <div class="ih-hm-row" style="margin-top:4px;">
-                    <input type="text" id="ih_fp_ball_image_expanded" placeholder="展开状态图片URL（可选，留空则用上面的图片）" value="${fp.ballImageExpanded || ""}" style="flex:1;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;" />
+                    <input type="text" id="ih_fp_ball_image_expanded" class="ih-fp-transparent-input" placeholder="展开状态图片URL（可选，留空则用上面的图片）" value="${fp.ballImageExpanded || ""}" style="flex:1;padding:5px 8px;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;background:transparent;color:var(--SmartThemeBodyColor);font-size:11px;" />
                 </div>
                 <div class="ih-switch-row" style="margin-top:6px;">
                     <label class="ih-switch-label" style="font-size:12px;">

@@ -4181,6 +4181,9 @@ function getButtonDisplayHtml(key) {
   if (key === "sendStop") {
     return getFeatherSendSvg();
   }
+  if (key === "editLastMsg") {
+    return getFeatherEditSvg();
+  }
   const def = BUTTON_DEFS[key];
   if (!def) return "?";
   if (def.icon) return `<i class="${def.icon}"></i>`;
@@ -5342,7 +5345,7 @@ const CHANGELOG_VERSION = "2.9.4";
 const CHANGELOG_HTML = `
 <h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.4</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>发送图标更换</b>：发送/中止按钮图标改用 Feather Icons 的 send，避免全局美化css影响。</li>
+  <li><b>发送编辑图标更换</b>：发送/中止、编辑按钮图标改用 Feather Icons，避免全局美化css影响。</li>
   <li><b>悬浮面板文件夹优化</b>：文件夹会根据屏幕空间自动在左侧或右侧展开，不再被悬浮栏遮挡；收起悬浮球会自动关闭文件夹面板。</li>
 </ul>
 `;
@@ -12047,7 +12050,7 @@ jQuery(async () => {
 
   if (!$("#input_edit_last_msg_btn").length) {
     const editLastBtn = $(
-      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息" data-norefocus="true"><i class="fa-solid fa-pencil"></i></button>',
+      `<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息" data-norefocus="true">${getFeatherEditSvg()}</button>`,
     );
     $("#input_helper_toolbar").append(editLastBtn);
   }

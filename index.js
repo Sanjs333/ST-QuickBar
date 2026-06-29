@@ -205,6 +205,12 @@ const INPUT_BUTTON_KEYS = new Set([
   "cursorRight",
 ]);
 
+function isInputButton(key) {
+  if (INPUT_BUTTON_KEYS.has(key)) return true;
+  if (key.startsWith("custom_")) return true;
+  return false;
+}
+
 function ensureFeatherLoaded() {
   if (window.feather) return;
   if (window._ihFeatherLoading) return;

@@ -3078,6 +3078,102 @@ body.ih-find-active input::-moz-selection {
   opacity: 0.2;
 }
 
+.ih-mgr-msg-edit {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-left: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background-color: transparent;
+  color: var(--SmartThemeBodyColor);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  transition: all 0.15s ease;
+}
+
+.ih-mgr-msg-edit:hover {
+  opacity: 1;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 22%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 40%,
+    transparent
+  );
+  color: var(--SmartThemeQuoteColor, cornflowerblue);
+}
+
+.ih-mgr-msg-edit:active {
+  transform: scale(0.92);
+}
+
+.ih-mgr-msg-edit i {
+  font-size: 11px;
+}
+
+.ih-mgr-edit-content {
+  background-color: var(--SmartThemeBlurTintColor);
+  color: var(--SmartThemeBodyColor);
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 12px;
+  padding: 18px;
+  width: 480px; /* 弹窗宽度，想更宽改这里 */
+  max-width: 92%;
+  box-shadow: 0 12px 36px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.45));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ih-mgr-edit-content h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ih-mgr-edit-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 8px;
+  background-color: var(--SmartThemeBlurTintColor);
+  color: var(--SmartThemeBodyColor);
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: var(--mainFontFamily);
+  resize: vertical;
+  min-height: 460px; /* 文本框最小高度 */
+  max-height: 90vh;
+}
+
+.ih-mgr-edit-textarea:focus {
+  outline: none;
+  border-color: var(--SmartThemeQuoteColor, cornflowerblue);
+}
+
+.ih-mgr-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ih-mgr-edit-actions .ih-hm-btn {
+  margin-left: 0;
+}
+
 .ih-mgr-msg-floor {
   font-family: var(--monoFontFamily);
   font-size: 10.5px;
@@ -3090,7 +3186,7 @@ body.ih-find-active input::-moz-selection {
 .ih-mgr-msg-lead {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   flex-shrink: 0;
   margin-left: -2px;
 }

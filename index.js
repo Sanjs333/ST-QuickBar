@@ -5339,12 +5339,11 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.9.4";
+const CHANGELOG_VERSION = "2.9.5";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.4</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.5</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>发送编辑图标更换</b>：发送/中止、编辑按钮图标改用 Feather Icons，避免全局美化css影响。</li>
-  <li><b>悬浮面板文件夹优化</b>：文件夹会根据屏幕空间自动在左侧或右侧展开，不再被悬浮栏遮挡；收起悬浮球会自动关闭文件夹面板。</li>
+  <li><b>消息管理新增编辑楼层</b>：消息管理面板内，每条消息除跳转按钮外新增编辑按钮，点击即可直接修改该楼层内容，保存后聊天界面实时更新。</li>
 </ul>
 `;
 
@@ -5544,16 +5543,21 @@ function openHelpPanel() {
 <p style="margin:10px 0 4px;font-weight:600;">删除</p>
 <p>可勾选任意多条消息（包括不连续楼层），或按范围批量删除。删除前会自动保存快照，5 分钟内可用<q>「撤回删除」</q>恢复。</p>
 
+<p style="margin:10px 0 4px;font-weight:600;">移动</p>
+<p>勾选要移动的消息（可多条，包括不连续楼层），输入目标楼层号后点移动，被选中的消息会整体搬到目标位置。移动前自动保存快照，可使用<q>「撤回删除」</q>恢复。</p>
+<p>输入目标楼层时，列表里会用箭头标记显示「插入到这里」的落点，方便你确认位置。</p>
+
 <p style="margin:10px 0 4px;font-weight:600;">插入</p>
 <p>在指定楼层插入一条空白消息，支持选择角色身份（用户、AI角色、旁白/系统）。插入后自动跳转到该楼层并进入编辑状态，可以直接输入内容。操作前自动保存快照，可使用<q>「撤回删除」</q>恢复。</p>
 <p>典型用途：在对话中间补充遗漏的内容、手动添加旁白/系统指令、在特定位置注入上下文等。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">共享行为</p>
 <ul>
-    <li>三个标签页共用同一个工具栏：全选、反选、范围选择、清除</li>
+    <li>四个标签页共用同一个工具栏：全选、反选、范围选择、清除</li>
     <li>勾选状态和滚动位置在标签页之间保留，切换标签不会丢失</li>
     <li>输入楼层号时列表会实时高亮对应消息：单条用强色、范围用主题色、保留最近用绿色</li>
-    <li>每条消息前的箭头按钮可一键跳转到原聊天位置</li>
+    <li>每条消息的箭头按钮可一键跳转到原聊天位置</li>
+    <li>每条消息的编辑按钮（铅笔图标）可直接修改该楼层内容，保存后聊天界面实时更新，无需刷新或重进聊天</li>
     <li>消息倒序按钮可切换列表显示方向，方便从最新消息往前管理</li>
     <li>采用按需渲染，大量消息时也能保持流畅</li>
 </ul>
@@ -5694,6 +5698,89 @@ function openHelpPanel() {
     if (e.target === overlay[0]) closeDialog();
   });
   content.find("#ih_help_close").on("click", closeDialog);
+}
+function openMgrEditDialog(floor, onSaved) {
+  if (floor < 0 || floor >= chat.length) {
+    toastr.warning("楼层不存在", "", { timeOut: 1000 });
+    return;
+  }
+  const msg = chat[floor];
+  const sender = msg.name || (msg.is_user ? "User" : "AI");
+  const { overlay, escHandler } = createDialogOverlay();
+  const content = $(`
+    <div class="ih-mgr-edit-content">
+      <h3><i class="fa-solid fa-pen"></i> 编辑楼层 #${floor}<span style="font-size:12px;opacity:0.6;font-weight:normal;margin-left:6px;">${ihEscapeHtml(sender)}</span></h3>
+      <textarea id="ih_mgr_edit_textarea" class="ih-mgr-edit-textarea" placeholder="在此编辑消息内容..."></textarea>
+      <div class="ih-mgr-edit-actions">
+        <button class="ih-hm-btn" id="ih_mgr_edit_cancel">取消</button>
+        <button class="ih-hm-btn ih-hm-btn-ok" id="ih_mgr_edit_save"><i class="fa-solid fa-check"></i> 保存</button>
+      </div>
+    </div>
+  `);
+  content.find("#ih_mgr_edit_textarea").val(String(msg.mes || ""));
+  overlay.append(content);
+  syncDialogTheme(content[0]);
+  content.on("click", (e) => e.stopPropagation());
+  generateFaIconProtectionCSS();
+  const closeDialog = () => {
+    document.removeEventListener("keydown", escHandler, true);
+    overlay.remove();
+  };
+  overlay.off("click").on("click", (e) => {
+    if (e.target === overlay[0]) closeDialog();
+  });
+  content.find("#ih_mgr_edit_cancel").on("click", closeDialog);
+  content.find("#ih_mgr_edit_save").on("click", async () => {
+    if (floor < 0 || floor >= chat.length) {
+      toastr.error("楼层已不存在，保存失败", "", { timeOut: 1500 });
+      closeDialog();
+      return;
+    }
+    const newText = content.find("#ih_mgr_edit_textarea").val();
+    const m = chat[floor];
+    m.mes = newText;
+    if (
+      Array.isArray(m.swipes) &&
+      typeof m.swipe_id === "number" &&
+      m.swipe_id >= 0 &&
+      m.swipe_id < m.swipes.length
+    ) {
+      m.swipes[m.swipe_id] = newText;
+    }
+    try {
+      const ctx = SillyTavern.getContext();
+      if (typeof ctx.updateMessageBlock === "function") {
+        ctx.updateMessageBlock(floor, m);
+      } else {
+        const $mesText = $(`#chat .mes[mesid="${floor}"] .mes_text`);
+        if ($mesText.length && typeof ctx.messageFormatting === "function") {
+          const formatted = ctx.messageFormatting(
+            m.mes,
+            m.name,
+            m.is_system,
+            m.is_user,
+            floor,
+          );
+          $mesText.empty().append(formatted);
+        }
+      }
+    } catch (e) {
+      console.warn("快捷工具栏: 更新消息显示失败", e);
+    }
+    closeDialog();
+    try {
+      await executeSlashCommandsWithOptions("/forcesave");
+      toastr.success(`已保存楼层 #${floor}`, "", { timeOut: 1000 });
+    } catch (e) {
+      console.error("快捷工具栏: 保存楼层失败", e);
+      toastr.error("保存失败", "", { timeOut: 1500 });
+    }
+    if (typeof onSaved === "function") onSaved();
+  });
+  setTimeout(() => {
+    const ta = content.find("#ih_mgr_edit_textarea")[0];
+    if (ta) ta.focus();
+  }, 100);
 }
 
 function openHideManagerPanel() {
@@ -5991,6 +6078,7 @@ function openHideManagerPanel() {
         </span>
         <span class="ih-mgr-msg-sender">${sender}</span>
         <span class="ih-mgr-msg-preview">${preview}${truncate}</span>
+        <button class="ih-mgr-msg-edit" data-floor="${floor}" title="编辑此楼层"><i class="fa-solid fa-pen"></i></button>
         ${ghost}
       </div>
     `;
@@ -6165,11 +6253,26 @@ function openHideManagerPanel() {
     }
     toastr.info(`已跳转到楼层 ${floor}`, "", { timeOut: 1000 });
   });
+  content.on("click", ".ih-mgr-msg-edit", function (e) {
+    e.stopPropagation();
+    e.preventDefault();
+    const floor = parseInt($(this).data("floor"));
+    if (isNaN(floor)) return;
+    openMgrEditDialog(floor, () => {
+      sharedState.scrollTop = vlistEl.scrollTop;
+      refreshList();
+      setTimeout(() => {
+        vlistEl.scrollTop = sharedState.scrollTop;
+        renderVisible();
+      }, 0);
+    });
+  });
 
   rowsEl.addEventListener("click", function (e) {
     const item = e.target.closest(".ih-mgr-msg-item");
     if (!item) return;
     if (e.target.closest(".ih-mgr-msg-jump")) return;
+    if (e.target.closest(".ih-mgr-msg-edit")) return;
     if (sharedState.activeTab === "insert") return;
     const floor = parseInt(item.dataset.floor);
     if (isNaN(floor)) return;

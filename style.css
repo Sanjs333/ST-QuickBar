@@ -2950,6 +2950,225 @@ body.ih-find-active input::-moz-selection {
   letter-spacing: 0.3px;
 }
 
+/* ===== 消息管理工具栏：全部一行(5按钮+跳转+回顶回底靠左，已选靠右) ===== */
+.ih-mgr-toolbar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px; /* 离上面那排标签的距离，想更近就调更小，比如 2px */
+  margin-top: 0;
+}
+
+.ih-mgr-select-group {
+  order: 1;
+  margin-left: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ih-mgr-select-group::-webkit-scrollbar {
+  height: 0;
+  display: none;
+}
+
+.ih-mgr-nav-group {
+  order: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ih-mgr-toolbar .ih-mgr-count {
+  order: 3;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* 小盒子在 PC 上隐身，里面两组照旧归工具栏排队，PC 完全不受影响 */
+.ih-mgr-btn-scroll {
+  display: contents;
+}
+
+/* 跳转框和回顶回底瘦身，让一行塞得下 */
+.ih-mgr-jump-box,
+.ih-mgr-scroll-seg {
+  height: 24px; /* 整体高度，想更矮就调更小 */
+  flex-shrink: 0;
+}
+.ih-mgr-jump-input {
+  width: 34px; /* 楼层输入框宽度，嫌窄调大 */
+  font-size: 10px;
+}
+.ih-mgr-jump-go {
+  padding: 0 8px; /* 跳转按钮左右内边距 */
+}
+.ih-mgr-seg-btn {
+  padding: 0 8px; /* 回顶/回底按钮左右内边距 */
+}
+
+.ih-mgr-jump-box {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 7px;
+  overflow: hidden;
+  background-color: var(--SmartThemeBlurTintColor);
+  height: 26px; /* 整体高度，想更矮调小这个数字 */
+  box-sizing: border-box;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.ih-mgr-jump-box:focus-within {
+  border-color: var(--SmartThemeQuoteColor, cornflowerblue);
+  box-shadow: 0 0 0 2px
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 18%,
+      transparent
+    );
+}
+
+.ih-mgr-jump-input {
+  width: 44px; /* 楼层输入框宽度，嫌窄调大 */
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 4px !important;
+  height: 100%;
+  text-align: center;
+  color: var(--SmartThemeBodyColor);
+  font-size: 11px;
+  font-family: var(--monoFontFamily);
+}
+
+.ih-mgr-jump-input:focus {
+  outline: none;
+}
+
+.ih-mgr-jump-go {
+  border: none;
+  border-left: 1px solid
+    color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 14%,
+    transparent
+  );
+  color: var(--SmartThemeBodyColor);
+  cursor: pointer;
+  padding: 0 8px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  transition: background-color 0.15s;
+}
+
+.ih-mgr-jump-go:hover {
+  background: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 30%,
+    transparent
+  );
+}
+
+.ih-mgr-scroll-seg {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 7px;
+  overflow: hidden;
+  background-color: var(--SmartThemeBlurTintColor);
+  height: 26px; /* 与输入框同高 */
+  box-sizing: border-box;
+}
+
+.ih-mgr-seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--SmartThemeBodyColor);
+  cursor: pointer;
+  padding: 0 8px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  opacity: 0.8;
+  transition:
+    background-color 0.15s,
+    opacity 0.15s;
+}
+
+.ih-mgr-seg-btn:first-child {
+  border-right: 1px solid
+    color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent);
+}
+
+.ih-mgr-seg-btn:hover {
+  opacity: 1;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeBodyColor) 10%,
+    transparent
+  );
+}
+
+@media (max-width: 768px) {
+  .ih-mgr-toolbar {
+    flex-wrap: wrap; /* 允许计数单独占一行 */
+  }
+  /* 第一栏：已选x条独占一行，靠左（保持原样） */
+  .ih-mgr-toolbar .ih-mgr-count {
+    order: 1;
+    flex-basis: 100%;
+    width: 100%;
+    margin-left: 0;
+  }
+  /* 第二栏：盒子显形，5按钮+跳转回顶回底 同一行，窄了整条横滑不换行 */
+  .ih-mgr-btn-scroll {
+    display: flex;
+    order: 2;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    flex-basis: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .ih-mgr-btn-scroll::-webkit-scrollbar {
+    height: 0;
+    display: none;
+  }
+  /* 5个按钮：保持原始宽度不被压缩，让外层盒子统一负责横滑 */
+  .ih-mgr-select-group {
+    order: 1;
+    flex: 0 0 auto;
+    min-width: auto;
+    overflow-x: visible;
+    margin-left: 0;
+  }
+  /* 跳转框+回顶回底：紧跟在按钮后面，宽松时贴右，窄了就跟着一起滑 */
+  .ih-mgr-nav-group {
+    order: 2;
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+}
+
 .ih-mgr-list-wrap {
   display: flex;
   flex-direction: column;
@@ -3274,6 +3493,51 @@ body.ih-find-active input::-moz-selection {
     var(--SmartThemeQuoteColor, cornflowerblue) 50%,
     transparent
   );
+}
+
+.ih-mgr-msg-item.ih-mgr-jump-highlight {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 30%,
+    transparent
+  ) !important; /* 高亮底色深浅，想更淡改小30，想更浓改大 */
+  border-color: var(--SmartThemeQuoteColor, cornflowerblue) !important;
+  color: var(--SmartThemeBodyColor);
+  animation: ih-mgr-jump-flash 1.4s ease-in-out infinite; /* 呼吸速度，越大越慢 */
+}
+
+@keyframes ih-mgr-jump-flash {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px
+        color-mix(
+          in srgb,
+          var(--SmartThemeQuoteColor, cornflowerblue) 45%,
+          transparent
+        ),
+      0 0 10px
+        color-mix(
+          in srgb,
+          var(--SmartThemeQuoteColor, cornflowerblue) 40%,
+          transparent
+        );
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px
+        color-mix(
+          in srgb,
+          var(--SmartThemeQuoteColor, cornflowerblue) 70%,
+          transparent
+        ),
+      0 0 16px
+        color-mix(
+          in srgb,
+          var(--SmartThemeQuoteColor, cornflowerblue) 60%,
+          transparent
+        );
+  }
 }
 
 .ih-mgr-msg-item.ih-mgr-highlight-keep {

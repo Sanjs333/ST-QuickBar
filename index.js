@@ -72,7 +72,7 @@ const BUTTON_DEFS = {
   },
   editLastMsg: {
     label: "编辑最后消息",
-    icon: "fa-solid fa-pencil",
+    icon: "bi bi-pencil-fill",
     text: null,
   },
   generateSwipe: {
@@ -227,12 +227,13 @@ function ensureFeatherLoaded() {
   document.head.appendChild(s);
 }
 
-function ensureBoxiconsLoaded() {
-  if (document.getElementById("ih-boxicons-css")) return;
+function ensureBootstrapIconsLoaded() {
+  if (document.getElementById("ih-bootstrap-icons-css")) return;
   const link = document.createElement("link");
-  link.id = "ih-boxicons-css";
+  link.id = "ih-bootstrap-icons-css";
   link.rel = "stylesheet";
-  link.href = "https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css";
+  link.href =
+    "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css";
   document.head.appendChild(link);
 }
 
@@ -4180,7 +4181,7 @@ function getButtonDisplayHtml(key) {
     return getFeatherSendSvg();
   }
   if (key === "editLastMsg") {
-    return '<i class="bx bxs-pencil"></i>';
+    return '<i class="bi bi-pencil-fill"></i>';
   }
   const def = BUTTON_DEFS[key];
   if (!def) return "?";
@@ -5239,6 +5240,7 @@ function openBeautyPromptPanel() {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
   const closeDialog = () => {
+    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -5339,11 +5341,15 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.9.5";
+const CHANGELOG_VERSION = "2.9.6";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.5</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.6</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>消息管理新增编辑楼层</b>：消息管理面板内，每条消息除跳转按钮外新增编辑按钮，点击即可直接修改该楼层内容，保存后聊天界面实时更新。</li>
+  <li><b>修复查找替换</b>：补上了按钮的创建逻辑，在按钮管理里开启后即可正常出现在工具栏。</li>
+  <li><b>消息管理列表工具栏新增回顶/回底与楼层跳转</b>：列表上方工具栏新增消息容器内回到顶部、回到底部按钮，以及楼层跳转框。输入楼层号回车或点击跳转即可平滑滚动并把该消息居中显示，方便在长列表里快速定位。屏幕过窄时可整条左右滑动而。</li>
+  <li><b>修复悬浮球偶发卡死</b>：补充了触摸中断（touchcancel）的收尾处理，尝试解决拖拽被系统打断后无法点击、无法交互的问题。</li>
+  <li><b>修复消息移动/跳转到末尾</b>：移动目标楼层现可填到末尾位置；楼层跳转输入等于或超过总数时会正确滚动到底部。</li>
+  <li><b>按钮显示微调</b>：收窄了中文符号按钮（如「」『』）过度挤压的字间距，保留适当缝隙；纯文字按钮字号自动小一号，更协调。</li>
 </ul>
 `;
 
@@ -5399,6 +5405,7 @@ function openChangelogPanel() {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
   const closeDialog = () => {
+    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -5559,6 +5566,7 @@ function openHelpPanel() {
     <li>每条消息的箭头按钮可一键跳转到原聊天位置</li>
     <li>每条消息的编辑按钮（铅笔图标）可直接修改该楼层内容，保存后聊天界面实时更新，无需刷新或重进聊天</li>
     <li>消息倒序按钮可切换列表显示方向，方便从最新消息往前管理</li>
+    <li>列表工具栏内置回到顶部、回到底部按钮，以及楼层跳转框，输入楼层号回车或点跳转，列表会平滑滚动并把该消息居中显示</li>
     <li>采用按需渲染，大量消息时也能保持流畅</li>
 </ul>
 
@@ -5691,6 +5699,7 @@ function openHelpPanel() {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
   const closeDialog = () => {
+    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -5723,6 +5732,7 @@ function openMgrEditDialog(floor, onSaved) {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
   const closeDialog = () => {
+    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -5798,6 +5808,8 @@ function openHideManagerPanel() {
     activeTab: "hide",
     scrollTop: 0,
     reverseOrder: false,
+    jumpHighlight: null,
+    _jumpHlTimer: null,
   };
 
   const ROW_HEIGHT = 36;
@@ -5894,7 +5906,7 @@ function openHideManagerPanel() {
 
         <div class="ih-mgr-inline-row">
           <label class="ih-mgr-inline-label">目标楼层</label>
-          <input type="number" id="ih_mgr_mv_target" class="ih-mgr-input" placeholder="楼层号" min="0" max="${total - 1}" />
+          <input type="number" id="ih_mgr_mv_target" class="ih-mgr-input" placeholder="楼层号" min="0" max="${total}" />
           <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon ih-mgr-input-clear-btn" title="清除输入" data-clear-targets="ih_mgr_mv_target"><i class="fa-solid fa-eraser"></i></button>
           <div class="ih-mgr-inline-actions">
             <button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_mgr_mv_confirm"><i class="fa-solid fa-arrows-up-down"></i> 移动</button>
@@ -5927,14 +5939,26 @@ function openHideManagerPanel() {
       </div>
       <div class="ih-mgr-shared-list-area">
         <div class="ih-mgr-toolbar">
-          <div class="ih-mgr-btn-group">
+          <span class="ih-mgr-count" id="ih_mgr_count">已选 0 条</span>
+          <div class="ih-mgr-btn-scroll">
+          <div class="ih-mgr-btn-group ih-mgr-select-group">
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_reverse_order" title="消息倒序"><i class="fa-solid fa-arrow-down-wide-short"></i></button>
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_select_all" title="全选"><i class="fa-solid fa-check-double"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_invert" title="反选"><i class="fa-solid fa-rotate"></i></button>
+            <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_invert" title="反选"><i class="fa-solid fa-repeat"></i></button>
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_range_toggle" title="范围选择"><i class="fa-solid fa-arrows-left-right-to-line"></i></button>
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_clear" title="清除选择"><i class="fa-solid fa-eraser"></i></button>
           </div>
-          <span class="ih-mgr-count" id="ih_mgr_count">已选 0 条</span>
+          <div class="ih-mgr-nav-group">
+            <div class="ih-mgr-jump-box">
+              <input type="number" id="ih_mgr_jump_floor" class="ih-mgr-jump-input" placeholder="楼层" min="0" max="${total - 1}" />
+              <button class="ih-mgr-jump-go" id="ih_mgr_jump_go" title="跳转到该楼层"><i class="fa-solid fa-location-arrow"></i></button>
+            </div>
+            <div class="ih-mgr-scroll-seg">
+              <button class="ih-mgr-seg-btn" id="ih_mgr_scroll_top" title="回到顶部"><i class="fa-solid fa-angles-up"></i></button>
+              <button class="ih-mgr-seg-btn" id="ih_mgr_scroll_bottom" title="回到底部"><i class="fa-solid fa-angles-down"></i></button>
+            </div>
+          </div>
+          </div>
         </div>
 
         <div class="ih-mgr-list-wrap">
@@ -6046,7 +6070,7 @@ function openHideManagerPanel() {
     return false;
   }
 
-  function buildRowHtml(floor) {
+  function buildRowHtml(floor, hl) {
     const msg = chat[floor];
     if (!msg) return "";
     const rawMes = String(msg?.mes || "");
@@ -6056,7 +6080,7 @@ function openHideManagerPanel() {
     const truncate = rawMes.length > 60 ? "..." : "";
     const hidden = isMessageHidden(msg);
     const isChecked = sharedState.selected.has(floor);
-    const hl = getHighlightSet();
+    if (!hl) hl = getHighlightSet();
     const cls = ["ih-mgr-msg-item"];
     if (hidden) cls.push("ih-mgr-msg-is-hidden");
     if (isChecked) cls.push("ih-mgr-msg-checked");
@@ -6066,6 +6090,7 @@ function openHideManagerPanel() {
     if (hl.insertAbove === floor) cls.push("ih-mgr-move-insert-above");
     if (hl.insertBelow === floor) cls.push("ih-mgr-move-insert-below");
     if (sharedState.rangeStart === floor) cls.push("ih-mgr-range-start");
+    if (sharedState.jumpHighlight === floor) cls.push("ih-mgr-jump-highlight");
     const ghost = hidden
       ? '<span class="ih-mgr-msg-ghost"><i class="fa-solid fa-ghost"></i></span>'
       : "";
@@ -6094,10 +6119,11 @@ function openHideManagerPanel() {
     );
     spacerTopEl.style.height = startIdx * ROW_HEIGHT + "px";
     spacerBottomEl.style.height = (total - endIdx) * ROW_HEIGHT + "px";
+    const hl = getHighlightSet();
     let html = "";
     for (let i = startIdx; i < endIdx; i++) {
       const floor = sharedState.reverseOrder ? total - 1 - i : i;
-      html += buildRowHtml(floor);
+      html += buildRowHtml(floor, hl);
     }
     rowsEl.innerHTML = html;
   }
@@ -6132,14 +6158,13 @@ function openHideManagerPanel() {
   );
 
   function scrollListToFloor(floor) {
-    if (
-      floor === null ||
-      floor === undefined ||
-      isNaN(floor) ||
-      floor < 0 ||
-      floor >= total
-    )
+    if (floor === null || floor === undefined || isNaN(floor) || floor < 0)
       return;
+    if (floor >= total) {
+      const toBottom = sharedState.reverseOrder ? 0 : vlistEl.scrollHeight;
+      vlistEl.scrollTo({ top: toBottom, behavior: "smooth" });
+      return;
+    }
     const displayIndex = sharedState.reverseOrder ? total - 1 - floor : floor;
     const targetTop =
       displayIndex * ROW_HEIGHT - vlistEl.clientHeight / 2 + ROW_HEIGHT / 2;
@@ -6182,6 +6207,7 @@ function openHideManagerPanel() {
   }, 0);
 
   const closeDialog = () => {
+    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -6311,10 +6337,44 @@ function openHideManagerPanel() {
     refreshList();
   });
 
-  content.find("#ih_mgr_reverse_order").on("click", () => {
-    sharedState.reverseOrder = !sharedState.reverseOrder;
-    vlistEl.scrollTop = 0;
-    refreshList();
+  content.find("#ih_mgr_scroll_top").on("click", () => {
+    vlistEl.scrollTo({ top: 0, behavior: "smooth" });
+  });
+  content.find("#ih_mgr_scroll_bottom").on("click", () => {
+    vlistEl.scrollTo({ top: vlistEl.scrollHeight, behavior: "smooth" });
+  });
+  const _doMgrJumpFloor = () => {
+    const v = content.find("#ih_mgr_jump_floor").val();
+    if (v === "") {
+      toastr.warning("请输入要跳转的楼层号", "", { timeOut: 1000 });
+      return;
+    }
+    const f = parseInt(v);
+    if (isNaN(f) || f < 0 || f >= total) {
+      toastr.warning(`楼层超出范围（0~${total - 1}）`, "", { timeOut: 1200 });
+      return;
+    }
+    sharedState.jumpHighlight = f;
+    scrollListToFloor(f);
+    renderVisible();
+    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
+    sharedState._jumpHlTimer = setTimeout(() => {
+      sharedState.jumpHighlight = null;
+      if (
+        vlistEl &&
+        vlistEl.ownerDocument &&
+        vlistEl.ownerDocument.contains(vlistEl)
+      ) {
+        renderVisible();
+      }
+    }, 3000);
+  };
+  content.find("#ih_mgr_jump_go").on("click", _doMgrJumpFloor);
+  content.find("#ih_mgr_jump_floor").on("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      _doMgrJumpFloor();
+    }
   });
 
   content.find("#ih_mgr_select_all").on("click", () => {
@@ -6619,8 +6679,8 @@ function openHideManagerPanel() {
       return;
     }
     const target = parseInt(tv);
-    if (isNaN(target) || target < 0 || target >= total) {
-      toastr.error(`无效楼层（范围 0~${total - 1}）`, "", { timeOut: 1800 });
+    if (isNaN(target) || target < 0 || target > total) {
+      toastr.error(`无效楼层（范围 0~${total}）`, "", { timeOut: 1800 });
       return;
     }
     if (selected.length === 1 && selected[0] === target) {
@@ -6781,6 +6841,7 @@ async function doChatRename() {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
   const closeDialog = () => {
+    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -7058,7 +7119,22 @@ const floatingPanelController = {
     });
     const pos = fp.position;
     if (pos.x !== null && pos.y !== null) {
-      ball.css({ left: pos.x + "px", top: pos.y + "px" });
+      const _vw = window.innerWidth || 0;
+      const _vh = window.innerHeight || 0;
+      const _bs = fp.ballSize || 48;
+      let _px = pos.x;
+      let _py = pos.y;
+      if (_vw > 120 && _vh > 120) {
+        const _maxX = Math.max(0, _vw - _bs);
+        const _maxY = Math.max(0, _vh - _bs);
+        if (_px < 0 || _py < 0 || _px > _maxX || _py > _maxY) {
+          _px = Math.max(0, Math.min(_maxX, _px));
+          _py = Math.max(0, Math.min(_maxY, _py));
+          fp.position = { x: Math.round(_px), y: Math.round(_py) };
+          saveSettingsDebounced();
+        }
+      }
+      ball.css({ left: _px + "px", top: _py + "px" });
     } else {
       requestAnimationFrame(() => {
         const fallbackX = window.innerWidth - (fp.ballSize || 48) - 16;
@@ -7367,6 +7443,7 @@ const floatingPanelController = {
         document.removeEventListener("mouseup", onEnd, true);
         document.removeEventListener("touchmove", onMove, true);
         document.removeEventListener("touchend", onEnd, true);
+        document.removeEventListener("touchcancel", onEnd, true);
         el.removeClass("ih-dragging");
         const _orig = el.data("ih-orig-transition") || "";
         if (_orig) {
@@ -7411,6 +7488,7 @@ const floatingPanelController = {
         capture: true,
       });
       document.addEventListener("touchend", onEnd, true);
+      document.addEventListener("touchcancel", onEnd, true);
     };
     dragTarget.on("mousedown", onStart);
     dragTarget.on("touchstart", onStart);
@@ -8041,8 +8119,11 @@ const floatingPanelController = {
 
   _clampToViewport() {
     const vv = window.visualViewport;
-    const vw = (vv && vv.width) || window.innerWidth;
-    const vh = (vv && vv.height) || window.innerHeight;
+    const vw = (vv && vv.width) || window.innerWidth || 0;
+    const vh = (vv && vv.height) || window.innerHeight || 0;
+    if (!vw || !vh || vw < 120 || vh < 120) {
+      return;
+    }
     const target = this._ballEl || this._panelEl;
     if (target && target.length) {
       const el = target[0];
@@ -8052,9 +8133,11 @@ const floatingPanelController = {
         let left = parseFloat(el.style.left);
         let top = parseFloat(el.style.top);
         if (!isNaN(left) && !isNaN(top)) {
-          const newLeft = Math.max(0, Math.min(vw - w, left));
-          const newTop = Math.max(0, Math.min(vh - h, top));
-          if (newLeft !== left || newTop !== top) {
+          const maxLeft = Math.max(0, vw - w);
+          const maxTop = Math.max(0, vh - h);
+          const newLeft = Math.max(0, Math.min(maxLeft, left));
+          const newTop = Math.max(0, Math.min(maxTop, top));
+          if (Math.abs(newLeft - left) > 1 || Math.abs(newTop - top) > 1) {
             el.style.left = newLeft + "px";
             el.style.top = newTop + "px";
             const fp = getSettings().floatingPanel;
@@ -9212,7 +9295,11 @@ function applyCJKNarrowToToolbar() {
 
       if (shouldNarrow) {
         btn.dataset.cjkDone = "1";
-        btn.style.setProperty("letter-spacing", "-3px", "important");
+        btn.style.setProperty(
+          "letter-spacing",
+          "-1px",
+          "important",
+        ); /* 中文按钮字间距，想更紧调更负如-2px，想更松调0 */
         btn.style.setProperty("padding", "3px", "important");
         btn.style.setProperty("min-width", "0", "important");
       } else {
@@ -9232,8 +9319,17 @@ function applyToolbarButtonSize() {
   if (!toolbar) return;
   const pv = Math.max(2, Math.round(size * 0.25));
   const ph = Math.max(4, Math.round(size * 0.5));
+  const textSize = Math.max(
+    8,
+    size - 1,
+  ); /* 文字按钮小一号，想更小把 -2 调成 -3，想一样大改成 size */
   toolbar.querySelectorAll(".input-helper-btn").forEach((btn) => {
-    btn.style.setProperty("font-size", size + "px", "important");
+    const hasIcon = !!btn.querySelector("i, svg");
+    btn.style.setProperty(
+      "font-size",
+      (hasIcon ? size : textSize) + "px",
+      "important",
+    );
     btn.querySelectorAll("i").forEach((icon) => {
       icon.style.setProperty("font-size", size + "px", "important");
     });
@@ -12126,7 +12222,7 @@ jQuery(async () => {
         }
     `;
   ensureFeatherLoaded();
-  ensureBoxiconsLoaded();
+  ensureBootstrapIconsLoaded();
   extension_settings[extensionName] = extension_settings[extensionName] || {};
   const settingsHtml = await $.get(`${extensionFolderPath}/settings.html`);
   $("#extensions_settings2").prepend(settingsHtml);
@@ -12152,7 +12248,7 @@ jQuery(async () => {
 
   if (!$("#input_edit_last_msg_btn").length) {
     const editLastBtn = $(
-      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息" data-norefocus="true"><i class="bx bxs-pencil"></i></button>',
+      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息" data-norefocus="true"><i class="bi bi-pencil-fill"></i></button>',
     );
     $("#input_helper_toolbar").append(editLastBtn);
   }
@@ -12264,10 +12360,17 @@ jQuery(async () => {
       '<button id="input_quick_hide_btn" class="input-helper-btn" title="快速隐藏（连续点击依次隐藏更多消息）" data-norefocus="true"><i class="fa-solid fa-eye-low-vision"></i></button>',
     );
   }
-  if (!$("#input_send_stop_btn").length) {
+  if (!$("#input_find_replace_btn").length) {
     $("#input_helper_toolbar").append(
-      `<button id="input_send_stop_btn" class="input-helper-btn" title="发送" data-norefocus="true">${getFeatherSendSvg()}</button>`,
+      '<button id="input_find_replace_btn" class="input-helper-btn" title="查找替换" data-norefocus="true"><i class="fa-solid fa-magnifying-glass"></i></button>',
     );
+  }
+  if (!$("#input_send_stop_btn").length) {
+    const sendStopBtn = $(
+      '<button id="input_send_stop_btn" class="input-helper-btn" title="发送" data-norefocus="true"></button>',
+    );
+    sendStopBtn.html(getFeatherSendSvg());
+    $("#input_helper_toolbar").append(sendStopBtn);
   }
 
   ALL_BUTTON_KEYS.forEach((key) => {
@@ -12275,6 +12378,7 @@ jQuery(async () => {
     const btn = $(`#${btnId}`);
     if (btn.length) bindButtonAction(btn, key);
   });
+  sendStopController._update();
 
   $("#enable_input_helper").on("change", onEnableInputChange);
   $("#enable_confirm_dangerous").on("change", function () {

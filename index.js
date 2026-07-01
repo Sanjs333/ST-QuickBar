@@ -5240,7 +5240,6 @@ function openBeautyPromptPanel() {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
   const closeDialog = () => {
-    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -5405,7 +5404,6 @@ function openChangelogPanel() {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
   const closeDialog = () => {
-    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -5699,7 +5697,6 @@ function openHelpPanel() {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
   const closeDialog = () => {
-    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -5732,7 +5729,6 @@ function openMgrEditDialog(floor, onSaved) {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
   const closeDialog = () => {
-    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -6841,7 +6837,6 @@ async function doChatRename() {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
   const closeDialog = () => {
-    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };

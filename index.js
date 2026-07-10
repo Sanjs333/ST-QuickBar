@@ -183,6 +183,11 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-paper-plane",
     text: null,
   },
+  resetFloatingBall: {
+    label: "重置悬浮球位置",
+    icon: "fa-solid fa-arrows-to-dot",
+    text: null,
+  },
 };
 
 const ALL_BUTTON_KEYS = Object.keys(BUTTON_DEFS);
@@ -220,9 +225,13 @@ function ensureFeatherLoaded() {
     "https://cdn.jsdelivr.net/npm/feather-icons@4.29.2/dist/feather.min.js";
   s.async = true;
   s.onload = function () {
+    window._ihFeatherLoading = false;
     try {
       sendStopController._update();
     } catch (e) {}
+  };
+  s.onerror = function () {
+    window._ihFeatherLoading = false;
   };
   document.head.appendChild(s);
 }
@@ -375,7 +384,6 @@ const defaultSettings = {
     currentProfileIndex: -1,
     panelProfiles: [],
     currentPanelProfileIndex: -1,
-    collapsed: true,
     autoHide: false,
   },
   buttons: Object.fromEntries(
@@ -412,7 +420,8 @@ const defaultSettings = {
       k === "cursorLeft" ||
       k === "cursorRight" ||
       k === "quickHide" ||
-      k === "sendStop"
+      k === "sendStop" ||
+      k === "resetFloatingBall"
         ? false
         : true,
     ]),
@@ -470,6 +479,7 @@ const shortcutFunctionMap = {
   cursorRight: () => doCursorRight(),
   quickHide: () => quickHideController.execute(),
   sendStop: () => sendStopController.execute(),
+  resetFloatingBall: () => doResetFloatingBall(),
 };
 
 function ihBlurToDismissKeyboard(targetEl) {
@@ -947,19 +957,14 @@ const quickHideController = {
 };
 
 const sendStopController = {
-  _generating: false,
-
   _isGeneratingNow() {
     const stopBtn = document.getElementById("mes_stop");
     return !!(stopBtn && $(stopBtn).is(":visible"));
   },
 
-  setGenerating(v) {
-    this._generating = !!v;
+  setGenerating() {
     this._update();
-    if (v) {
-      setTimeout(() => this._update(), 100);
-    }
+    setTimeout(() => this._update(), 100);
   },
 
   execute() {
@@ -1590,18 +1595,18 @@ const streamScrollController = {
     }, 400);
   },
 
-  onMessageRendered() {},
-
   reset() {
     this._shouldScroll = false;
     this._isRealStream = false;
     this._chatLengthAtStart = 0;
+    this._lastMesLengthAtStart = 0;
   },
 
   onGenerationStopped() {
     this._shouldScroll = false;
     this._isRealStream = false;
     this._chatLengthAtStart = 0;
+    this._lastMesLengthAtStart = 0;
   },
 
   arm() {
@@ -2848,6 +2853,7 @@ const historyManager = {
     } else {
       const h = this._getExternalHistory(el, { fromInput: true });
       if (h.isPerformingUndoRedo) return;
+      clearTimeout(h.inputDebounceTimer);
       const text = el.value || "";
       const cursorPos = el.selectionStart || 0;
       if (h.pointer >= 0 && h.states[h.pointer].text === text) return;
@@ -3211,7 +3217,7 @@ const historyManager = {
     if (el === getMessageInput()[0]) return;
     if (el.isContentEditable) return;
 
-    const h = this._getExternalHistory(el, { fromBeforeInput: true });
+    const h = this._getExternalHistory(el);
     if (!h) return;
     if (h.isPerformingUndoRedo) return;
 
@@ -3257,7 +3263,6 @@ const historyManager = {
     }, 350);
   },
 
-  _updateButtonsRaf: null,
   updateButtons() {
     this._doUpdateButtons();
   },
@@ -3334,7 +3339,6 @@ const chatUndoManager = {
 
   _pushSnapshot(snapshot) {
     this._snapshots.push(snapshot);
-    this._lastSaveTime = Date.now();
     while (this._snapshots.length > this.MAX_SNAPSHOTS) {
       this._snapshots.shift();
       const t = this._autoClearTimers.shift();
@@ -3552,29 +3556,10 @@ const shiftMode = {
       this.activate();
     }
   },
-  _restoreTargetFocus() {
-    const target = this._cmView ? this._cmView.contentDOM : this._targetEl;
-    if (!target) return;
-
-    try {
-      const doc = target.ownerDocument || document;
-      if (!doc.contains(target)) return;
-
-      requestAnimationFrame(() => {
-        try {
-          if (!this.active) return;
-
-          if (this._cmView) {
-            this._cmView.focus();
-            return;
-          }
-
-          if (typeof target.focus === "function") {
-            target.focus({ preventScroll: true });
-          }
-        } catch (e) {}
-      });
-    } catch (e) {}
+  _syncButtonState() {
+    $(
+      "#input_shift_btn, .ih-folder-dropdown-portal [data-button-key='shift'], .ih-floating-panel [data-button-key='shift']",
+    ).toggleClass("input-helper-btn-active", this.active);
   },
 
   activate(silent = false) {
@@ -3609,7 +3594,10 @@ const shiftMode = {
         const win = doc.defaultView || window;
         const sel = win.getSelection();
         if (!sel || sel.rangeCount === 0) {
-          toastr.warning("无法获取光标位置", "", { timeOut: 1000 });
+          this.active = false;
+          this._syncButtonState();
+          if (!silent)
+            toastr.warning("无法获取光标位置", "", { timeOut: 1000 });
           return;
         }
         this._targetEl = target;
@@ -3743,9 +3731,7 @@ const shiftMode = {
       target.addEventListener("mouseup", this._handler);
       target.addEventListener("touchend", this._handler);
     }
-    $(
-      "#input_shift_btn, .ih-folder-dropdown-portal [data-button-key='shift'], .ih-floating-panel [data-button-key='shift']",
-    ).addClass("input-helper-btn-active");
+    this._syncButtonState();
     if (!silent) {
       if (this._hintToast) {
         toastr.clear(this._hintToast);
@@ -3803,9 +3789,7 @@ const shiftMode = {
     this._anchorNode = null;
     this._anchorOffset = 0;
     this._lastHandlerAt = 0;
-    $(
-      "#input_shift_btn, .ih-folder-dropdown-portal [data-button-key='shift'], .ih-floating-panel [data-button-key='shift']",
-    ).removeClass("input-helper-btn-active");
+    this._syncButtonState();
     if (!silent) {
       const oldToast = this._hintToast;
       this._hintToast = null;
@@ -4105,6 +4089,19 @@ function getSettings() {
   return extension_settings[extensionName];
 }
 
+function ihForceSaveSettings() {
+  try {
+    const ctx = SillyTavern.getContext();
+    if (ctx && typeof ctx.saveSettings === "function") {
+      ctx.saveSettings();
+      return;
+    }
+  } catch (e) {}
+  try {
+    executeSlashCommandsWithOptions("/forcesave");
+  } catch (e) {}
+}
+
 function getButtonIdFromKey(key) {
   if (key.startsWith("custom_"))
     return `input_custom_${key.replace("custom_", "")}_btn`;
@@ -4157,6 +4154,7 @@ function getButtonIdFromKey(key) {
     cursorRight: "input_cursor_right_btn",
     quickHide: "input_quick_hide_btn",
     sendStop: "input_send_stop_btn",
+    resetFloatingBall: "input_reset_floating_ball_btn",
   };
   return map[key] || "";
 }
@@ -4229,7 +4227,7 @@ function insertPair(left, right, cursorOffset) {
       cmView.focus();
       return;
     }
-    insertToContentEditable(target, left, right, cursorOffset);
+    insertToContentEditable(target, left, right);
     return;
   }
 
@@ -4276,12 +4274,12 @@ function insertPair(left, right, cursorOffset) {
   }, 0);
 }
 
-function insertToContentEditable(el, left, right, cursorOffset) {
+function insertToContentEditable(el, left, right) {
   const doc = el.ownerDocument || document;
   const win = doc.defaultView || window;
   el.focus();
   const sel = win.getSelection();
-  if (_savedRange) {
+  if (sel && _savedRange) {
     try {
       if (
         _savedRange.startContainer &&
@@ -5340,15 +5338,17 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.9.6";
+const CHANGELOG_VERSION = "2.9.7";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.6</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.7</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>修复查找替换</b>：补上了按钮的创建逻辑，在按钮管理里开启后即可正常出现在工具栏。</li>
-  <li><b>消息管理列表工具栏新增回顶/回底与楼层跳转</b>：列表上方工具栏新增消息容器内回到顶部、回到底部按钮，以及楼层跳转框。输入楼层号回车或点击跳转即可平滑滚动并把该消息居中显示，方便在长列表里快速定位。屏幕过窄时可整条左右滑动而。</li>
-  <li><b>修复悬浮球偶发卡死</b>：补充了触摸中断（touchcancel）的收尾处理，尝试解决拖拽被系统打断后无法点击、无法交互的问题。</li>
-  <li><b>修复消息移动/跳转到末尾</b>：移动目标楼层现可填到末尾位置；楼层跳转输入等于或超过总数时会正确滚动到底部。</li>
-  <li><b>按钮显示微调</b>：收窄了中文符号按钮（如「」『』）过度挤压的字间距，保留适当缝隙；纯文字按钮字号自动小一号，更协调。</li>
+  <li><b>消息管理 Token 统计</b>：点击顶部「Token」徽章统计总 Token 数，再点收起；开启后每条消息预览替换为 Token 数。</li>
+  <li><b>文件夹展开方向</b>：悬浮栏/工具栏文件夹支持横向/竖向排列切换。</li>
+  <li><b>文件夹展开保持（图钉）</b>：文件夹设置里新增图钉开关，钉住后展开的子菜单点击外部不会自动关闭，适合连续插入符号；不钉住则点外部自动收起。可按文件夹单独设置。</li>
+  <li><b>修复文件夹按钮误关编辑框</b>：修复文件夹内的按钮向外部编辑框（世界书、预设、角色卡等弹窗）插入内容时，可能误触发编辑框弹窗关闭的问题。</li>
+  <li><b>新增「重置悬浮球位置」按钮</b>：在按钮管理中开启并放入工具栏，一键将悬浮球/面板重置至默认位置，便于找回拖出屏幕的悬浮球。</li>
+  <li><b>空工具栏不再上浮</b>：按钮全在悬浮球时，点击输入框工具栏不再浮出；放回按钮即恢复。</li>
+  <li><b>选中模式优化</b>：修复移动端偶发失灵及编辑框切换后按钮状态不同步问题。</li>
 </ul>
 `;
 
@@ -5565,6 +5565,7 @@ function openHelpPanel() {
     <li>每条消息的编辑按钮（铅笔图标）可直接修改该楼层内容，保存后聊天界面实时更新，无需刷新或重进聊天</li>
     <li>消息倒序按钮可切换列表显示方向，方便从最新消息往前管理</li>
     <li>列表工具栏内置回到顶部、回到底部按钮，以及楼层跳转框，输入楼层号回车或点跳转，列表会平滑滚动并把该消息居中显示</li>
+        <li>顶部「Token」徽章：点击展开显示当前聊天总 Token 数（数字在上、tokens 在下），再次点击收起；开启后，每条消息临时显示该楼 Token 数</li>
     <li>采用按需渲染，大量消息时也能保持流畅</li>
 </ul>
 
@@ -5583,6 +5584,8 @@ function openHelpPanel() {
 <p>可以将按钮收纳到文件夹中，工具栏只显示一个折叠按钮，点击展开内部按钮。</p>
 <p><b>设置方式</b>：在设置中拖动按钮到文件夹上方可放入文件夹，从文件夹中的按钮拖出可移回主工具栏。也可以使用<q>「移出文件夹」</q>的小按钮快速移回。</p>
 <p>文件夹按钮放入悬浮面板后，展开子菜单会自动选择弹出方向并避开屏幕边缘。</p>
+<p><b>展开方向</b>：点击文件夹旁的方向按钮，可切换横向/竖向排列。子按钮少时横排节省空间，多时竖排便于查找。工具栏和悬浮面板中的文件夹均适用。</p>
+<p><b>展开保持（图钉）</b>：点击文件夹旁的图钉按钮，可切换该文件夹展开后的关闭方式。钉住（图钉高亮）后，展开的子菜单点击外部不会自动关闭，适合连续插入符号、括号等；不钉住时点击外部会自动收起，适合点一下就走的功能按钮。再次点击文件夹本身随时可手动关闭。此设置每个文件夹独立保存。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-circle-dot"></i> 悬浮面板</h4>
 
@@ -5668,6 +5671,8 @@ function openHelpPanel() {
   智绘姬面板
 </p>
 <p>点击 智绘姬面板 按钮可快速打开智绘姬生图插件面板（需要先安装并启用 <a href="https://github.com/damoshen123/st-chatu8" target="_blank">智绘姬</a> 插件）。</p>
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-arrows-to-dot"></i> 重置悬浮球位置</p>
+<p>将此按钮添加至工具栏后，点击即可将悬浮球/悬浮面板重置为默认位置，适用于悬浮球被拖出屏幕边缘无法找回的情况。功能与设置面板中的「重置位置」按钮相同。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-palette"></i> 美化指南</p>
 <p>在设置面板底部点击<q>「美化指南」</q>按钮，可获取一段提示词。将提示词复制给 AI 并填写配色风格描述，即可生成匹配主题的快捷工具栏美化 CSS。</p>
@@ -5806,6 +5811,8 @@ function openHideManagerPanel() {
     reverseOrder: false,
     jumpHighlight: null,
     _jumpHlTimer: null,
+    showToken: false,
+    tokenCache: new Map(),
   };
 
   const ROW_HEIGHT = 36;
@@ -5818,6 +5825,13 @@ function openHideManagerPanel() {
       <div class="ih-mgr-header">
         <h3><i class="fa-solid fa-ghost"></i> 消息管理</h3>
         <span class="ih-mgr-total-badge">${total} 条消息</span>
+        <span class="ih-mgr-total-badge ih-mgr-token-total" id="ih_mgr_token_total" title="点击计算 Token 数（再点收起）">
+          <span class="ih-mgr-token-idle"><i class="fa-solid fa-calculator"></i> Token</span>
+          <span class="ih-mgr-token-active">
+            <span class="ih-mgr-token-total-num">…</span>
+            <span class="ih-mgr-token-unit">tokens</span>
+          </span>
+        </span>
         <button class="ih-mgr-close-x" id="ih_mgr_close" title="关闭"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
@@ -5939,6 +5953,7 @@ function openHideManagerPanel() {
           <div class="ih-mgr-btn-scroll">
           <div class="ih-mgr-btn-group ih-mgr-select-group">
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_reverse_order" title="消息倒序"><i class="fa-solid fa-arrow-down-wide-short"></i></button>
+
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_select_all" title="全选"><i class="fa-solid fa-check-double"></i></button>
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_invert" title="反选"><i class="fa-solid fa-repeat"></i></button>
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_range_toggle" title="范围选择"><i class="fa-solid fa-arrows-left-right-to-line"></i></button>
@@ -6074,6 +6089,16 @@ function openHideManagerPanel() {
     const previewText = rawMes.replace(/\s+/g, " ").substring(0, 60);
     const preview = ihEscapeHtml(previewText);
     const truncate = rawMes.length > 60 ? "..." : "";
+    let previewHtml;
+    if (sharedState.showToken) {
+      if (sharedState.tokenCache.has(floor)) {
+        previewHtml = `<span class="ih-mgr-msg-preview ih-mgr-msg-token" data-floor="${floor}">${sharedState.tokenCache.get(floor)} tokens</span>`;
+      } else {
+        previewHtml = `<span class="ih-mgr-msg-preview ih-mgr-msg-token" data-floor="${floor}" data-pending="1">计算中…</span>`;
+      }
+    } else {
+      previewHtml = `<span class="ih-mgr-msg-preview">${preview}${truncate}</span>`;
+    }
     const hidden = isMessageHidden(msg);
     const isChecked = sharedState.selected.has(floor);
     if (!hl) hl = getHighlightSet();
@@ -6098,7 +6123,7 @@ function openHideManagerPanel() {
           <span class="ih-mgr-msg-floor">#${floor}</span>
         </span>
         <span class="ih-mgr-msg-sender">${sender}</span>
-        <span class="ih-mgr-msg-preview">${preview}${truncate}</span>
+        ${previewHtml}
         <button class="ih-mgr-msg-edit" data-floor="${floor}" title="编辑此楼层"><i class="fa-solid fa-pen"></i></button>
         ${ghost}
       </div>
@@ -6122,6 +6147,65 @@ function openHideManagerPanel() {
       html += buildRowHtml(floor, hl);
     }
     rowsEl.innerHTML = html;
+    if (sharedState.showToken) computeTokensForVisible();
+  }
+  function _getTokenizerCtx() {
+    try {
+      const ctx = SillyTavern.getContext();
+      if (ctx && typeof ctx.getTokenCountAsync === "function") return ctx;
+    } catch (e) {}
+    return null;
+  }
+
+  async function computeTokensForVisible() {
+    const ctx = _getTokenizerCtx();
+    if (!ctx) return;
+    const pending = rowsEl.querySelectorAll(
+      '.ih-mgr-msg-token[data-pending="1"]',
+    );
+    for (const el of pending) {
+      const floor = parseInt(el.dataset.floor);
+      if (isNaN(floor) || !chat[floor]) continue;
+      el.removeAttribute("data-pending");
+      try {
+        const count = await ctx.getTokenCountAsync(
+          String(chat[floor].mes || ""),
+        );
+        sharedState.tokenCache.set(floor, count);
+        if (el.ownerDocument && el.ownerDocument.contains(el)) {
+          el.textContent = count + " tokens";
+        }
+      } catch (e) {}
+    }
+  }
+
+  async function computeTotalTokens() {
+    const numEl = content.find(".ih-mgr-token-total-num");
+    const ctx = _getTokenizerCtx();
+    if (!ctx) {
+      numEl.text("不可用");
+      return;
+    }
+    numEl.html('<i class="fa-solid fa-spinner fa-spin"></i>');
+    let sum = 0;
+    for (let i = 0; i < total; i++) {
+      if (!sharedState.showToken) return;
+      const msg = chat[i];
+      if (!msg) continue;
+      let count;
+      if (sharedState.tokenCache.has(i)) {
+        count = sharedState.tokenCache.get(i);
+      } else {
+        try {
+          count = await ctx.getTokenCountAsync(String(msg.mes || ""));
+          sharedState.tokenCache.set(i, count);
+        } catch (e) {
+          count = 0;
+        }
+      }
+      sum += count;
+    }
+    if (sharedState.showToken) numEl.text(sum.toLocaleString());
   }
 
   let _renderRaf = null;
@@ -6133,9 +6217,13 @@ function openHideManagerPanel() {
       _renderRaf = null;
       _isRendering = true;
       const prevScrollTop = vlistEl.scrollTop;
-      renderVisible();
-      if (Math.abs(vlistEl.scrollTop - prevScrollTop) > 2) {
-        vlistEl.scrollTop = prevScrollTop;
+      try {
+        renderVisible();
+        if (Math.abs(vlistEl.scrollTop - prevScrollTop) > 2) {
+          vlistEl.scrollTop = prevScrollTop;
+        }
+      } catch (e) {
+        console.warn("快捷工具栏: 消息列表渲染失败", e);
       }
       requestAnimationFrame(() => {
         _isRendering = false;
@@ -6172,11 +6260,6 @@ function openHideManagerPanel() {
     content
       .find("#ih_mgr_reverse_order")
       .toggleClass("ih-mgr-btn-active", sharedState.reverseOrder);
-    const checkboxes = rowsEl.querySelectorAll("input[type=checkbox]");
-    let allCheckedInView = checkboxes.length > 0;
-    checkboxes.forEach((cb) => {
-      if (!cb.checked) allCheckedInView = false;
-    });
     const allBtn = content.find("#ih_mgr_select_all");
     if (sharedState.selected.size === total && total > 0) {
       allBtn
@@ -6372,7 +6455,21 @@ function openHideManagerPanel() {
       _doMgrJumpFloor();
     }
   });
-
+  content.find("#ih_mgr_reverse_order").on("click", () => {
+    sharedState.reverseOrder = !sharedState.reverseOrder;
+    sharedState.scrollTop = 0;
+    vlistEl.scrollTop = 0;
+    refreshList();
+  });
+  content.find("#ih_mgr_token_total").on("click", function () {
+    sharedState.showToken = !sharedState.showToken;
+    $(this).toggleClass("ih-token-on", sharedState.showToken);
+    renderVisible();
+    if (sharedState.showToken) {
+      computeTokensForVisible();
+      computeTotalTokens();
+    }
+  });
   content.find("#ih_mgr_select_all").on("click", () => {
     if (sharedState.selected.size === total) {
       sharedState.selected.clear();
@@ -6807,6 +6904,18 @@ function doChatClose() {
   const btn = document.getElementById("option_close_chat");
   if (btn) btn.click();
   else toastr.warning("找不到关闭聊天入口", "", { timeOut: 1200 });
+}
+
+function doResetFloatingBall() {
+  const fp = getSettings().floatingPanel;
+  if (!fp || !fp.enabled) {
+    toastr.warning("悬浮球/悬浮面板还没开启哦", "", { timeOut: 1500 });
+    return;
+  }
+  fp.position = { x: null, y: null };
+  saveSettingsDebounced();
+  floatingPanelController.refresh();
+  toastr.info("悬浮球位置已重置", "", { timeOut: 1000 });
 }
 
 async function doChatRename() {
@@ -7360,6 +7469,7 @@ const floatingPanelController = {
     panel
       .find("[data-button-key='findReplace']")
       .toggleClass("input-helper-btn-active", findReplaceController.active);
+    sendStopController._update();
     historyManager.updateButtons();
     generateFaIconProtectionCSS();
   },
@@ -7498,6 +7608,16 @@ const floatingPanelController = {
     this._expanded = !this._expanded;
     if (!this._panelEl || !this._ballEl) return;
     if (this._expanded) {
+      if (getSettings().floatingPanel.autoHide) {
+        this._autoHideVisible = true;
+        if (this._ballEl) {
+          this._ballEl.stop(true).css({
+            visibility: "",
+            "pointer-events": "",
+            opacity: "0.85",
+          });
+        }
+      }
       const panelDisplay = this._getPanelDisplayValue();
       this._panelEl.css({
         visibility: "hidden",
@@ -8010,12 +8130,16 @@ const floatingPanelController = {
   },
 
   _showAutoHide() {
-    if (this._autoHideVisible) return;
+    const wasVisible = this._autoHideVisible;
     this._autoHideVisible = true;
     const target = this._ballEl || this._panelEl;
     if (target) {
-      target.css({ visibility: "", "pointer-events": "" });
-      target.stop(true).animate({ opacity: 0.85 }, 200);
+      target.stop(true).css({ visibility: "", "pointer-events": "" });
+      if (wasVisible) {
+        target.css("opacity", "0.85");
+      } else {
+        target.animate({ opacity: 0.85 }, 200);
+      }
     }
     if (this._panelEl) {
       this._panelEl
@@ -8043,8 +8167,10 @@ const floatingPanelController = {
       closeAllFolderDropdowns();
     }
     const target = this._ballEl || this._panelEl;
+    const self = this;
     if (target) {
       target.stop(true).animate({ opacity: 0 }, 150, function () {
+        if (self._autoHideVisible) return;
         $(this).css({
           visibility: "hidden",
           "pointer-events": "none",
@@ -8456,7 +8582,7 @@ const floatingPanelController = {
       this._dialogObserver.disconnect();
       this._dialogObserver = null;
     }
-    clearTimeout(this._dialogDebounceTimer);
+    this._dialogDebounceTimer = null;
     if (this._currentDialogHost) {
       this._moveElementsToBody();
       this._currentDialogHost = null;
@@ -8686,7 +8812,6 @@ function bindRepeatableButton(btn, action) {
   let suppressMouseUntil = 0;
   let touchStartX = 0;
   let touchStartY = 0;
-  let touchMoved = false;
 
   const HOLD_DELAY = 350;
   const REPEAT_INTERVAL = 60;
@@ -8737,7 +8862,6 @@ function bindRepeatableButton(btn, action) {
         const t = e.touches[0];
         touchStartX = t.clientX;
         touchStartY = t.clientY;
-        touchMoved = false;
         suppressMouseUntil = Date.now() + 600;
         startRepeat();
       },
@@ -8749,7 +8873,6 @@ function bindRepeatableButton(btn, action) {
     const dx = Math.abs(t.clientX - touchStartX);
     const dy = Math.abs(t.clientY - touchStartY);
     if (dx > 10 || dy > 10) {
-      touchMoved = true;
       stopRepeat();
     }
   });
@@ -9160,14 +9283,26 @@ function closeAllFolderDropdowns() {
   portals.forEach((el) => el.remove());
 }
 
+function closeNonPersistFolderDropdowns() {
+  const portals = document.querySelectorAll(
+    ".ih-folder-dropdown-portal:not(.ih-folder-dropdown-persist)",
+  );
+  portals.forEach((el) => el.remove());
+}
+
 function openFolderDropdown(folderBtn, fi, fromFloating) {
   closeAllFolderDropdowns();
   const settings = getSettings();
   const buttons = settings.buttons;
   const folder = settings.folders[fi];
   if (!folder) return;
+  const layoutClass =
+    folder.dropdownLayout === "vertical" ? " ih-folder-dropdown-vertical" : "";
+  const persistClass = folder.dropdownPersist
+    ? " ih-folder-dropdown-persist"
+    : "";
   const dropdown = $(
-    `<div class="ih-folder-dropdown-portal" data-folder-index="${fi}"></div>`,
+    `<div class="ih-folder-dropdown-portal${layoutClass}${persistClass}" data-folder-index="${fi}"></div>`,
   );
   let floatingButtons;
   if (fromFloating) {
@@ -9215,6 +9350,17 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
   $("body").append(dropdown);
   syncToolbarButtonStyles(dropdown);
   syncDialogTheme(dropdown[0]);
+  [
+    "click",
+    "mousedown",
+    "mouseup",
+    "pointerdown",
+    "pointerup",
+    "touchstart",
+    "touchend",
+  ].forEach((evt) => {
+    dropdown[0].addEventListener(evt, (e) => e.stopPropagation(), false);
+  });
   const btnRect = folderBtn[0].getBoundingClientRect();
   const ddWidth = dropdown.outerWidth();
   const ddHeight = dropdown.outerHeight();
@@ -9317,7 +9463,7 @@ function applyToolbarButtonSize() {
   const textSize = Math.max(
     8,
     size - 1,
-  ); /* 文字按钮小一号，想更小把 -2 调成 -3，想一样大改成 size */
+  ); /* 文字按钮小一号，想更小把 -1 调成 -2 或 -3，想一样大改成 size */
   toolbar.querySelectorAll(".input-helper-btn").forEach((btn) => {
     const hasIcon = !!btn.querySelector("i, svg");
     btn.style.setProperty(
@@ -9334,6 +9480,34 @@ function applyToolbarButtonSize() {
     }
   });
   updateToolbarMaxHeight();
+}
+
+function toolbarHasVisibleButtons() {
+  const settings = getSettings();
+  const buttons = settings.buttons;
+  const order = settings.buttonOrder || [];
+  const folderedButtons = getFolderedButtons();
+  const floatingButtons = floatingPanelController.getFloatingButtons();
+  for (const key of order) {
+    if (key.startsWith("folder_")) {
+      const fi = parseInt(key.replace("folder_", ""));
+      const folder = (settings.folders || [])[fi];
+      if (!folder) continue;
+      if (buttons[key] === false) continue;
+      if (floatingButtons.has(key)) continue;
+      const visibleInFolder = (folder.buttons || []).some((bk) => {
+        if (buttons[bk] === false) return false;
+        if (floatingButtons.has(bk)) return false;
+        return true;
+      });
+      if (visibleInFolder) return true;
+      continue;
+    }
+    if (folderedButtons.has(key)) continue;
+    if (floatingButtons.has(key)) continue;
+    if (buttons[key] !== false) return true;
+  }
+  return false;
 }
 
 function buildToolbar() {
@@ -9477,6 +9651,11 @@ function buildToolbar() {
     "input-helper-btn-active",
     bottomNavController.active,
   );
+  if (settings.enabled && toolbarHasVisibleButtons()) {
+    toolbar.removeClass("input-helper-hidden");
+  } else {
+    toolbar.addClass("input-helper-hidden");
+  }
 }
 
 function toggleFolderCollapse(fi) {
@@ -10658,6 +10837,8 @@ function renderFolderSettings() {
                 <div class="ih-folder-setting-header">
                     <div class="menu_button menu_button_icon ih-folder-icon-btn" data-folder-index="${fi}" title="选择图标" style="cursor:pointer;">${iconDisplay}</div>
                     <input type="text" class="ih-folder-name-input" value="${safeFolderName}" placeholder="文件夹名称" data-folder-index="${fi}" />
+                    <div class="menu_button menu_button_icon ih-folder-layout-btn" data-folder-index="${fi}" title="展开方向（横向/竖向）" style="cursor:pointer;"><i class="fa-solid ${folder.dropdownLayout === "vertical" ? "fa-arrows-up-down" : "fa-arrows-left-right"}"></i></div>
+                    <div class="menu_button menu_button_icon ih-folder-persist-btn" data-folder-index="${fi}" title="${folder.dropdownPersist ? "展开后：点外部不会自动关闭（点击切换）" : "展开后：点外部会自动关闭（点击切换）"}" style="cursor:pointer;${folder.dropdownPersist ? "opacity:1;border-color:var(--SmartThemeQuoteColor,cornflowerblue);box-shadow:0 0 5px color-mix(in srgb,var(--SmartThemeQuoteColor,cornflowerblue) 55%,transparent);" : "opacity:0.5;"}"><i class="fa-solid fa-thumbtack"></i></div>
                     <div class="menu_button menu_button_icon ih-folder-delete-btn" data-folder-index="${fi}" title="删除文件夹" style="cursor:pointer;"><i class="fa-solid fa-trash"></i></div>
                 </div>
                 <div class="ih-folder-button-list" data-folder-index="${fi}">
@@ -10686,6 +10867,34 @@ function renderFolderSettings() {
       getSettings().folders[fi].name = $(this).val();
       saveSettingsDebounced();
       buildToolbar();
+    });
+  container
+    .off("click", ".ih-folder-layout-btn")
+    .on("click", ".ih-folder-layout-btn", function () {
+      const fi = parseInt($(this).data("folder-index"));
+      const folder = getSettings().folders[fi];
+      folder.dropdownLayout =
+        folder.dropdownLayout === "vertical" ? "horizontal" : "vertical";
+      saveSettingsDebounced();
+      renderFolderSettings();
+      closeAllFolderDropdowns();
+    });
+  container
+    .off("click", ".ih-folder-persist-btn")
+    .on("click", ".ih-folder-persist-btn", function () {
+      const fi = parseInt($(this).data("folder-index"));
+      const folder = getSettings().folders[fi];
+      folder.dropdownPersist = !folder.dropdownPersist;
+      saveSettingsDebounced();
+      renderFolderSettings();
+      closeAllFolderDropdowns();
+      toastr.info(
+        folder.dropdownPersist
+          ? "该文件夹展开后，点外部不会自动关闭"
+          : "该文件夹展开后，点外部会自动关闭",
+        "",
+        { timeOut: 1200 },
+      );
     });
   container
     .off("click", ".ih-folder-delete-btn")
@@ -11089,6 +11298,7 @@ function deleteCustomSymbol(index) {
   getSettings().shortcuts = newShortcuts;
   getSettings().buttonOrder = newOrder;
   saveSettingsDebounced();
+  ihForceSaveSettings();
   loadCustomSymbolButtons();
   renderFolderSettings();
   renderFloatingPanelSettings();
@@ -11199,6 +11409,7 @@ function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
       getSettings().customSymbols.push(symbolObj);
     }
     saveSettingsDebounced();
+    ihForceSaveSettings();
 
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
@@ -11223,6 +11434,7 @@ function onEnableInputChange() {
   if (value) {
     updateButtonVisibility();
     floatingPanelController.refresh();
+    chatUndoManager.startWatcher();
   } else {
     $("#input_helper_toolbar").addClass("input-helper-hidden");
     if (shiftMode.active) shiftMode.deactivate();
@@ -11232,6 +11444,7 @@ function onEnableInputChange() {
     scrollLockController.release();
     floatingPanelController.destroy();
     closeAllFolderDropdowns();
+    chatUndoManager.stopWatcher();
   }
 }
 
@@ -11260,8 +11473,7 @@ function setupShortcutInputs() {
         saveSettingsDebounced();
         return;
       }
-      if (keys.length <= 1 && ["Ctrl", "Alt", "Shift"].includes(keys[0]))
-        return;
+      if (keys.length <= 1) return;
       const shortcutString = keys.join("+");
       $(this).val(shortcutString);
       const sk = $(this).attr("id").replace("shortcut_", "");
@@ -11373,7 +11585,6 @@ function initSortable() {
           ui.item.removeClass("ih-child-row");
           ui.item.removeAttr("data-is-child");
           ui.item.find(".ih-child-remove-btn").remove();
-          ui.item.attr("data-just-dropped", "true");
           const newOrder = [];
           $("#integrated_button_settings")
             .children(".integrated-button-row")
@@ -11392,7 +11603,6 @@ function initSortable() {
           const key = $(this).attr("data-button-key");
           if (key) {
             newOrder.push(key);
-            $(this).removeAttr("data-just-dropped");
           }
         });
         getSettings().buttonOrder = newOrder;
@@ -11524,6 +11734,7 @@ async function loadSettings() {
   if (s.toolbarPinned === undefined) s.toolbarPinned = false;
   if (s.toolbarBtnSize === undefined) s.toolbarBtnSize = 12;
   if (s.pagingScrollRatio === undefined) s.pagingScrollRatio = 0.93;
+  if (s.autoScrollSpeed === undefined) s.autoScrollSpeed = 50;
   if (s.autoScrollToAiOnStream === undefined) s.autoScrollToAiOnStream = false;
   if (s.lockScrollOnGeneration === undefined) s.lockScrollOnGeneration = false;
   if (s.twoRowMode === undefined) s.twoRowMode = false;
@@ -11602,7 +11813,6 @@ async function loadSettings() {
     if (profile.orientation === undefined) profile.orientation = "vertical";
     if (!Array.isArray(profile.buttons)) profile.buttons = [];
   });
-  if (s.floatingPanel.collapsed === undefined) s.floatingPanel.collapsed = true;
   if (s.floatingPanel.autoHide === undefined) s.floatingPanel.autoHide = false;
   s.folders.forEach((folder) => {
     if (folder.collapsed === undefined) folder.collapsed = false;
@@ -11610,12 +11820,17 @@ async function loadSettings() {
     if (folder.icon === undefined) folder.icon = "";
     if (folder.display === undefined) folder.display = "";
     if (folder.name === undefined) folder.name = "文件夹";
+    if (folder.dropdownLayout === undefined)
+      folder.dropdownLayout = "horizontal";
+    if (folder.dropdownPersist === undefined) folder.dropdownPersist = false;
   });
   $("#enable_input_helper").prop("checked", s.enabled);
   $("#enable_confirm_dangerous").prop("checked", s.confirmDangerousActions);
   $("#enable_toolbar_pinned").prop("checked", s.toolbarPinned);
   $("#toolbar_btn_size").val(s.toolbarBtnSize);
   $("#toolbar_btn_size_input").val(s.toolbarBtnSize);
+  $("#auto_scroll_speed").val(s.autoScrollSpeed || 50);
+  $("#auto_scroll_speed_input").val(s.autoScrollSpeed || 50);
   $("#paging_scroll_ratio").val(
     Math.round((s.pagingScrollRatio || 0.93) * 100),
   );
@@ -11800,7 +12015,7 @@ function setupGlobalDropdownClose() {
       !$(e.target).closest(".ih-folder-btn").length &&
       !$(e.target).closest(".ih-folder-dropdown-portal").length
     ) {
-      closeAllFolderDropdowns();
+      closeNonPersistFolderDropdowns();
     }
   });
 }
@@ -12216,6 +12431,7 @@ jQuery(async () => {
             display: none !important;
         }
     `;
+  document.head.appendChild(hiddenCSS);
   ensureFeatherLoaded();
   ensureBootstrapIconsLoaded();
   extension_settings[extensionName] = extension_settings[extensionName] || {};
@@ -12368,6 +12584,13 @@ jQuery(async () => {
     $("#input_helper_toolbar").append(sendStopBtn);
   }
 
+  if (!$("#input_reset_floating_ball_btn").length) {
+    const resetBallBtn = $(
+      '<button id="input_reset_floating_ball_btn" class="input-helper-btn" title="重置悬浮球位置" data-norefocus="true"><i class="fa-solid fa-arrows-to-dot"></i></button>',
+    );
+    $("#input_helper_toolbar").append(resetBallBtn);
+  }
+
   ALL_BUTTON_KEYS.forEach((key) => {
     const btnId = getButtonIdFromKey(key);
     const btn = $(`#${btnId}`);
@@ -12516,6 +12739,16 @@ jQuery(async () => {
     saveSettingsDebounced();
     autoScrollController._speed = val;
   });
+  $(document).on("input change", "#auto_scroll_speed_input", function () {
+    let val = parseInt($(this).val());
+    if (isNaN(val)) val = 50;
+    val = Math.max(1, Math.min(1000, val));
+    $(this).val(val);
+    getSettings().autoScrollSpeed = val;
+    $("#auto_scroll_speed").val(val);
+    saveSettingsDebounced();
+    autoScrollController._speed = val;
+  });
 
   $(document).on("input", "#toolbar_btn_size", function () {
     let val = parseInt($(this).val());
@@ -12587,6 +12820,8 @@ jQuery(async () => {
       display: "",
       buttons: [],
       collapsed: false,
+      dropdownLayout: "horizontal",
+      dropdownPersist: false,
     });
     saveSettingsDebounced();
     renderFolderSettings();
@@ -12891,26 +13126,25 @@ jQuery(async () => {
       autoScrollController.setStreaming(true);
       streamScrollController.onStreamStart(type);
       scrollLockController.onGenerationStart(type);
-      sendStopController.setGenerating(true);
+      sendStopController.setGenerating();
     });
 
     eventSource.on(event_types.GENERATION_ENDED, function () {
       autoScrollController.setStreaming(false);
       scrollLockController.onGenerationEnd();
       streamScrollController.onStreamEnd();
-      sendStopController.setGenerating(false);
+      sendStopController.setGenerating();
     });
 
     eventSource.on(event_types.GENERATION_STOPPED, function () {
       autoScrollController.setStreaming(false);
       streamScrollController.onGenerationStopped();
       scrollLockController.release();
-      sendStopController.setGenerating(false);
+      sendStopController.setGenerating();
     });
 
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, function () {
       autoScrollController.setStreaming(false);
-      streamScrollController.onMessageRendered();
     });
 
     if (event_types.STREAM_TOKEN_RECEIVED) {

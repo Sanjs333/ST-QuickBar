@@ -215,6 +215,20 @@
   filter: grayscale(0.3);
 }
 
+.ih-folder-dropdown-portal.ih-folder-dropdown-vertical {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.ih-folder-dropdown-portal.ih-folder-dropdown-vertical .input-helper-btn {
+  width: auto;
+  justify-content: center;
+}
+
 @keyframes ih-dropdown-in {
   from {
     opacity: 0;
@@ -2250,77 +2264,6 @@ textarea.ih-replace-input::-webkit-scrollbar {
   background-color: transparent !important;
 }
 
-.ih-msd-list {
-  display: flex !important;
-  flex-direction: column !important;
-  flex-wrap: nowrap !important;
-  align-items: stretch !important;
-  gap: 2px;
-}
-
-.ih-msd-list > .ih-msd-item {
-  width: 100% !important;
-  max-width: 100% !important;
-  box-sizing: border-box !important;
-  flex: 0 0 auto !important;
-}
-
-.ih-msd-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background-color 0.15s;
-}
-
-.ih-msd-item:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--SmartThemeQuoteColor, cornflowerblue) 12%,
-    transparent
-  );
-}
-
-.ih-msd-item input[type="checkbox"] {
-  margin: 0;
-  flex-shrink: 0;
-}
-
-.ih-msd-floor {
-  font-family: var(--monoFontFamily);
-  opacity: 0.6;
-  flex-shrink: 0;
-  min-width: 32px;
-}
-
-.ih-msd-sender {
-  font-weight: 600;
-  flex-shrink: 0;
-  max-width: 60px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ih-msd-preview {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.8;
-}
-
-.ih-msd-hidden {
-  font-size: 10px;
-  opacity: 0.5;
-  flex-shrink: 0;
-  margin-left: auto;
-}
-
 body.ih-find-active textarea::selection,
 body.ih-find-active textarea::-moz-selection,
 body.ih-find-active #send_textarea::selection,
@@ -2916,19 +2859,6 @@ body.ih-find-active input::-moz-selection {
   font-size: 12.5px;
 }
 
-.ih-mgr-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 4px 2px 2px;
-  flex-wrap: wrap;
-  border-top: 1px dashed
-    color-mix(in srgb, var(--SmartThemeBorderColor) 35%, transparent);
-  padding-top: 9px;
-  margin-top: 3px;
-}
-
 .ih-mgr-btn-group {
   display: flex;
   gap: 5px;
@@ -2950,14 +2880,14 @@ body.ih-find-active input::-moz-selection {
   letter-spacing: 0.3px;
 }
 
-/* ===== 消息管理工具栏：全部一行(5按钮+跳转+回顶回底靠左，已选靠右) ===== */
+/* ===== 消息管理工具栏 ===== */
 .ih-mgr-toolbar {
   display: flex;
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
-  padding-top: 2px; /* 离上面那排标签的距离，想更近就调更小，比如 2px */
+  padding-top: 2px; /* 离上面那排标签的距离*/
   margin-top: 0;
 }
 
@@ -2992,28 +2922,11 @@ body.ih-find-active input::-moz-selection {
   flex-shrink: 0;
 }
 
-/* 小盒子在 PC 上隐身，里面两组照旧归工具栏排队，PC 完全不受影响 */
 .ih-mgr-btn-scroll {
   display: contents;
 }
 
-/* 跳转框和回顶回底瘦身，让一行塞得下 */
-.ih-mgr-jump-box,
-.ih-mgr-scroll-seg {
-  height: 24px; /* 整体高度，想更矮就调更小 */
-  flex-shrink: 0;
-}
-.ih-mgr-jump-input {
-  width: 34px; /* 楼层输入框宽度，嫌窄调大 */
-  font-size: 10px;
-}
-.ih-mgr-jump-go {
-  padding: 0 8px; /* 跳转按钮左右内边距 */
-}
-.ih-mgr-seg-btn {
-  padding: 0 8px; /* 回顶/回底按钮左右内边距 */
-}
-
+/* 跳转框和回顶回底 */
 .ih-mgr-jump-box {
   display: inline-flex;
   align-items: center;
@@ -3021,7 +2934,7 @@ body.ih-find-active input::-moz-selection {
   border-radius: 7px;
   overflow: hidden;
   background-color: var(--SmartThemeBlurTintColor);
-  height: 26px; /* 整体高度，想更矮调小这个数字 */
+  height: 26px; /* 整体高度 */
   box-sizing: border-box;
   transition:
     border-color 0.15s,
@@ -3039,7 +2952,7 @@ body.ih-find-active input::-moz-selection {
 }
 
 .ih-mgr-jump-input {
-  width: 44px; /* 楼层输入框宽度，嫌窄调大 */
+  width: 44px; /* 楼层输入框宽度*/
   border: none !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -3125,16 +3038,14 @@ body.ih-find-active input::-moz-selection {
 
 @media (max-width: 768px) {
   .ih-mgr-toolbar {
-    flex-wrap: wrap; /* 允许计数单独占一行 */
+    flex-wrap: wrap;
   }
-  /* 第一栏：已选x条独占一行，靠左（保持原样） */
   .ih-mgr-toolbar .ih-mgr-count {
     order: 1;
     flex-basis: 100%;
     width: 100%;
     margin-left: 0;
   }
-  /* 第二栏：盒子显形，5按钮+跳转回顶回底 同一行，窄了整条横滑不换行 */
   .ih-mgr-btn-scroll {
     display: flex;
     order: 2;
@@ -3153,7 +3064,6 @@ body.ih-find-active input::-moz-selection {
     height: 0;
     display: none;
   }
-  /* 5个按钮：保持原始宽度不被压缩，让外层盒子统一负责横滑 */
   .ih-mgr-select-group {
     order: 1;
     flex: 0 0 auto;
@@ -3161,7 +3071,6 @@ body.ih-find-active input::-moz-selection {
     overflow-x: visible;
     margin-left: 0;
   }
-  /* 跳转框+回顶回底：紧跟在按钮后面，宽松时贴右，窄了就跟着一起滑 */
   .ih-mgr-nav-group {
     order: 2;
     flex: 0 0 auto;
@@ -3344,7 +3253,7 @@ body.ih-find-active input::-moz-selection {
   border: 1px solid var(--SmartThemeBorderColor);
   border-radius: 12px;
   padding: 18px;
-  width: 480px; /* 弹窗宽度，想更宽改这里 */
+  width: 480px; /* 弹窗宽度 */
   max-width: 92%;
   box-shadow: 0 12px 36px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.45));
   box-sizing: border-box;
@@ -3503,7 +3412,7 @@ body.ih-find-active input::-moz-selection {
   ) !important; /* 高亮底色深浅，想更淡改小30，想更浓改大 */
   border-color: var(--SmartThemeQuoteColor, cornflowerblue) !important;
   color: var(--SmartThemeBodyColor);
-  animation: ih-mgr-jump-flash 1.4s ease-in-out infinite; /* 呼吸速度，越大越慢 */
+  animation: ih-mgr-jump-flash 1.4s ease-in-out infinite;
 }
 
 @keyframes ih-mgr-jump-flash {
@@ -3579,6 +3488,79 @@ body.ih-find-active input::-moz-selection {
     var(--SmartThemeEmColor, orange) 24%,
     transparent
   );
+}
+
+.ih-mgr-token-total {
+  margin-left: 2px !important; /* 和"X条消息"徽章之间的间距 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--SmartThemeQuoteColor, cornflowerblue);
+  cursor: pointer;
+  line-height: 1.1;
+  user-select: none;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+
+.ih-mgr-token-total:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 24%,
+    transparent
+  ); /* 悬停时底色*/
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 50%,
+    transparent
+  );
+}
+
+.ih-mgr-token-total.ih-token-on {
+  flex-direction: column;
+  gap: 0;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 26%,
+    transparent
+  );
+  border-color: var(--SmartThemeQuoteColor, cornflowerblue);
+}
+
+.ih-mgr-token-total .ih-mgr-token-active {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.05;
+}
+.ih-mgr-token-total.ih-token-on .ih-mgr-token-idle {
+  display: none;
+}
+.ih-mgr-token-total.ih-token-on .ih-mgr-token-active {
+  display: flex;
+}
+
+.ih-mgr-token-total-num {
+  font-family: var(--monoFontFamily);
+  font-weight: 600;
+  font-size: 13px; /* 数字大小 */
+}
+
+.ih-mgr-token-unit {
+  font-size: 9px; /* "tokens"小字大小 */
+  opacity: 0.7;
+  letter-spacing: 0.5px;
+}
+
+.ih-mgr-msg-token {
+  color: var(--SmartThemeQuoteColor, cornflowerblue) !important;
+  font-family: var(--monoFontFamily);
+  font-style: normal !important;
+  opacity: 0.95 !important;
 }
 
 .ih-mgr-msg-item.ih-mgr-range-start {

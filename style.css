@@ -1215,14 +1215,6 @@
   }
 }
 
-.prevent-keyboard-hide {
-  pointer-events: none;
-}
-
-.prevent-keyboard-hide > button {
-  pointer-events: auto;
-}
-
 .ih-hide-manager-content {
   background-color: var(--SmartThemeBlurTintColor);
   color: var(--SmartThemeBodyColor);
@@ -1319,22 +1311,6 @@
   border-color: var(--SmartThemeQuoteColor, cornflowerblue);
 }
 
-.ih-hm-input-wide {
-  width: 70px;
-}
-
-.ih-hm-sep {
-  font-size: 14px;
-  opacity: 0.5;
-  flex-shrink: 0;
-}
-
-.ih-hm-hint {
-  font-size: 11px;
-  opacity: 0.6;
-  flex-shrink: 0;
-}
-
 .ih-hm-btn {
   padding: 5px 14px;
   border: 1px solid var(--SmartThemeBorderColor);
@@ -1396,24 +1372,6 @@
     var(--SmartThemeQuoteColor, cornflowerblue) 30%,
     var(--SmartThemeBlurTintColor)
   );
-}
-
-.ih-hm-quick {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.ih-hm-btn-half {
-  flex: 1;
-  justify-content: center;
-  margin-left: 0;
-  padding: 7px 10px;
-}
-
-.ih-hm-close-row {
-  display: flex;
-  justify-content: flex-end;
 }
 
 .ih-hm-btn-close {
@@ -2867,27 +2825,28 @@ body.ih-find-active input::-moz-selection {
 
 .ih-mgr-count {
   font-size: 11px;
-  opacity: 0.7;
+  opacity: 0.85;
   font-family: var(--monoFontFamily);
   flex-shrink: 0;
-  padding: 3px 10px;
+  padding: 4px 11px;
   background-color: color-mix(
     in srgb,
-    var(--SmartThemeBodyColor) 5%,
+    var(--SmartThemeBodyColor) 6%,
     transparent
   );
-  border-radius: 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
+  border-radius: 12px;
   letter-spacing: 0.3px;
 }
 
-/* ===== 消息管理工具栏 ===== */
 .ih-mgr-toolbar {
   display: flex;
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
-  padding-top: 2px; /* 离上面那排标签的距离*/
+  padding-top: 2px;
   margin-top: 0;
 }
 
@@ -2921,12 +2880,16 @@ body.ih-find-active input::-moz-selection {
   margin-left: auto;
   flex-shrink: 0;
 }
+.ih-mgr-toolbar .ih-mgr-token-total {
+  order: 4;
+  margin-left: 6px !important;
+  flex-shrink: 0;
+}
 
 .ih-mgr-btn-scroll {
   display: contents;
 }
 
-/* 跳转框和回顶回底 */
 .ih-mgr-jump-box {
   display: inline-flex;
   align-items: center;
@@ -2934,7 +2897,7 @@ body.ih-find-active input::-moz-selection {
   border-radius: 7px;
   overflow: hidden;
   background-color: var(--SmartThemeBlurTintColor);
-  height: 26px; /* 整体高度 */
+  height: 26px;
   box-sizing: border-box;
   transition:
     border-color 0.15s,
@@ -2952,7 +2915,7 @@ body.ih-find-active input::-moz-selection {
 }
 
 .ih-mgr-jump-input {
-  width: 44px; /* 楼层输入框宽度*/
+  width: 44px;
   border: none !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -3002,7 +2965,7 @@ body.ih-find-active input::-moz-selection {
   border-radius: 7px;
   overflow: hidden;
   background-color: var(--SmartThemeBlurTintColor);
-  height: 26px; /* 与输入框同高 */
+  height: 26px;
   box-sizing: border-box;
 }
 
@@ -3042,9 +3005,14 @@ body.ih-find-active input::-moz-selection {
   }
   .ih-mgr-toolbar .ih-mgr-count {
     order: 1;
-    flex-basis: 100%;
-    width: 100%;
+    flex: 0 0 auto;
+    width: auto;
     margin-left: 0;
+  }
+  .ih-mgr-toolbar .ih-mgr-token-total {
+    order: 1;
+    margin-left: auto !important;
+    flex-shrink: 0;
   }
   .ih-mgr-btn-scroll {
     display: flex;
@@ -3253,7 +3221,7 @@ body.ih-find-active input::-moz-selection {
   border: 1px solid var(--SmartThemeBorderColor);
   border-radius: 12px;
   padding: 18px;
-  width: 480px; /* 弹窗宽度 */
+  width: 480px;
   max-width: 92%;
   box-shadow: 0 12px 36px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.45));
   box-sizing: border-box;
@@ -3283,7 +3251,7 @@ body.ih-find-active input::-moz-selection {
   line-height: 1.6;
   font-family: var(--mainFontFamily);
   resize: vertical;
-  min-height: 460px; /* 文本框最小高度 */
+  min-height: 460px;
   max-height: 90vh;
 }
 
@@ -3409,7 +3377,7 @@ body.ih-find-active input::-moz-selection {
     in srgb,
     var(--SmartThemeQuoteColor, cornflowerblue) 30%,
     transparent
-  ) !important; /* 高亮底色深浅，想更淡改小30，想更浓改大 */
+  ) !important;
   border-color: var(--SmartThemeQuoteColor, cornflowerblue) !important;
   color: var(--SmartThemeBodyColor);
   animation: ih-mgr-jump-flash 1.4s ease-in-out infinite;
@@ -3491,7 +3459,7 @@ body.ih-find-active input::-moz-selection {
 }
 
 .ih-mgr-token-total {
-  margin-left: 2px !important; /* 和"X条消息"徽章之间的间距 */
+  margin-left: 2px !important;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3510,7 +3478,7 @@ body.ih-find-active input::-moz-selection {
     in srgb,
     var(--SmartThemeQuoteColor, cornflowerblue) 24%,
     transparent
-  ); /* 悬停时底色*/
+  );
   border-color: color-mix(
     in srgb,
     var(--SmartThemeQuoteColor, cornflowerblue) 50%,
@@ -3547,11 +3515,11 @@ body.ih-find-active input::-moz-selection {
 .ih-mgr-token-total-num {
   font-family: var(--monoFontFamily);
   font-weight: 600;
-  font-size: 13px; /* 数字大小 */
+  font-size: 13px;
 }
 
 .ih-mgr-token-unit {
-  font-size: 9px; /* "tokens"小字大小 */
+  font-size: 9px;
   opacity: 0.7;
   letter-spacing: 0.5px;
 }

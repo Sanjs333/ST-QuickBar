@@ -5212,7 +5212,7 @@ function openBeautyPromptPanel() {
 
 ## 输出格式
 
-直接给我一段可以粘贴的 CSS 代码块，用 /*=== 快捷工具栏 ===*/ 开头做注释标记。`;
+直接给我一段可以粘贴的 CSS 代码块，用  开头做注释标记。`;
 
   const { overlay, escHandler } = createDialogOverlay();
   const content = $(`
@@ -5825,13 +5825,6 @@ function openHideManagerPanel() {
       <div class="ih-mgr-header">
         <h3><i class="fa-solid fa-ghost"></i> 消息管理</h3>
         <span class="ih-mgr-total-badge">${total} 条消息</span>
-        <span class="ih-mgr-total-badge ih-mgr-token-total" id="ih_mgr_token_total" title="点击计算 Token 数（再点收起）">
-          <span class="ih-mgr-token-idle"><i class="fa-solid fa-calculator"></i> Token</span>
-          <span class="ih-mgr-token-active">
-            <span class="ih-mgr-token-total-num">…</span>
-            <span class="ih-mgr-token-unit">tokens</span>
-          </span>
-        </span>
         <button class="ih-mgr-close-x" id="ih_mgr_close" title="关闭"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
@@ -5970,6 +5963,13 @@ function openHideManagerPanel() {
             </div>
           </div>
           </div>
+          <span class="ih-mgr-total-badge ih-mgr-token-total" id="ih_mgr_token_total" title="点击计算 Token 数（再点收起）">
+            <span class="ih-mgr-token-idle"><i class="fa-solid fa-calculator"></i> Token</span>
+            <span class="ih-mgr-token-active">
+              <span class="ih-mgr-token-total-num">…</span>
+              <span class="ih-mgr-token-unit">tokens</span>
+            </span>
+          </span>
         </div>
 
         <div class="ih-mgr-list-wrap">
@@ -9436,11 +9436,7 @@ function applyCJKNarrowToToolbar() {
 
       if (shouldNarrow) {
         btn.dataset.cjkDone = "1";
-        btn.style.setProperty(
-          "letter-spacing",
-          "-1px",
-          "important",
-        ); /* 中文按钮字间距，想更紧调更负如-2px，想更松调0 */
+        btn.style.setProperty("letter-spacing", "-1px", "important");
         btn.style.setProperty("padding", "3px", "important");
         btn.style.setProperty("min-width", "0", "important");
       } else {
@@ -9460,10 +9456,7 @@ function applyToolbarButtonSize() {
   if (!toolbar) return;
   const pv = Math.max(2, Math.round(size * 0.25));
   const ph = Math.max(4, Math.round(size * 0.5));
-  const textSize = Math.max(
-    8,
-    size - 1,
-  ); /* 文字按钮小一号，想更小把 -1 调成 -2 或 -3，想一样大改成 size */
+  const textSize = Math.max(8, size - 1);
   toolbar.querySelectorAll(".input-helper-btn").forEach((btn) => {
     const hasIcon = !!btn.querySelector("i, svg");
     btn.style.setProperty(

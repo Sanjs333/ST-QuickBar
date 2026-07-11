@@ -7504,7 +7504,7 @@ const floatingPanelController = {
         const ev2 = e2.touches ? e2.touches[0] : e2;
         const dx = ev2.clientX - startX;
         const dy = ev2.clientY - startY;
-        const threshold = e2.touches ? 10 : 5;
+        const threshold = e2.touches ? 16 : 5;
         if (!moved && Math.abs(dx) < threshold && Math.abs(dy) < threshold)
           return;
         if (!moved) {
@@ -13149,5 +13149,8 @@ jQuery(async () => {
     console.warn("快捷工具栏: 无法监听事件", e);
   }
   window.addEventListener("resize", updateToolbarMaxHeight);
+  eventSource.on("st_quickbar_reset_floating_ball", () =>
+    doResetFloatingBall(),
+  );
   console.log("快捷工具栏插件已加载");
 });

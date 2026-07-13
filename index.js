@@ -188,6 +188,11 @@ const BUTTON_DEFS = {
     icon: "fa-solid fa-arrows-to-dot",
     text: null,
   },
+  colorPicker: {
+    label: "取色器",
+    icon: "fa-solid fa-eye-dropper",
+    text: null,
+  },
 };
 
 const ALL_BUTTON_KEYS = Object.keys(BUTTON_DEFS);
@@ -421,7 +426,8 @@ const defaultSettings = {
       k === "cursorRight" ||
       k === "quickHide" ||
       k === "sendStop" ||
-      k === "resetFloatingBall"
+      k === "resetFloatingBall" ||
+      k === "colorPicker"
         ? false
         : true,
     ]),
@@ -480,6 +486,7 @@ const shortcutFunctionMap = {
   quickHide: () => quickHideController.execute(),
   sendStop: () => sendStopController.execute(),
   resetFloatingBall: () => doResetFloatingBall(),
+  colorPicker: () => openColorPicker(),
 };
 
 function ihBlurToDismissKeyboard(targetEl) {
@@ -698,6 +705,40 @@ function scrollChatToElement(element, behavior = "smooth", center = false) {
   });
 }
 
+function ihShouldIgnoreTapTarget(target, extraClosest) {
+  const $target = $(target);
+  if (
+    $target.is(
+      "a, button, input, textarea, select, label, video, audio, iframe",
+    ) ||
+    $target.is(
+      "[onclick], [contenteditable], [role='button'], [tabindex]:not([tabindex='-1'])",
+    )
+  ) {
+    return true;
+  }
+  let closestSel =
+    ".mes_buttons, .swipe_left, .swipe_right, .mes_edit_buttons, " +
+    ".ih-floating-ball, .ih-floating-panel, " +
+    ".qr--button, .qr--buttons";
+  if (extraClosest) closestSel += ", " + extraClosest;
+  if ($target.closest(closestSel).length) return true;
+  if ($target.is("summary") || $target.closest("summary").length) return true;
+  if (
+    $target.is(".reasoning-toggle-btn") ||
+    $target.closest(".reasoning-toggle-btn").length
+  ) {
+    return true;
+  }
+  if (
+    $target.is(".inline-drawer-toggle, .inline-drawer-header") ||
+    $target.closest(".inline-drawer-toggle, .inline-drawer-header").length
+  ) {
+    return true;
+  }
+  return false;
+}
+
 const messageNavigation = {
   _currentAiIndex: -1,
   _lastNavTime: 0,
@@ -708,9 +749,9 @@ const messageNavigation = {
       typeof includeUserNavController !== "undefined" &&
       includeUserNavController.active
     ) {
-      return $("#chat .mes");
+      return $("#chat .mes:visible");
     }
-    return $("#chat .mes[is_user='false']");
+    return $("#chat .mes[is_user='false']:visible");
   },
 
   _findCurrentVisibleAiIndex() {
@@ -1154,12 +1195,8 @@ const pagingController = {
       this._getVisibleHeight(scrollEl) *
       (getSettings().pagingScrollRatio || 0.93);
     const newTop = Math.max(0, scrollEl.scrollTop - pageHeight);
-    if (isTextLike) {
-      ihBlurToDismissKeyboard(scrollEl);
-      ihSmoothScrollTo(scrollEl, newTop, 180);
-    } else {
-      ihSmoothScrollTo(scrollEl, newTop, 180);
-    }
+    if (isTextLike) ihBlurToDismissKeyboard(scrollEl);
+    ihSmoothScrollTo(scrollEl, newTop, 180);
   },
 
   pageDown(forceEl) {
@@ -1172,12 +1209,8 @@ const pagingController = {
       (getSettings().pagingScrollRatio || 0.93);
     const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
     const newTop = Math.min(maxScroll, scrollEl.scrollTop + pageHeight);
-    if (isTextLike) {
-      ihBlurToDismissKeyboard(scrollEl);
-      ihSmoothScrollTo(scrollEl, newTop, 200);
-    } else {
-      ihSmoothScrollTo(scrollEl, newTop, 200);
-    }
+    if (isTextLike) ihBlurToDismissKeyboard(scrollEl);
+    ihSmoothScrollTo(scrollEl, newTop, 200);
   },
 
   _tapTouchStart: null,
@@ -1195,43 +1228,10 @@ const pagingController = {
     const self = this;
 
     function shouldIgnoreTapTarget(target) {
-      const $target = $(target);
-      if (
-        $target.is(
-          "a, button, input, textarea, select, label, video, audio, iframe",
-        ) ||
-        $target.is(
-          "[onclick], [contenteditable], [role='button'], [tabindex]:not([tabindex='-1'])",
-        )
-      ) {
-        return true;
-      }
-      if (
-        $target.closest(
-          ".mes_buttons, .swipe_left, .swipe_right, .mes_edit_buttons, " +
-            ".ih-floating-ball, .ih-floating-panel, " +
-            ".qr--button, .qr--buttons, " +
-            ".ih-folder-dropdown-portal, .ih-dialog-overlay, .ih-find-bar",
-        ).length
-      ) {
-        return true;
-      }
-      if ($target.is("summary") || $target.closest("summary").length) {
-        return true;
-      }
-      if (
-        $target.is(".reasoning-toggle-btn") ||
-        $target.closest(".reasoning-toggle-btn").length
-      ) {
-        return true;
-      }
-      if (
-        $target.is(".inline-drawer-toggle, .inline-drawer-header") ||
-        $target.closest(".inline-drawer-toggle, .inline-drawer-header").length
-      ) {
-        return true;
-      }
-      return false;
+      return ihShouldIgnoreTapTarget(
+        target,
+        ".ih-folder-dropdown-portal, .ih-dialog-overlay, .ih-find-bar",
+      );
     }
 
     function doTapPage(clientY, clientX) {
@@ -1410,6 +1410,10 @@ const autoScrollController = {
 
   resume() {
     if (this.active) {
+      if (this._rafId) {
+        cancelAnimationFrame(this._rafId);
+        this._rafId = null;
+      }
       this._paused = false;
       this._lastTimestamp = null;
       this._scrollAccum = 0;
@@ -1537,6 +1541,7 @@ const streamScrollController = {
   _ready: false,
   _armTimer: null,
   _chatLengthAtStart: 0,
+  _lastMesLengthAtStart: 0,
 
   onStreamStart(type) {
     if (!this._ready) {
@@ -1623,7 +1628,6 @@ const streamScrollController = {
 
 const scrollLockController = {
   _active: false,
-  _savedScrollTop: null,
   _chatEl: null,
   _wheelHandler: null,
   _touchHandler: null,
@@ -1637,7 +1641,6 @@ const scrollLockController = {
     if (!chatEl) return;
     this.release();
     this._chatEl = chatEl;
-    this._savedScrollTop = chatEl.scrollTop;
     this._active = true;
 
     try {
@@ -1701,7 +1704,6 @@ const scrollLockController = {
     }
     this._wheelHandler = null;
     this._touchHandler = null;
-    this._savedScrollTop = null;
     this._chatEl = null;
   },
 };
@@ -1714,10 +1716,8 @@ const findReplaceController = {
   _matches: [],
   _currentMatchIndex: -1,
   _searchTerm: "",
-  _madeReadonly: false,
   _caseSensitive: false,
   _collapsed: false,
-  _readonlyCleanupFn: null,
   _liveSearchHandler: null,
   _cmInputHandler: null,
 
@@ -1797,33 +1797,6 @@ const findReplaceController = {
       } catch (e) {}
       this._cmInputHandler = null;
     }
-    if (
-      this._readonlyCleanupFn &&
-      this._targetTextarea &&
-      this._targetTextarea.length
-    ) {
-      try {
-        this._targetTextarea[0].removeEventListener(
-          "mousedown",
-          this._readonlyCleanupFn,
-        );
-        this._targetTextarea[0].removeEventListener(
-          "touchstart",
-          this._readonlyCleanupFn,
-        );
-      } catch (e) {}
-      this._readonlyCleanupFn = null;
-    }
-    if (
-      this._madeReadonly &&
-      this._targetTextarea &&
-      this._targetTextarea.length
-    ) {
-      try {
-        this._targetTextarea[0].removeAttribute("readonly");
-      } catch (e) {}
-      this._madeReadonly = false;
-    }
     if (this._barObserver) {
       try {
         this._barObserver.disconnect();
@@ -1861,9 +1834,7 @@ const findReplaceController = {
     this._matches = [];
     this._currentMatchIndex = -1;
     this._searchTerm = "";
-    this._firstNavPending = false;
     this._lastHighlightPos = null;
-    this._lastHighlightLen = 0;
     this._updateActiveUI(false);
     document.body.classList.remove("ih-find-active");
   },
@@ -2113,93 +2084,15 @@ const findReplaceController = {
     bar.on("pointerdown", (e) => e.stopPropagation());
     bar.on("pointerup", (e) => e.stopPropagation());
     if (this._targetTextarea && this._targetTextarea.length) {
-      const self2 = this;
-      this._liveSearchHandler = function () {
-        if (!self2.active) return;
-        if (self2._isReplacing) return;
-        const oldPos = self2._lastHighlightPos;
-        self2._rebuildMatchesWithoutHighlight();
-        if (self2._matches.length <= 0) {
-          self2._currentMatchIndex = -1;
-          self2._updateCount();
-          return;
-        }
-        if (oldPos !== null && oldPos !== undefined) {
-          let foundIdx = -1;
-          for (let i = 0; i < self2._matches.length; i++) {
-            if (self2._matches[i] >= oldPos) {
-              foundIdx = i;
-              break;
-            }
-          }
-          if (foundIdx === -1) {
-            self2._currentMatchIndex = self2._matches.length - 1;
-          } else {
-            self2._currentMatchIndex = foundIdx;
-          }
-        } else {
-          self2._currentMatchIndex = -1;
-        }
-        self2._updateCount();
-      };
+      this._liveSearchHandler = this._makeLiveInputHandler();
       this._targetTextarea[0].addEventListener(
         "input",
         this._liveSearchHandler,
       );
     }
     if (this._cmView) {
-      const self3 = this;
-      this._cmInputHandler = function () {
-        if (!self3.active) return;
-        if (self3._isReplacing) return;
-        const oldPos = self3._lastHighlightPos;
-        self3._rebuildMatchesWithoutHighlight();
-        if (self3._matches.length <= 0) {
-          self3._currentMatchIndex = -1;
-          self3._updateCount();
-          return;
-        }
-        if (oldPos !== null && oldPos !== undefined) {
-          let foundIdx = -1;
-          for (let i = 0; i < self3._matches.length; i++) {
-            if (self3._matches[i] >= oldPos) {
-              foundIdx = i;
-              break;
-            }
-          }
-          if (foundIdx === -1) {
-            self3._currentMatchIndex = self3._matches.length - 1;
-          } else {
-            self3._currentMatchIndex = foundIdx;
-          }
-        } else {
-          self3._currentMatchIndex = -1;
-        }
-        self3._updateCount();
-      };
+      this._cmInputHandler = this._makeLiveInputHandler();
       this._cmView.contentDOM.addEventListener("input", this._cmInputHandler);
-    }
-    if (this._targetTextarea && this._targetTextarea.length) {
-      const self = this;
-      this._readonlyCleanupFn = function () {
-        if (
-          self._madeReadonly &&
-          self._targetTextarea &&
-          self._targetTextarea.length
-        ) {
-          self._targetTextarea[0].removeAttribute("readonly");
-          self._madeReadonly = false;
-        }
-      };
-      this._targetTextarea[0].addEventListener(
-        "mousedown",
-        this._readonlyCleanupFn,
-      );
-      this._targetTextarea[0].addEventListener(
-        "touchstart",
-        this._readonlyCleanupFn,
-        { passive: true },
-      );
     }
     const self = this;
     this._barObserver = new MutationObserver(() => {
@@ -2279,6 +2172,53 @@ const findReplaceController = {
     document.addEventListener("focusin", this._focusStealGuard, true);
   },
 
+  _makeLiveInputHandler() {
+    const self = this;
+    return function () {
+      if (!self.active) return;
+      if (self._isReplacing) return;
+      const oldPos = self._lastHighlightPos;
+      self._rebuildMatchesWithoutHighlight();
+      if (self._matches.length <= 0) {
+        self._currentMatchIndex = -1;
+        self._updateCount();
+        return;
+      }
+      if (oldPos !== null && oldPos !== undefined) {
+        let foundIdx = -1;
+        for (let i = 0; i < self._matches.length; i++) {
+          if (self._matches[i] >= oldPos) {
+            foundIdx = i;
+            break;
+          }
+        }
+        self._currentMatchIndex =
+          foundIdx === -1 ? self._matches.length - 1 : foundIdx;
+      } else {
+        self._currentMatchIndex = -1;
+      }
+      self._updateCount();
+    };
+  },
+
+  _scanMatches(text, term) {
+    const searchText = this._caseSensitive ? text : text.toLowerCase();
+    const searchTerm = this._caseSensitive ? term : term.toLowerCase();
+    const matches = [];
+    const MAX_MATCHES = 10000;
+    let truncated = false;
+    let pos = 0;
+    while ((pos = searchText.indexOf(searchTerm, pos)) !== -1) {
+      matches.push(pos);
+      pos += searchTerm.length;
+      if (matches.length >= MAX_MATCHES) {
+        truncated = true;
+        break;
+      }
+    }
+    return { matches, truncated };
+  },
+
   _doSearch() {
     if (this._isReplacing) return;
     try {
@@ -2350,23 +2290,12 @@ const findReplaceController = {
     const text = this._cmView
       ? this._cmView.state.doc.toString()
       : this._targetTextarea.val();
-    const searchText = this._caseSensitive ? text : text.toLowerCase();
-    const searchTerm = this._caseSensitive ? term : term.toLowerCase();
-    let pos = 0;
-    const MAX_MATCHES = 10000;
-    let truncated = false;
-    while ((pos = searchText.indexOf(searchTerm, pos)) !== -1) {
-      this._matches.push(pos);
-      pos += searchTerm.length;
-      if (this._matches.length >= MAX_MATCHES) {
-        truncated = true;
-        break;
-      }
-    }
-    if (truncated) {
+    const _scan = this._scanMatches(text, term);
+    this._matches = _scan.matches;
+    if (_scan.truncated) {
       try {
         toastr.warning(
-          `匹配项太多，只显示前 ${MAX_MATCHES} 个，建议输入更具体的关键词`,
+          `匹配项太多，只显示前 10000 个，建议输入更具体的关键词`,
           "",
           { timeOut: 2500 },
         );
@@ -2374,7 +2303,6 @@ const findReplaceController = {
     }
     if (this._matches.length > 0) {
       this._currentMatchIndex = -1;
-      this._firstNavPending = false;
       this._hideNoMatchHint();
     } else if (term && this._barEl) {
       this._showNoMatchHint();
@@ -2398,15 +2326,7 @@ const findReplaceController = {
     const text = this._cmView
       ? this._cmView.state.doc.toString()
       : this._targetTextarea.val();
-    const searchText = this._caseSensitive ? text : text.toLowerCase();
-    const searchTerm = this._caseSensitive ? term : term.toLowerCase();
-    let pos = 0;
-    const MAX_MATCHES = 10000;
-    while ((pos = searchText.indexOf(searchTerm, pos)) !== -1) {
-      this._matches.push(pos);
-      pos += searchTerm.length;
-      if (this._matches.length >= MAX_MATCHES) break;
-    }
+    this._matches = this._scanMatches(text, term).matches;
     this._currentMatchIndex = -1;
     this._updateCount();
     if (this._matches.length > 0) {
@@ -2542,7 +2462,6 @@ const findReplaceController = {
     } catch (e) {}
     this._scrollTextareaToPos(textarea, pos);
     this._lastHighlightPos = pos;
-    this._lastHighlightLen = len;
   },
 
   _updateCount() {
@@ -2627,10 +2546,6 @@ const findReplaceController = {
       this._updateCount();
       return;
     }
-    if (this._madeReadonly) {
-      this._targetTextarea[0].removeAttribute("readonly");
-      this._madeReadonly = false;
-    }
     const isSendTextarea = this._targetTextarea[0] === getMessageInput()[0];
     if (isSendTextarea) saveStateBeforeAction();
     else historyManager.pushState(this._targetTextarea);
@@ -2663,7 +2578,6 @@ const findReplaceController = {
     } catch (e) {}
     this._scrollTextareaToPos(ta, _oldPos);
     this._lastHighlightPos = _oldPos;
-    this._lastHighlightLen = _replaceLen;
     setTimeout(() => {
       this._isReplacing = false;
     }, 0);
@@ -2687,10 +2601,6 @@ const findReplaceController = {
         this._highlightMatch(false);
       }
       return;
-    }
-    if (this._madeReadonly) {
-      this._targetTextarea[0].removeAttribute("readonly");
-      this._madeReadonly = false;
     }
     const isSendTextarea = this._targetTextarea[0] === getMessageInput()[0];
     if (isSendTextarea) saveStateBeforeAction();
@@ -2733,6 +2643,563 @@ async function pickFaIcon() {
     console.warn("pick-icon 不可用:", e);
     return false;
   }
+}
+
+const _ihColorParseCache = new Map();
+const _IH_COLOR_CACHE_MAX = 300;
+function ihParseColorToRgba(str) {
+  if (!str) return null;
+  if (_ihColorParseCache.has(str)) return _ihColorParseCache.get(str);
+
+  let result = null;
+  const s = str.trim();
+  const hex = s.match(/^#([0-9a-fA-F]{3,8})$/);
+  if (hex) {
+    const h = hex[1];
+    let r, g, b;
+    let a = 1;
+    if (h.length === 3) {
+      r = parseInt(h[0] + h[0], 16);
+      g = parseInt(h[1] + h[1], 16);
+      b = parseInt(h[2] + h[2], 16);
+    } else if (h.length === 4) {
+      r = parseInt(h[0] + h[0], 16);
+      g = parseInt(h[1] + h[1], 16);
+      b = parseInt(h[2] + h[2], 16);
+      a = parseInt(h[3] + h[3], 16) / 255;
+    } else if (h.length === 6) {
+      r = parseInt(h.slice(0, 2), 16);
+      g = parseInt(h.slice(2, 4), 16);
+      b = parseInt(h.slice(4, 6), 16);
+    } else if (h.length === 8) {
+      r = parseInt(h.slice(0, 2), 16);
+      g = parseInt(h.slice(2, 4), 16);
+      b = parseInt(h.slice(4, 6), 16);
+      a = parseInt(h.slice(6, 8), 16) / 255;
+    }
+    if (r !== undefined) {
+      result = { r, g, b, a: Math.round(a * 1000) / 1000 };
+    }
+  }
+
+  if (!result) {
+    const rgb = s.match(/^rgba?\(([^)]+)\)$/i);
+    if (rgb) {
+      const parts = rgb[1]
+        .split(/[,\s/]+/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      if (parts.length >= 3) {
+        result = {
+          r: parseInt(parts[0]) || 0,
+          g: parseInt(parts[1]) || 0,
+          b: parseInt(parts[2]) || 0,
+          a: parts[3] !== undefined ? parseFloat(parts[3]) : 1,
+        };
+      }
+    }
+  }
+
+  if (!result) {
+    const probe = document.createElement("div");
+    probe.style.color = s;
+    if (probe.style.color !== "") {
+      probe.style.cssText +=
+        ";position:absolute;left:-9999px;top:-9999px;visibility:hidden;";
+      document.body.appendChild(probe);
+      const parsed = getComputedStyle(probe).color;
+      probe.remove();
+      const m = parsed.match(/rgba?\(([^)]+)\)/i);
+      if (m) {
+        const parts = m[1]
+          .split(/[,\s/]+/)
+          .map((x) => x.trim())
+          .filter(Boolean);
+        result = {
+          r: parseInt(parts[0]) || 0,
+          g: parseInt(parts[1]) || 0,
+          b: parseInt(parts[2]) || 0,
+          a: parts[3] !== undefined ? parseFloat(parts[3]) : 1,
+        };
+      }
+    }
+  }
+
+  if (_ihColorParseCache.size >= _IH_COLOR_CACHE_MAX) {
+    const oldestKey = _ihColorParseCache.keys().next().value;
+    _ihColorParseCache.delete(oldestKey);
+  }
+  _ihColorParseCache.set(str, result);
+  return result;
+}
+
+function ihRgbToHex(r, g, b) {
+  const h = (n) =>
+    Math.max(0, Math.min(255, Math.round(n)))
+      .toString(16)
+      .padStart(2, "0");
+  return "#" + h(r) + h(g) + h(b);
+}
+
+function openColorPicker() {
+  const _existingCp = document.querySelector(".ih-color-picker-portal");
+  if (_existingCp) {
+    if (typeof _existingCp._ihClose === "function") _existingCp._ihClose();
+    else _existingCp.remove();
+    return;
+  }
+  let target = null;
+  const _cpActive = document.activeElement;
+  if (isEditableElement(_cpActive) && !shouldIgnoreFocusedElement(_cpActive)) {
+    target = _cpActive;
+  } else {
+    target = getInsertionTarget();
+  }
+  if (!target) {
+    toastr.warning("没有找到可编辑的输入框", "", { timeOut: 1200 });
+    return;
+  }
+  let cmView = null;
+  let textareaEl = null;
+  if (target.isContentEditable) {
+    cmView = getCodeMirrorView(target);
+    if (!cmView) {
+      toastr.warning("这个编辑区暂不支持取色", "", { timeOut: 1500 });
+      return;
+    }
+  } else if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") {
+    textareaEl = target;
+  } else {
+    toastr.warning("这个编辑区暂不支持取色", "", { timeOut: 1500 });
+    return;
+  }
+
+  const COLOR_RE =
+    /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|rgba?\([^)]*\)|hsla?\([^)]*\)/gi;
+
+  const getText = () =>
+    cmView ? cmView.state.doc.toString() : textareaEl.value || "";
+
+  const scan = () => {
+    const text = getText();
+    const arr = [];
+    COLOR_RE.lastIndex = 0;
+    let m;
+    while ((m = COLOR_RE.exec(text)) !== null) {
+      const raw = m[0];
+      const rgba = ihParseColorToRgba(raw);
+      if (rgba)
+        arr.push({ start: m.index, end: m.index + raw.length, raw, rgba });
+      if (m.index === COLOR_RE.lastIndex) COLOR_RE.lastIndex++;
+    }
+    return arr;
+  };
+
+  const initial = scan();
+  if (initial.length === 0) {
+    toastr.info(
+      "当前编辑框里没有找到颜色值，请先点一下要取色的编辑框，确认光标在正确的框内再试",
+      "",
+      { timeOut: 3000 },
+    );
+    return;
+  }
+
+  const rgbaToStr = (rgba) => {
+    if (rgba.a >= 1) return ihRgbToHex(rgba.r, rgba.g, rgba.b);
+    const a = Math.round(rgba.a * 1000) / 1000;
+    return `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${a})`;
+  };
+
+  const selectRange = (start, end) => {
+    if (cmView) {
+      cmView.dispatch({
+        selection: { anchor: start, head: end },
+        scrollIntoView: true,
+      });
+      cmView.focus();
+    } else {
+      try {
+        const ae = document.activeElement;
+        if (ae && ae !== textareaEl && portal[0].contains(ae)) ae.blur();
+      } catch (e) {}
+      try {
+        textareaEl.focus({ preventScroll: true });
+        textareaEl.setSelectionRange(start, end);
+      } catch (e) {}
+      try {
+        findReplaceController._scrollTextareaToPos(textareaEl, start);
+      } catch (e) {}
+      requestAnimationFrame(() => {
+        try {
+          if (document.activeElement !== textareaEl) {
+            textareaEl.focus({ preventScroll: true });
+          }
+          textareaEl.setSelectionRange(start, end);
+          findReplaceController._scrollTextareaToPos(textareaEl, start);
+        } catch (e) {}
+      });
+    }
+  };
+
+  const replaceRange = (start, end, newStr) => {
+    if (cmView) {
+      cmView.dispatch({
+        changes: { from: start, to: end, insert: newStr },
+        selection: { anchor: start, head: start + newStr.length },
+        scrollIntoView: true,
+      });
+      cmView.focus();
+    } else {
+      const isSend = textareaEl === getMessageInput()[0];
+      if (isSend) saveStateBeforeAction();
+      else historyManager.pushState($(textareaEl));
+      const savedScroll = textareaEl.scrollTop;
+      const text = textareaEl.value;
+      textareaEl.value =
+        text.substring(0, start) + newStr + text.substring(end);
+      textareaEl.scrollTop = savedScroll;
+      textareaEl.dispatchEvent(new Event("input", { bubbles: true }));
+      textareaEl.scrollTop = savedScroll;
+      historyManager.pushState($(textareaEl));
+    }
+  };
+
+  document
+    .querySelectorAll(".ih-color-picker-portal")
+    .forEach((el) => el.remove());
+  closeAllFolderDropdowns();
+
+  const portal = $(
+    `<div class="ih-color-picker-portal"><div class="ih-cp-header"><span class="ih-cp-drag" title="按住拖动面板"><i class="fa-solid fa-grip-lines"></i></span><div class="ih-cp-header-btns"><button class="ih-cp-pin" type="button" title="固定面板：点亮后点击外部不会关闭，再点一下解除"><i class="fa-solid fa-thumbtack"></i></button><button class="ih-cp-close" type="button" title="关闭取色面板"><i class="fa-solid fa-xmark"></i></button></div></div><div class="ih-cp-list"></div><div class="ih-cp-resize" title="拖动调整面板大小"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></div></div>`,
+  );
+  const listEl = portal.find(".ih-cp-list");
+  let pinned = false;
+  let activeIndex = -1;
+  let cachedList = [];
+  const findColorAtPos = (pos) => {
+    for (let i = 0; i < cachedList.length; i++) {
+      if (pos >= cachedList[i].start && pos <= cachedList[i].end) return i;
+    }
+    return -1;
+  };
+  const setActiveRow = (idx) => {
+    activeIndex = idx;
+    listEl.find(".ih-cp-row").removeClass("ih-cp-row-active");
+    if (idx >= 0) {
+      const rowEl = listEl.find(`.ih-cp-row[data-index="${idx}"]`)[0];
+      if (rowEl) {
+        rowEl.classList.add("ih-cp-row-active");
+        rowEl.scrollIntoView({ block: "nearest" });
+      }
+    }
+  };
+  const onEditorCaret = () => {
+    let pos;
+    if (cmView) {
+      const sel = cmView.state.selection.main;
+      if (sel.from !== sel.to) return;
+      pos = sel.head;
+    } else if (textareaEl) {
+      if (textareaEl.selectionStart !== textareaEl.selectionEnd) return;
+      pos = textareaEl.selectionStart;
+    } else return;
+    if (pos === null || pos === undefined) return;
+    const idx = findColorAtPos(pos);
+    setActiveRow(idx >= 0 ? idx : -1);
+    if (idx >= 0) {
+      const c = cachedList[idx];
+      if (cmView) {
+        cmView.dispatch({ selection: { anchor: c.start, head: c.end } });
+      } else if (textareaEl) {
+        try {
+          textareaEl.setSelectionRange(c.start, c.end);
+        } catch (e) {}
+      }
+    }
+  };
+
+  const render = () => {
+    const list = scan();
+    cachedList = list;
+    if (list.length === 0) {
+      listEl.html(`<div class="ih-cp-empty">没有颜色了</div>`);
+      return;
+    }
+    let html = "";
+    list.forEach((c, i) => {
+      const hex = ihRgbToHex(c.rgba.r, c.rgba.g, c.rgba.b);
+      const alphaPct = Math.round(c.rgba.a * 100);
+      const swatchBg = `rgba(${c.rgba.r},${c.rgba.g},${c.rgba.b},${c.rgba.a})`;
+      html += `
+        <div class="ih-cp-row${i === activeIndex ? " ih-cp-row-active" : ""}" data-index="${i}">
+          <span class="ih-cp-swatch" style="--cp-bg:${swatchBg};"></span>
+          <span class="ih-cp-text" title="点击跳转到编辑框里这个颜色">${ihEscapeHtml(c.raw)}</span>
+          <span class="ih-cp-controls">
+            <input type="color" class="ih-cp-color" value="${hex}" title="选颜色" />
+            <span class="ih-cp-alpha-wrap">
+              <input type="range" class="ih-cp-alpha" min="0" max="100" value="${alphaPct}" title="透明度" />
+              <span class="ih-cp-alpha-val">${alphaPct}%</span>
+            </span>
+          </span>
+        </div>`;
+    });
+    listEl.html(html);
+  };
+
+  const applyRow = (rowEl) => {
+    const idx = parseInt(rowEl.getAttribute("data-index"));
+    const list = scan();
+    if (isNaN(idx) || idx < 0 || idx >= list.length) {
+      render();
+      return;
+    }
+    const c = list[idx];
+    const hex = rowEl.querySelector(".ih-cp-color").value;
+    const alpha = parseInt(rowEl.querySelector(".ih-cp-alpha").value) / 100;
+    const parsed = ihParseColorToRgba(hex) || { r: 0, g: 0, b: 0 };
+    const rgba = { r: parsed.r, g: parsed.g, b: parsed.b, a: alpha };
+    const newStr = rgbaToStr(rgba);
+    replaceRange(c.start, c.end, newStr);
+    const txt = rowEl.querySelector(".ih-cp-text");
+    if (txt) txt.textContent = newStr;
+    cachedList = scan();
+    activeIndex = idx;
+    setActiveRow(idx);
+    selectRange(c.start, c.start + newStr.length);
+  };
+
+  const previewRow = (rowEl) => {
+    const hex = rowEl.querySelector(".ih-cp-color").value;
+    const alpha = parseInt(rowEl.querySelector(".ih-cp-alpha").value) / 100;
+    const parsed = ihParseColorToRgba(hex) || { r: 0, g: 0, b: 0 };
+    const sw = rowEl.querySelector(".ih-cp-swatch");
+    if (sw)
+      sw.style.setProperty(
+        "--cp-bg",
+        `rgba(${parsed.r},${parsed.g},${parsed.b},${alpha})`,
+      );
+  };
+
+  let _cpPreviewRaf = null;
+  let _cpPreviewRow = null;
+  const schedulePreview = (rowEl) => {
+    _cpPreviewRow = rowEl;
+    if (_cpPreviewRaf) return;
+    _cpPreviewRaf = requestAnimationFrame(() => {
+      _cpPreviewRaf = null;
+      if (_cpPreviewRow) previewRow(_cpPreviewRow);
+    });
+  };
+
+  portal.on("click", ".ih-cp-row", function (e) {
+    if ($(e.target).closest("input, .ih-cp-alpha-wrap, .ih-cp-controls").length)
+      return;
+    const idx = parseInt(this.getAttribute("data-index"));
+    if (!isNaN(idx) && cachedList[idx]) {
+      setActiveRow(idx);
+      selectRange(cachedList[idx].start, cachedList[idx].end);
+    }
+  });
+  portal.on("click", ".ih-cp-pin", function () {
+    pinned = !pinned;
+    this.classList.toggle("ih-cp-pin-active", pinned);
+  });
+  portal.on("input", ".ih-cp-color", function () {
+    schedulePreview(this.closest(".ih-cp-row"));
+  });
+  portal.on("change", ".ih-cp-color", function () {
+    applyRow(this.closest(".ih-cp-row"));
+  });
+  portal.on("input", ".ih-cp-alpha", function () {
+    const row = this.closest(".ih-cp-row");
+    const valEl = row.querySelector(".ih-cp-alpha-val");
+    if (valEl) valEl.textContent = this.value + "%";
+    schedulePreview(row);
+  });
+  portal.on("change", ".ih-cp-alpha", function () {
+    applyRow(this.closest(".ih-cp-row"));
+  });
+
+  portal.on("mousedown", function (e) {
+    if (!$(e.target).closest("input, textarea, select").length) {
+      e.preventDefault();
+    }
+  });
+
+  [
+    "click",
+    "mousedown",
+    "mouseup",
+    "pointerdown",
+    "pointerup",
+    "touchstart",
+    "touchend",
+  ].forEach((evt) => {
+    portal[0].addEventListener(evt, (e) => e.stopPropagation(), false);
+  });
+
+  const _cpOpenDialogs = document.querySelectorAll("dialog[open]");
+  const _cpHost =
+    _cpOpenDialogs.length > 0
+      ? _cpOpenDialogs[_cpOpenDialogs.length - 1]
+      : document.body;
+  $(_cpHost).append(portal);
+  render();
+  syncDialogTheme(portal[0]);
+  generateFaIconProtectionCSS();
+
+  const _cpHeaderEl = portal.find(".ih-cp-header")[0];
+  if (_cpHeaderEl) {
+    _cpHeaderEl.style.cursor = "move";
+    let _cpDx = 0,
+      _cpDy = 0,
+      _cpOrigL = 0,
+      _cpOrigT = 0;
+    const _cpMove = (e) => {
+      const ev = e.touches ? e.touches[0] : e;
+      let nl = _cpOrigL + (ev.clientX - _cpDx);
+      let nt = _cpOrigT + (ev.clientY - _cpDy);
+      const w = portal[0].offsetWidth;
+      const h = portal[0].offsetHeight;
+      nl = Math.max(0, Math.min(window.innerWidth - w, nl));
+      nt = Math.max(0, Math.min(window.innerHeight - h, nt));
+      portal.css({ left: nl + "px", top: nt + "px" });
+      if (e.cancelable) e.preventDefault();
+    };
+    const _cpUp = () => {
+      document.removeEventListener("mousemove", _cpMove, true);
+      document.removeEventListener("mouseup", _cpUp, true);
+      document.removeEventListener("touchmove", _cpMove, true);
+      document.removeEventListener("touchend", _cpUp, true);
+    };
+    const _cpDown = (e) => {
+      if (e.target.closest && e.target.closest(".ih-cp-header-btns")) return;
+      const ev = e.touches ? e.touches[0] : e;
+      const rect = portal[0].getBoundingClientRect();
+      _cpOrigL = rect.left;
+      _cpOrigT = rect.top;
+      _cpDx = ev.clientX;
+      _cpDy = ev.clientY;
+      document.addEventListener("mousemove", _cpMove, true);
+      document.addEventListener("mouseup", _cpUp, true);
+      document.addEventListener("touchmove", _cpMove, {
+        capture: true,
+        passive: false,
+      });
+      document.addEventListener("touchend", _cpUp, true);
+    };
+    _cpHeaderEl.addEventListener("mousedown", _cpDown);
+    _cpHeaderEl.addEventListener("touchstart", _cpDown, { passive: true });
+  }
+
+  const _cpResizeEl = portal.find(".ih-cp-resize")[0];
+  if (_cpResizeEl) {
+    let _rw = 0,
+      _rh = 0,
+      _rx = 0,
+      _ry = 0;
+    const _rMove = (e) => {
+      const ev = e.touches ? e.touches[0] : e;
+      let nw = _rw + (ev.clientX - _rx);
+      let nh = _rh + (ev.clientY - _ry);
+      nw = Math.max(190, Math.min(window.innerWidth * 0.96, nw));
+      nh = Math.max(130, Math.min(window.innerHeight * 0.8, nh));
+      portal.css({ width: nw + "px", height: nh + "px" });
+      if (e.cancelable) e.preventDefault();
+    };
+    const _rUp = () => {
+      document.removeEventListener("mousemove", _rMove, true);
+      document.removeEventListener("mouseup", _rUp, true);
+      document.removeEventListener("touchmove", _rMove, true);
+      document.removeEventListener("touchend", _rUp, true);
+    };
+    const _rDown = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const ev = e.touches ? e.touches[0] : e;
+      const rect = portal[0].getBoundingClientRect();
+      _rw = rect.width;
+      _rh = rect.height;
+      _rx = ev.clientX;
+      _ry = ev.clientY;
+      document.addEventListener("mousemove", _rMove, true);
+      document.addEventListener("mouseup", _rUp, true);
+      document.addEventListener("touchmove", _rMove, {
+        capture: true,
+        passive: false,
+      });
+      document.addEventListener("touchend", _rUp, true);
+    };
+    _cpResizeEl.addEventListener("mousedown", _rDown);
+    _cpResizeEl.addEventListener("touchstart", _rDown, { passive: false });
+  }
+
+  document.body.classList.add("ih-cp-selecting");
+  const _cpCaretEl = cmView ? cmView.contentDOM : textareaEl;
+  const _cpCaretHandler = onEditorCaret;
+  if (_cpCaretEl) {
+    _cpCaretEl.addEventListener("click", _cpCaretHandler);
+    _cpCaretEl.addEventListener("mouseup", _cpCaretHandler);
+  }
+
+  const btnSel =
+    "#input_color_picker_btn, " +
+    ".ih-folder-dropdown-portal [data-button-key='colorPicker'], " +
+    ".ih-floating-panel [data-button-key='colorPicker']";
+  let anchorBtn = null;
+  document.querySelectorAll(btnSel).forEach((el) => {
+    if (el.offsetParent !== null) anchorBtn = el;
+  });
+
+  requestAnimationFrame(() => {
+    const ddW = portal.outerWidth();
+    const ddH = portal.outerHeight();
+    let left, top;
+    if (anchorBtn) {
+      const r = anchorBtn.getBoundingClientRect();
+      left = r.left + r.width / 2 - ddW / 2;
+      top = r.top - ddH - 6;
+      if (top < 4) top = r.bottom + 6;
+    } else {
+      left = window.innerWidth / 2 - ddW / 2;
+      top = window.innerHeight - ddH - 80;
+    }
+    if (left < 4) left = 4;
+    if (left + ddW > window.innerWidth - 4) left = window.innerWidth - ddW - 4;
+    if (top < 4) top = 4;
+    if (top + ddH > window.innerHeight - 4) top = window.innerHeight - ddH - 4;
+    portal.css({ left: left + "px", top: top + "px" });
+  });
+
+  const closePortal = () => {
+    if (_cpPreviewRaf) {
+      cancelAnimationFrame(_cpPreviewRaf);
+      _cpPreviewRaf = null;
+    }
+    document.removeEventListener("mousedown", outside, true);
+    document.removeEventListener("touchstart", outside, true);
+    if (_cpCaretEl) {
+      _cpCaretEl.removeEventListener("click", _cpCaretHandler);
+      _cpCaretEl.removeEventListener("mouseup", _cpCaretHandler);
+    }
+    document.body.classList.remove("ih-cp-selecting");
+    portal.remove();
+  };
+  portal[0]._ihClose = closePortal;
+  portal.find(".ih-cp-close").on("click", closePortal);
+  const outside = (e) => {
+    if (pinned) return;
+    if (portal[0].contains(e.target)) return;
+    if (anchorBtn && anchorBtn.contains(e.target)) return;
+    if (_cpCaretEl && _cpCaretEl.contains && _cpCaretEl.contains(e.target))
+      return;
+    closePortal();
+  };
+  setTimeout(() => {
+    document.addEventListener("mousedown", outside, true);
+    document.addEventListener("touchstart", outside, true);
+  }, 60);
 }
 
 const historyManager = {
@@ -3264,9 +3731,6 @@ const historyManager = {
   },
 
   updateButtons() {
-    this._doUpdateButtons();
-  },
-  _doUpdateButtons() {
     const target = getInsertionTarget();
     let undoDisabled = true;
     let redoDisabled = true;
@@ -3523,7 +3987,7 @@ const chatUndoManager = {
         } catch (e) {}
       }
       self._lastWatchedLength = cur;
-    }, 800);
+    }, 1500);
   },
 
   stopWatcher() {
@@ -3993,52 +4457,24 @@ ${css}`;
   }
 }
 
-function _hasUserBallCSS() {
-  try {
-    for (const sheet of document.styleSheets) {
-      try {
-        const href = sheet.href || "";
-        if (href.includes(extensionName) || href.includes("ST-QuickBar"))
-          continue;
-        for (const rule of sheet.cssRules) {
-          if (!rule.selectorText) continue;
-          if (!rule.selectorText.includes("ih-floating-ball")) continue;
-          if (
-            rule.selectorText.includes("ih-ball-custom") ||
-            rule.selectorText.includes("ih-ball-transparent") ||
-            rule.selectorText.includes("ih-ball-expanded")
-          )
-            continue;
-          if (
-            rule.selectorText.includes(":hover") ||
-            rule.selectorText.includes(":active")
-          )
-            continue;
-          if (rule.selectorText.includes("fa-")) continue;
-          const bgImg = rule.style.backgroundImage || "";
-          if (bgImg && bgImg !== "none" && bgImg !== "" && bgImg !== "(empty)")
-            return true;
-          const bg = rule.style.background || "";
-          if (bg && bg.includes("url(")) return true;
-          const bgColor = rule.style.backgroundColor || "";
-          const border = rule.style.border || "";
-          const boxShadow = rule.style.boxShadow || "";
-          if (
-            (bgColor &&
-              bgColor !== "transparent" &&
-              bgColor !== "rgba(0, 0, 0, 0)") ||
-            (border && border !== "none") ||
-            (boxShadow && boxShadow !== "none")
-          )
-            return true;
-        }
-      } catch (e) {}
-    }
-  } catch (e) {}
-  return false;
+let _cachedBallCSSFlags = null;
+function _invalidateBallCSSCache() {
+  _cachedBallCSSFlags = null;
 }
-
+function _getBallCSSFlags() {
+  if (_cachedBallCSSFlags === null) {
+    _cachedBallCSSFlags = _computeBallCSSFlags();
+  }
+  return _cachedBallCSSFlags;
+}
+function _hasUserBallCSS() {
+  return _getBallCSSFlags().hasCSS;
+}
 function _hasUserBallBackgroundImage() {
+  return _getBallCSSFlags().hasBgImage;
+}
+function _computeBallCSSFlags() {
+  const result = { hasCSS: false, hasBgImage: false };
   try {
     for (const sheet of document.styleSheets) {
       try {
@@ -4048,22 +4484,57 @@ function _hasUserBallBackgroundImage() {
         for (const rule of sheet.cssRules) {
           if (!rule.selectorText) continue;
           if (!rule.selectorText.includes("ih-floating-ball")) continue;
-          if (
-            rule.selectorText.includes(":hover") ||
-            rule.selectorText.includes(":active") ||
-            rule.selectorText.includes("ih-ball-expanded")
-          )
-            continue;
           if (rule.selectorText.includes("fa-")) continue;
+          const isHoverOrActive =
+            rule.selectorText.includes(":hover") ||
+            rule.selectorText.includes(":active");
+          const isExpanded = rule.selectorText.includes("ih-ball-expanded");
           const bgImg = rule.style.backgroundImage || "";
-          if (bgImg && bgImg !== "none" && bgImg.includes("url(")) return true;
           const bg = rule.style.background || "";
-          if (bg && bg.includes("url(")) return true;
+          if (!result.hasBgImage && !isHoverOrActive && !isExpanded) {
+            if (bgImg && bgImg !== "none" && bgImg.includes("url(")) {
+              result.hasBgImage = true;
+            } else if (bg && bg.includes("url(")) {
+              result.hasBgImage = true;
+            }
+          }
+          if (
+            !result.hasCSS &&
+            !isHoverOrActive &&
+            !isExpanded &&
+            !rule.selectorText.includes("ih-ball-custom") &&
+            !rule.selectorText.includes("ih-ball-transparent")
+          ) {
+            if (
+              bgImg &&
+              bgImg !== "none" &&
+              bgImg !== "" &&
+              bgImg !== "(empty)"
+            ) {
+              result.hasCSS = true;
+            } else if (bg && bg.includes("url(")) {
+              result.hasCSS = true;
+            } else {
+              const bgColor = rule.style.backgroundColor || "";
+              const border = rule.style.border || "";
+              const boxShadow = rule.style.boxShadow || "";
+              if (
+                (bgColor &&
+                  bgColor !== "transparent" &&
+                  bgColor !== "rgba(0, 0, 0, 0)") ||
+                (border && border !== "none") ||
+                (boxShadow && boxShadow !== "none")
+              ) {
+                result.hasCSS = true;
+              }
+            }
+          }
+          if (result.hasCSS && result.hasBgImage) return result;
         }
       } catch (e) {}
     }
   } catch (e) {}
-  return false;
+  return result;
 }
 
 let _cachedMessageInput = null;
@@ -4155,6 +4626,7 @@ function getButtonIdFromKey(key) {
     quickHide: "input_quick_hide_btn",
     sendStop: "input_send_stop_btn",
     resetFloatingBall: "input_reset_floating_ball_btn",
+    colorPicker: "input_color_picker_btn",
   };
   return map[key] || "";
 }
@@ -4364,13 +4836,17 @@ function insertNewLine() {
   let lineEnd = text.indexOf("\n", cursorPos);
   if (lineEnd === -1) lineEnd = text.length;
   const newText = text.substring(0, lineEnd) + "\n" + text.substring(lineEnd);
+  const _savedScrollTopNL = target.scrollTop;
   target.value = newText;
+  target.scrollTop = _savedScrollTopNL;
   target.dispatchEvent(new Event("input", { bubbles: true }));
+  target.scrollTop = _savedScrollTopNL;
   setTimeout(() => {
     try {
       target.selectionStart = lineEnd + 1;
       target.selectionEnd = lineEnd + 1;
       target.focus({ preventScroll: true });
+      target.scrollTop = _savedScrollTopNL;
     } catch (e) {}
     historyManager.pushState($(target));
   }, 0);
@@ -4417,7 +4893,9 @@ function insertTag(tag) {
   const newText = text.substring(0, startPos) + tag + text.substring(endPos);
   const _savedScrollTop3 = target.scrollTop;
   target.value = newText;
+  target.scrollTop = _savedScrollTop3;
   target.dispatchEvent(new Event("input", { bubbles: true }));
+  target.scrollTop = _savedScrollTop3;
   setTimeout(() => {
     try {
       target.selectionStart = startPos + tag.length;
@@ -4908,7 +5386,7 @@ function getHiddenStatus() {
   };
 }
 
-async function doHideRange(from, to) {
+async function _doHideUnhideRange(from, to, isHide) {
   if (from === "" && to === "") return;
   const total = chat.length;
   const f = from === "" ? 0 : parseInt(from);
@@ -4919,53 +5397,45 @@ async function doHideRange(from, to) {
     });
     return;
   }
-  await executeSlashCommandsWithOptions(`/hide ${f}-${t}`);
+  await executeSlashCommandsWithOptions(
+    `/${isHide ? "hide" : "unhide"} ${f}-${t}`,
+  );
   await new Promise((r) => setTimeout(r, 300));
-  toastr.success(`已隐藏 ${f} ~ ${t}`, "", { timeOut: 1000 });
+  toastr.success(`${isHide ? "已隐藏" : "已取消隐藏"} ${f} ~ ${t}`, "", {
+    timeOut: 1000,
+  });
+}
+
+async function doHideRange(from, to) {
+  return _doHideUnhideRange(from, to, true);
 }
 
 async function doUnhideRange(from, to) {
-  if (from === "" && to === "") return;
+  return _doHideUnhideRange(from, to, false);
+}
+
+async function _doHideUnhideOne(floor, isHide) {
   const total = chat.length;
-  const f = from === "" ? 0 : parseInt(from);
-  const t = to === "" ? total - 1 : parseInt(to);
-  if (isNaN(f) || isNaN(t) || f < 0 || t >= total || f > t) {
-    toastr.error(`无效范围: ${f} ~ ${t}（总消息 0~${total - 1}）`, "", {
+  const f = parseInt(floor);
+  if (isNaN(f) || f < 0 || f >= total) {
+    toastr.error(`无效楼层: ${floor}（总消息 0~${total - 1}）`, "", {
       timeOut: 2500,
     });
     return;
   }
-  await executeSlashCommandsWithOptions(`/unhide ${f}-${t}`);
+  await executeSlashCommandsWithOptions(`/${isHide ? "hide" : "unhide"} ${f}`);
   await new Promise((r) => setTimeout(r, 300));
-  toastr.success(`已取消隐藏 ${f} ~ ${t}`, "", { timeOut: 1000 });
+  toastr.success(`${isHide ? "已隐藏楼层" : "已取消隐藏楼层"} ${f}`, "", {
+    timeOut: 1000,
+  });
 }
 
 async function doHideOne(floor) {
-  const total = chat.length;
-  const f = parseInt(floor);
-  if (isNaN(f) || f < 0 || f >= total) {
-    toastr.error(`无效楼层: ${floor}（总消息 0~${total - 1}）`, "", {
-      timeOut: 2500,
-    });
-    return;
-  }
-  await executeSlashCommandsWithOptions(`/hide ${f}`);
-  await new Promise((r) => setTimeout(r, 300));
-  toastr.success(`已隐藏楼层 ${f}`, "", { timeOut: 1000 });
+  return _doHideUnhideOne(floor, true);
 }
 
 async function doUnhideOne(floor) {
-  const total = chat.length;
-  const f = parseInt(floor);
-  if (isNaN(f) || f < 0 || f >= total) {
-    toastr.error(`无效楼层: ${floor}（总消息 0~${total - 1}）`, "", {
-      timeOut: 2500,
-    });
-    return;
-  }
-  await executeSlashCommandsWithOptions(`/unhide ${f}`);
-  await new Promise((r) => setTimeout(r, 300));
-  toastr.success(`已取消隐藏楼层 ${f}`, "", { timeOut: 1000 });
+  return _doHideUnhideOne(floor, false);
 }
 
 async function doKeepRecent(count) {
@@ -5139,7 +5609,7 @@ function openBeautyPromptPanel() {
 
 5. **中文符号按钮的特殊样式**
    插件通过 JS 检测按钮文本中的 CJK 字符（中日韩文字及符号），对纯文本按钮（无图标）自动应用
-   \`letter-spacing: -3px\` 和 \`padding: 3px\` 的 inline style + !important 来收窄按钮宽度。
+   \`letter-spacing: -1px\` 和 \`padding: 3px\` 的 inline style + !important 来收窄按钮宽度。
    这会影响「」『』《》三个内置按钮，以及任何显示文字包含中文的自定义按钮。
    悬浮面板中的 CJK 按钮也有类似的 padding 收窄处理。
    由于是 inline style + !important，外部 CSS 无法覆盖这些属性。
@@ -5338,17 +5808,12 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.9.7";
+const CHANGELOG_VERSION = "2.9.8";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.7</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.8</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>消息管理 Token 统计</b>：点击顶部「Token」徽章统计总 Token 数，再点收起；开启后每条消息预览替换为 Token 数。</li>
-  <li><b>文件夹展开方向</b>：悬浮栏/工具栏文件夹支持横向/竖向排列切换。</li>
-  <li><b>文件夹展开保持（图钉）</b>：文件夹设置里新增图钉开关，钉住后展开的子菜单点击外部不会自动关闭，适合连续插入符号；不钉住则点外部自动收起。可按文件夹单独设置。</li>
-  <li><b>修复文件夹按钮误关编辑框</b>：修复文件夹内的按钮向外部编辑框（世界书、预设、角色卡等弹窗）插入内容时，可能误触发编辑框弹窗关闭的问题。</li>
-  <li><b>新增「重置悬浮球位置」按钮</b>：在按钮管理中开启并放入工具栏，一键将悬浮球/面板重置至默认位置，便于找回拖出屏幕的悬浮球。</li>
-  <li><b>空工具栏不再上浮</b>：按钮全在悬浮球时，点击输入框工具栏不再浮出；放回按钮即恢复。</li>
-  <li><b>选中模式优化</b>：修复移动端偶发失灵及编辑框切换后按钮状态不同步问题。</li>
+  <li><b>新增「取色器」</b>：自动扫描输入框/编辑区里的颜色值（#十六进制、rgb/rgba、hsl/hsla），列成可拖动小面板，点行跳转、拖滑块调透明度、图钉固定，改完自动写回。适合调 CSS 配色。</li>
+  <li><b>性能优化</b>：悬浮球美化 CSS 检测改为缓存计算、撤回快照轮询降频、弹窗跟随改用微任务，减少后台空转。</li>
 </ul>
 `;
 
@@ -5450,11 +5915,19 @@ function openHelpPanel() {
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-object-group"></i> 选中包裹模式</p>
 <p>全局开关。开启后，自定义按钮的<q>「插入内容」</q>会按照设置的<q>「光标位置」</q>切成左右两半，自动包裹选中的文本。例如：自定义内容是 <code>**粗体**</code>，光标位置设为<q>「中间」</q>，开启此模式选中 abc 再点按钮，会变成 <code>**abc**</code>。</p>
 <p>原生的 **、<q>""</q>、() 等内置符号按钮本身就是包裹模式，不受此开关影响。如果只想给个别按钮启用，可以在编辑该自定义按钮时勾选其专属的<q>「选中包裹」</q>选项。</p>
-
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-copy"></i> 复制 / 粘贴</p>
 <p><b>复制</b>：复制当前输入框或编辑区域中选中的文本。</p>
 <p><b>粘贴</b>：读取系统剪贴板内容并插入到当前光标位置。需要浏览器允许剪贴板权限，通常要求 HTTPS 或 localhost 环境。</p>
 <p>两个按钮默认关闭，可在<q>「按钮管理」</q>中启用，也支持绑定快捷键。</p>
+<p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-eye-dropper"></i> 取色器</p>
+<p>自动扫描当前输入框或编辑区域里的颜色值（支持 #十六进制、rgb / rgba、hsl / hsla 写法），把它们列在一个可拖动的小面板里，方便快速预览和修改。</p>
+<ul>
+    <li>点某一行的颜色文字，会跳转并选中编辑框里对应的那段颜色，方便定位</li>
+    <li>点色块旁的取色按钮换颜色，拖动滑块调透明度，改完自动写回编辑框</li>
+    <li>面板可拖动位置、拖右下角调整大小；点图钉按钮钉住后，点击面板外部不会自动关闭，适合连续改多个颜色</li>
+    <li>把光标移到编辑框里某个颜色上，面板会自动高亮对应的那一行</li>
+</ul>
+<p>默认关闭，可在<q>「按钮管理」</q>中启用，也支持绑定快捷键。适合美化 CSS、调整配色时使用。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-magnifying-glass"></i> 查找替换</p>
 <p>在输入框、正在编辑的消息、以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）中查找和替换文本。</p>
@@ -6515,44 +6988,30 @@ function openHideManagerPanel() {
     });
   }
   bindHighlightInput("#ih_mgr_specific_floor");
-  bindHighlightInput("#ih_mgr_range_from");
-  bindHighlightInput("#ih_mgr_range_to");
   bindHighlightInput("#ih_mgr_keep_recent");
-  bindHighlightInput("#ih_mgr_del_from");
-  bindHighlightInput("#ih_mgr_del_to");
   bindHighlightInput("#ih_mgr_mv_target");
   bindHighlightInput("#ih_mgr_insert_floor");
-  content.on("input", "#ih_mgr_range_from, #ih_mgr_range_to", () => {
-    const fv = content.find("#ih_mgr_range_from").val();
-    const tv = content.find("#ih_mgr_range_to").val();
-    sharedState.selected.clear();
-    if (fv !== "" || tv !== "") {
-      const f = fv === "" ? 0 : parseInt(fv);
-      const t = tv === "" ? total - 1 : parseInt(tv);
-      if (!isNaN(f) && !isNaN(t)) {
-        const lo = Math.max(0, Math.min(f, t));
-        const hi = Math.min(total - 1, Math.max(f, t));
-        for (let i = lo; i <= hi; i++) sharedState.selected.add(i);
+  function bindRangeSelectInput(fromId, toId) {
+    content.on("input", `#${fromId}, #${toId}`, function () {
+      const v = $(this).val();
+      if (v !== "") scrollListToFloor(parseInt(v));
+      const fv = content.find(`#${fromId}`).val();
+      const tv = content.find(`#${toId}`).val();
+      sharedState.selected.clear();
+      if (fv !== "" || tv !== "") {
+        const f = fv === "" ? 0 : parseInt(fv);
+        const t = tv === "" ? total - 1 : parseInt(tv);
+        if (!isNaN(f) && !isNaN(t)) {
+          const lo = Math.max(0, Math.min(f, t));
+          const hi = Math.min(total - 1, Math.max(f, t));
+          for (let i = lo; i <= hi; i++) sharedState.selected.add(i);
+        }
       }
-    }
-    refreshList();
-  });
-
-  content.on("input", "#ih_mgr_del_from, #ih_mgr_del_to", () => {
-    const fv = content.find("#ih_mgr_del_from").val();
-    const tv = content.find("#ih_mgr_del_to").val();
-    sharedState.selected.clear();
-    if (fv !== "" || tv !== "") {
-      const f = fv === "" ? 0 : parseInt(fv);
-      const t = tv === "" ? total - 1 : parseInt(tv);
-      if (!isNaN(f) && !isNaN(t)) {
-        const lo = Math.max(0, Math.min(f, t));
-        const hi = Math.min(total - 1, Math.max(f, t));
-        for (let i = lo; i <= hi; i++) sharedState.selected.add(i);
-      }
-    }
-    refreshList();
-  });
+      refreshList();
+    });
+  }
+  bindRangeSelectInput("ih_mgr_range_from", "ih_mgr_range_to");
+  bindRangeSelectInput("ih_mgr_del_from", "ih_mgr_del_to");
 
   function getSortedSelected() {
     return Array.from(sharedState.selected).sort((a, b) => a - b);
@@ -7259,10 +7718,6 @@ const floatingPanelController = {
     return orientation === "wrap-side" || orientation === "wrap-down";
   },
 
-  _getPanelDisplayValue() {
-    return "flex";
-  },
-
   _applyWrapPanelGrid(panel, fp) {
     if (!panel || !panel[0]) return;
     const size = fp.buttonSize || 12;
@@ -7337,7 +7792,7 @@ const floatingPanelController = {
         ? "ih-fp-horizontal"
         : "ih-fp-vertical";
     const panel = $(
-      `<div class="ih-floating-panel ${panelLayoutClass} ${fp.displayMode === "fixed" ? "ih-fp-fixed" : "ih-fp-collapsible"}"></div>`,
+      `<div class="ih-floating-panel ${panelLayoutClass}"></div>`,
     );
     if (isWrapPanel) {
       this._applyWrapPanelGrid(panel, fp);
@@ -7618,7 +8073,7 @@ const floatingPanelController = {
           });
         }
       }
-      const panelDisplay = this._getPanelDisplayValue();
+      const panelDisplay = "flex";
       this._panelEl.css({
         visibility: "hidden",
         display: panelDisplay,
@@ -7951,41 +8406,7 @@ const floatingPanelController = {
     this._ahTouchEnd = function (e) {
       if (touchMoved) return;
       if (pagingController.active) return;
-      const $target = $(e.target);
-      if (
-        $target.is(
-          "a, button, input, textarea, select, label, video, audio, iframe",
-        ) ||
-        $target.is(
-          "[onclick], [contenteditable], [role='button'], [tabindex]:not([tabindex='-1'])",
-        )
-      ) {
-        return;
-      }
-      if (
-        $target.closest(
-          ".mes_buttons, .swipe_left, .swipe_right, .mes_edit_buttons, " +
-            ".ih-floating-ball, .ih-floating-panel, " +
-            ".qr--button, .qr--buttons",
-        ).length
-      ) {
-        return;
-      }
-      if ($target.is("summary") || $target.closest("summary").length) {
-        return;
-      }
-      if (
-        $target.is(".reasoning-toggle-btn") ||
-        $target.closest(".reasoning-toggle-btn").length
-      ) {
-        return;
-      }
-      if (
-        $target.is(".inline-drawer-toggle, .inline-drawer-header") ||
-        $target.closest(".inline-drawer-toggle, .inline-drawer-header").length
-      ) {
-        return;
-      }
+      if (ihShouldIgnoreTapTarget(e.target)) return;
       if (Date.now() - (self._ahLastToggleTime || 0) < 350) return;
       ahTouchHandled = true;
       setTimeout(() => {
@@ -8002,41 +8423,7 @@ const floatingPanelController = {
       if (Date.now() - (self._ahLastToggleTime || 0) < 350) return;
       if (ahTouchHandled) return;
       if (pagingController.active) return;
-      const $target = $(e.target);
-      if (
-        $target.is(
-          "a, button, input, textarea, select, label, video, audio, iframe",
-        ) ||
-        $target.is(
-          "[onclick], [contenteditable], [role='button'], [tabindex]:not([tabindex='-1'])",
-        )
-      ) {
-        return;
-      }
-      if (
-        $target.closest(
-          ".mes_buttons, .swipe_left, .swipe_right, .mes_edit_buttons, " +
-            ".ih-floating-ball, .ih-floating-panel, " +
-            ".qr--button, .qr--buttons",
-        ).length
-      ) {
-        return;
-      }
-      if ($target.is("summary") || $target.closest("summary").length) {
-        return;
-      }
-      if (
-        $target.is(".reasoning-toggle-btn") ||
-        $target.closest(".reasoning-toggle-btn").length
-      ) {
-        return;
-      }
-      if (
-        $target.is(".inline-drawer-toggle, .inline-drawer-header") ||
-        $target.closest(".inline-drawer-toggle, .inline-drawer-header").length
-      ) {
-        return;
-      }
+      if (ihShouldIgnoreTapTarget(e.target)) return;
       if (floatingPanelController._expanded) return;
       self._ahLastToggleTime = Date.now();
       if (self._autoHideVisible) {
@@ -8555,18 +8942,10 @@ const floatingPanelController = {
     const self = this;
     this._dialogObserver = new MutationObserver(() => {
       if (self._dialogDebounceTimer) return;
-      self._dialogDebounceTimer = true;
-
-      const run = () => {
+      self._dialogDebounceTimer = setTimeout(() => {
         self._dialogDebounceTimer = null;
         self._updateDialogHost();
-      };
-
-      if (typeof queueMicrotask === "function") {
-        queueMicrotask(run);
-      } else {
-        Promise.resolve().then(run);
-      }
+      }, 200);
     });
     this._dialogObserver.observe(document.body, {
       childList: true,
@@ -8582,6 +8961,7 @@ const floatingPanelController = {
       this._dialogObserver.disconnect();
       this._dialogObserver = null;
     }
+    if (this._dialogDebounceTimer) clearTimeout(this._dialogDebounceTimer);
     this._dialogDebounceTimer = null;
     if (this._currentDialogHost) {
       this._moveElementsToBody();
@@ -8929,7 +9309,6 @@ function bindButtonAction(btn, key) {
           "nextAiMsg",
           "pagingMode",
           "autoScroll",
-          "jumpToFloor",
           "bottomNavMode",
         ]);
 
@@ -9335,7 +9714,7 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
       }
     }
     const btn = $(
-      `<button class="input-helper-btn" data-button-key="${ihEscapeAttr(bKey)}" title="${ihEscapeAttr(label)}" data-norefocus="true">${displayHtml}</button>`,
+      `<button class="input-helper-btn" data-button-key="${ihEscapeAttr(bKey)}" title="${ihEscapeAttr(label)}">${displayHtml}</button>`,
     );
     bindButtonAction(btn, bKey);
     btn.on("mousedown", function (e) {
@@ -9555,7 +9934,7 @@ function buildToolbar() {
       ? `<span class="ih-folder-label">${safeLabelText}</span>`
       : "";
     const folderBtn = $(`
-            <button id="input_folder_${fi}_btn" class="input-helper-btn ih-folder-btn" title="${safeLabelAttr}" data-norefocus="true" data-folder-index="${fi}">
+            <button id="input_folder_${fi}_btn" class="input-helper-btn ih-folder-btn" title="${safeLabelAttr}" data-folder-index="${fi}">
                 ${iconHtml}${labelHtml}<i class="fa-solid fa-ellipsis-vertical ih-folder-dots"></i>
             </button>
         `);
@@ -11182,7 +11561,7 @@ function loadCustomSymbolButtons() {
     const displayContent = getButtonDisplayHtml(`custom_${index}`);
     const safeTitle = ihEscapeAttr(symbol.name || "自定义");
     const button = $(
-      `<button id="${buttonId}" class="input-helper-btn custom-symbol-button" title="${safeTitle}" data-norefocus="true" data-index="${index}">${displayContent}</button>`,
+      `<button id="${buttonId}" class="input-helper-btn custom-symbol-button" title="${safeTitle}" data-index="${index}">${displayContent}</button>`,
     );
     $("#input_helper_toolbar").append(button);
     bindButtonAction(button, `custom_${index}`);
@@ -11515,7 +11894,8 @@ function handleGlobalShortcuts(e) {
   for (const key in shortcuts) {
     if (shortcuts[key] === shortcutString) {
       const isSendTextarea = document.activeElement === getMessageInput()[0];
-      if (isInputButton(key)) {
+      if (key === "colorPicker") {
+      } else if (isInputButton(key)) {
         if (!isSendTextarea) return;
       } else {
         const tag = document.activeElement?.tagName;
@@ -12246,21 +12626,19 @@ function setupGlobalFocusTracking() {
   });
 
   try {
-    const obs = new MutationObserver((muts) => {
-      muts.forEach((m) => {
-        m.addedNodes.forEach((n) => {
-          if (!n.tagName) return;
-          if (n.tagName === "IFRAME") {
-            attachToIframe(n);
-            n.addEventListener("load", () => attachToIframe(n));
-          } else if (n.querySelectorAll) {
-            n.querySelectorAll("iframe").forEach((ifr) => {
-              attachToIframe(ifr);
-              ifr.addEventListener("load", () => attachToIframe(ifr));
-            });
-          }
-        });
+    let _iframeScanTimer = null;
+    const scanAllIframes = () => {
+      document.querySelectorAll("iframe").forEach((ifr) => {
+        attachToIframe(ifr);
+        if (!ifr.__ihLoadBound) {
+          ifr.__ihLoadBound = true;
+          ifr.addEventListener("load", () => attachToIframe(ifr));
+        }
       });
+    };
+    const obs = new MutationObserver(() => {
+      clearTimeout(_iframeScanTimer);
+      _iframeScanTimer = setTimeout(scanAllIframes, 300);
     });
     obs.observe(document.body, { childList: true, subtree: true });
   } catch (e) {}
@@ -12452,126 +12830,126 @@ jQuery(async () => {
 
   if (!$("#input_edit_last_msg_btn").length) {
     const editLastBtn = $(
-      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息" data-norefocus="true"><i class="bi bi-pencil-fill"></i></button>',
+      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息"><i class="bi bi-pencil-fill"></i></button>',
     );
     $("#input_helper_toolbar").append(editLastBtn);
   }
   if (!$("#input_generate_swipe_btn").length) {
     const generateSwipeBtn = $(
-      '<button id="input_generate_swipe_btn" class="input-helper-btn" title="生成备选回复" data-norefocus="true"><i class="fa-solid fa-shuffle"></i></button>',
+      '<button id="input_generate_swipe_btn" class="input-helper-btn" title="生成备选回复"><i class="fa-solid fa-shuffle"></i></button>',
     );
     $("#input_helper_toolbar").append(generateSwipeBtn);
   }
   if (!$("#input_open_qr_assistant_btn").length) {
     const qrAssistantBtn = $(
-      '<button id="input_open_qr_assistant_btn" class="input-helper-btn" title="QR助手面板" data-norefocus="true"><i class="fa-solid fa-rocket"></i></button>',
+      '<button id="input_open_qr_assistant_btn" class="input-helper-btn" title="QR助手面板"><i class="fa-solid fa-rocket"></i></button>',
     );
     $("#input_helper_toolbar").append(qrAssistantBtn);
   }
   if (!$("#input_open_chatu8_btn").length) {
     const chatU8Btn = $(
-      '<button id="input_open_chatu8_btn" class="input-helper-btn" title="智绘姬面板" data-norefocus="true"><i class="fa-solid fa-paintbrush"></i></button>',
+      '<button id="input_open_chatu8_btn" class="input-helper-btn" title="智绘姬面板"><i class="fa-solid fa-paintbrush"></i></button>',
     );
     $("#input_helper_toolbar").append(chatU8Btn);
   }
   if (!$("#input_switch_panel_profile_btn").length) {
     const switchPanelBtn = $(
-      '<button id="input_switch_panel_profile_btn" class="input-helper-btn" title="切换面板方案" data-norefocus="true"><i class="fa-solid fa-layer-group"></i></button>',
+      '<button id="input_switch_panel_profile_btn" class="input-helper-btn" title="切换面板方案"><i class="fa-solid fa-layer-group"></i></button>',
     );
     $("#input_helper_toolbar").append(switchPanelBtn);
   }
   if (!$("#input_bottom_nav_mode_btn").length) {
     const bottomNavBtn = $(
-      '<button id="input_bottom_nav_mode_btn" class="input-helper-btn" title="底部跳转模式" data-norefocus="true"><i class="fa-solid fa-angle-double-down"></i></button>',
+      '<button id="input_bottom_nav_mode_btn" class="input-helper-btn" title="底部跳转模式"><i class="fa-solid fa-angle-double-down"></i></button>',
     );
     $("#input_helper_toolbar").append(bottomNavBtn);
   }
   if (!$("#input_include_user_nav_mode_btn").length) {
     const includeUserNavBtn = $(
-      '<button id="input_include_user_nav_mode_btn" class="input-helper-btn" title="包含用户消息导航" data-norefocus="true"><i class="fa-solid fa-arrows-up-down"></i></button>',
+      '<button id="input_include_user_nav_mode_btn" class="input-helper-btn" title="包含用户消息导航"><i class="fa-solid fa-arrows-up-down"></i></button>',
     );
     $("#input_helper_toolbar").append(includeUserNavBtn);
   }
   if (!$("#input_enter_delete_mode_btn").length) {
     const enterDelBtn = $(
-      '<button id="input_enter_delete_mode_btn" class="input-helper-btn" title="进入删除模式" data-norefocus="true"><i class="fa-solid fa-trash-can"></i></button>',
+      '<button id="input_enter_delete_mode_btn" class="input-helper-btn" title="进入删除模式"><i class="fa-solid fa-trash-can"></i></button>',
     );
     $("#input_helper_toolbar").append(enterDelBtn);
   }
   if (!$("#input_copy_text_btn").length) {
     const copyBtn = $(
-      '<button id="input_copy_text_btn" class="input-helper-btn" title="复制" data-norefocus="true"><i class="fa-solid fa-copy"></i></button>',
+      '<button id="input_copy_text_btn" class="input-helper-btn" title="复制"><i class="fa-solid fa-copy"></i></button>',
     );
     $("#input_helper_toolbar").append(copyBtn);
   }
   if (!$("#input_paste_text_btn").length) {
     const pasteBtn = $(
-      '<button id="input_paste_text_btn" class="input-helper-btn" title="粘贴" data-norefocus="true"><i class="fa-solid fa-paste"></i></button>',
+      '<button id="input_paste_text_btn" class="input-helper-btn" title="粘贴"><i class="fa-solid fa-paste"></i></button>',
     );
     $("#input_helper_toolbar").append(pasteBtn);
   }
   if (!$("#input_wrap_toggle_btn").length) {
     const wrapBtn = $(
-      '<button id="input_wrap_toggle_btn" class="input-helper-btn" title="选中包裹模式" data-norefocus="true"><i class="fa-solid fa-object-group"></i></button>',
+      '<button id="input_wrap_toggle_btn" class="input-helper-btn" title="选中包裹模式"><i class="fa-solid fa-object-group"></i></button>',
     );
     $("#input_helper_toolbar").append(wrapBtn);
   }
   if (!$("#input_cursor_left_btn").length) {
     const cursorLeftBtn = $(
-      '<button id="input_cursor_left_btn" class="input-helper-btn" title="光标左移（按住连续移动）" data-norefocus="true"><i class="fa-solid fa-caret-left"></i></button>',
+      '<button id="input_cursor_left_btn" class="input-helper-btn" title="光标左移（按住连续移动）"><i class="fa-solid fa-caret-left"></i></button>',
     );
     $("#input_helper_toolbar").append(cursorLeftBtn);
   }
   if (!$("#input_cursor_right_btn").length) {
     const cursorRightBtn = $(
-      '<button id="input_cursor_right_btn" class="input-helper-btn" title="光标右移（按住连续移动）" data-norefocus="true"><i class="fa-solid fa-caret-right"></i></button>',
+      '<button id="input_cursor_right_btn" class="input-helper-btn" title="光标右移（按住连续移动）"><i class="fa-solid fa-caret-right"></i></button>',
     );
     $("#input_helper_toolbar").append(cursorRightBtn);
   }
   if (!$("#input_chat_undo_btn").length) {
     const chatUndoBtn = $(
-      '<button id="input_chat_undo_btn" class="input-helper-btn input-helper-btn-disabled" title="撤回删除" data-norefocus="true"><i class="fa-solid fa-trash-arrow-up"></i></button>',
+      '<button id="input_chat_undo_btn" class="input-helper-btn input-helper-btn-disabled" title="撤回删除"><i class="fa-solid fa-trash-arrow-up"></i></button>',
     );
     $("#input_helper_toolbar").append(chatUndoBtn);
   }
   if (!$("#input_chat_manager_btn").length) {
     $("#input_helper_toolbar").append(
-      '<button id="input_chat_manager_btn" class="input-helper-btn" title="聊天管理器" data-norefocus="true"><i class="fa-solid fa-address-book"></i></button>',
+      '<button id="input_chat_manager_btn" class="input-helper-btn" title="聊天管理器"><i class="fa-solid fa-address-book"></i></button>',
     );
   }
   if (!$("#input_chat_new_btn").length) {
     $("#input_helper_toolbar").append(
-      '<button id="input_chat_new_btn" class="input-helper-btn" title="新建聊天" data-norefocus="true"><i class="fa-solid fa-comments"></i></button>',
+      '<button id="input_chat_new_btn" class="input-helper-btn" title="新建聊天"><i class="fa-solid fa-comments"></i></button>',
     );
   }
   if (!$("#input_chat_rename_btn").length) {
     $("#input_helper_toolbar").append(
-      '<button id="input_chat_rename_btn" class="input-helper-btn" title="重命名聊天" data-norefocus="true"><i class="fa-solid fa-pen-to-square"></i></button>',
+      '<button id="input_chat_rename_btn" class="input-helper-btn" title="重命名聊天"><i class="fa-solid fa-pen-to-square"></i></button>',
     );
   }
   if (!$("#input_chat_delete_btn").length) {
     $("#input_helper_toolbar").append(
-      '<button id="input_chat_delete_btn" class="input-helper-btn" title="删除聊天" data-norefocus="true"><i class="fa-solid fa-comment-slash"></i></button>',
+      '<button id="input_chat_delete_btn" class="input-helper-btn" title="删除聊天"><i class="fa-solid fa-comment-slash"></i></button>',
     );
   }
   if (!$("#input_chat_close_btn").length) {
     $("#input_helper_toolbar").append(
-      '<button id="input_chat_close_btn" class="input-helper-btn" title="关闭聊天" data-norefocus="true"><i class="fa-solid fa-xmark"></i></button>',
+      '<button id="input_chat_close_btn" class="input-helper-btn" title="关闭聊天"><i class="fa-solid fa-xmark"></i></button>',
     );
   }
   if (!$("#input_quick_hide_btn").length) {
     $("#input_helper_toolbar").append(
-      '<button id="input_quick_hide_btn" class="input-helper-btn" title="快速隐藏（连续点击依次隐藏更多消息）" data-norefocus="true"><i class="fa-solid fa-eye-low-vision"></i></button>',
+      '<button id="input_quick_hide_btn" class="input-helper-btn" title="快速隐藏（连续点击依次隐藏更多消息）"><i class="fa-solid fa-eye-low-vision"></i></button>',
     );
   }
   if (!$("#input_find_replace_btn").length) {
     $("#input_helper_toolbar").append(
-      '<button id="input_find_replace_btn" class="input-helper-btn" title="查找替换" data-norefocus="true"><i class="fa-solid fa-magnifying-glass"></i></button>',
+      '<button id="input_find_replace_btn" class="input-helper-btn" title="查找替换"><i class="fa-solid fa-magnifying-glass"></i></button>',
     );
   }
   if (!$("#input_send_stop_btn").length) {
     const sendStopBtn = $(
-      '<button id="input_send_stop_btn" class="input-helper-btn" title="发送" data-norefocus="true"></button>',
+      '<button id="input_send_stop_btn" class="input-helper-btn" title="发送"></button>',
     );
     sendStopBtn.html(getFeatherSendSvg());
     $("#input_helper_toolbar").append(sendStopBtn);
@@ -12579,9 +12957,16 @@ jQuery(async () => {
 
   if (!$("#input_reset_floating_ball_btn").length) {
     const resetBallBtn = $(
-      '<button id="input_reset_floating_ball_btn" class="input-helper-btn" title="重置悬浮球位置" data-norefocus="true"><i class="fa-solid fa-arrows-to-dot"></i></button>',
+      '<button id="input_reset_floating_ball_btn" class="input-helper-btn" title="重置悬浮球位置"><i class="fa-solid fa-arrows-to-dot"></i></button>',
     );
     $("#input_helper_toolbar").append(resetBallBtn);
+  }
+
+  if (!$("#input_color_picker_btn").length) {
+    const colorPickerBtn = $(
+      '<button id="input_color_picker_btn" class="input-helper-btn" title="取色器"><i class="fa-solid fa-eye-dropper"></i></button>',
+    );
+    $("#input_helper_toolbar").append(colorPickerBtn);
   }
 
   ALL_BUTTON_KEYS.forEach((key) => {
@@ -12859,6 +13244,7 @@ jQuery(async () => {
       _themeChangeTimer = setTimeout(() => {
         _lastThemeRefreshTime = Date.now();
         _invalidateThemeSample();
+        _invalidateBallCSSCache();
         _cachedToolbarStyles = null;
         _cachedToolbarStylesTime = 0;
         if (floatingPanelController._isDragging) return;
@@ -12883,7 +13269,6 @@ jQuery(async () => {
     themeObserver.observe(document.head, {
       childList: true,
       subtree: true,
-      characterData: true,
     });
   } catch (e) {
     console.warn("快捷工具栏: 主题监听初始化失败", e);

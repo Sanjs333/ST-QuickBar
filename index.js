@@ -370,6 +370,7 @@ const defaultSettings = {
   twoRowMode: false,
   twoRowOrder: "input-first",
   bottomNavMode: false,
+  colorPicker: { x: null, y: null, width: 0, height: 0 },
   floatingPanel: {
     enabled: false,
     orientation: "vertical",
@@ -2773,6 +2774,11 @@ function openColorPicker() {
     toastr.warning("这个编辑区暂不支持取色", "", { timeOut: 1500 });
     return;
   }
+  if (target === getMessageInput()[0]) {
+    _lastFocusedEditable = null;
+  } else {
+    _lastFocusedEditable = target;
+  }
 
   const COLOR_RE =
     /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|rgba?\([^)]*\)|hsla?\([^)]*\)/gi;
@@ -2861,6 +2867,12 @@ function openColorPicker() {
       textareaEl.scrollTop = savedScroll;
       textareaEl.dispatchEvent(new Event("input", { bubbles: true }));
       textareaEl.scrollTop = savedScroll;
+      try {
+        textareaEl.focus({ preventScroll: true });
+        textareaEl.setSelectionRange(start, start + newStr.length);
+        textareaEl.scrollTop = savedScroll;
+      } catch (e) {}
+      _lastFocusedEditable = isSend ? null : textareaEl;
       historyManager.pushState($(textareaEl));
     }
   };
@@ -2873,6 +2885,9 @@ function openColorPicker() {
   const portal = $(
     `<div class="ih-color-picker-portal"><div class="ih-cp-header"><span class="ih-cp-drag" title="按住拖动面板"><i class="fa-solid fa-grip-lines"></i></span><div class="ih-cp-header-btns"><button class="ih-cp-pin" type="button" title="固定面板：点亮后点击外部不会关闭，再点一下解除"><i class="fa-solid fa-thumbtack"></i></button><button class="ih-cp-close" type="button" title="关闭取色面板"><i class="fa-solid fa-xmark"></i></button></div></div><div class="ih-cp-list"></div><div class="ih-cp-resize" title="拖动调整面板大小"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></div></div>`,
   );
+  const _cpSaved = getSettings().colorPicker || {};
+  if (_cpSaved.width > 0) portal.css("width", _cpSaved.width + "px");
+  if (_cpSaved.height > 0) portal.css("height", _cpSaved.height + "px");
   const listEl = portal.find(".ih-cp-list");
   let pinned = false;
   let activeIndex = -1;
@@ -3072,6 +3087,14 @@ function openColorPicker() {
       document.removeEventListener("mouseup", _cpUp, true);
       document.removeEventListener("touchmove", _cpMove, true);
       document.removeEventListener("touchend", _cpUp, true);
+      try {
+        const _r = portal[0].getBoundingClientRect();
+        const _cp = getSettings().colorPicker || {};
+        _cp.x = Math.round(_r.left);
+        _cp.y = Math.round(_r.top);
+        getSettings().colorPicker = _cp;
+        saveSettingsDebounced();
+      } catch (e) {}
     };
     const _cpDown = (e) => {
       if (e.target.closest && e.target.closest(".ih-cp-header-btns")) return;
@@ -3113,6 +3136,14 @@ function openColorPicker() {
       document.removeEventListener("mouseup", _rUp, true);
       document.removeEventListener("touchmove", _rMove, true);
       document.removeEventListener("touchend", _rUp, true);
+      try {
+        const _r = portal[0].getBoundingClientRect();
+        const _cp = getSettings().colorPicker || {};
+        _cp.width = Math.round(_r.width);
+        _cp.height = Math.round(_r.height);
+        getSettings().colorPicker = _cp;
+        saveSettingsDebounced();
+      } catch (e) {}
     };
     const _rDown = (e) => {
       e.stopPropagation();
@@ -3156,7 +3187,14 @@ function openColorPicker() {
     const ddW = portal.outerWidth();
     const ddH = portal.outerHeight();
     let left, top;
-    if (anchorBtn) {
+    if (
+      _cpSaved &&
+      typeof _cpSaved.x === "number" &&
+      typeof _cpSaved.y === "number"
+    ) {
+      left = _cpSaved.x;
+      top = _cpSaved.y;
+    } else if (anchorBtn) {
       const r = anchorBtn.getBoundingClientRect();
       left = r.left + r.width / 2 - ddW / 2;
       top = r.top - ddH - 6;
@@ -3200,6 +3238,35 @@ function openColorPicker() {
     document.addEventListener("mousedown", outside, true);
     document.addEventListener("touchstart", outside, true);
   }, 60);
+}
+
+function ihApplyTextMinimalChange(el, newText) {
+  const oldText = el.value || "";
+  if (oldText === newText) {
+    return { start: el.selectionStart || 0, end: el.selectionEnd || 0 };
+  }
+  let start = 0;
+  const minLen = Math.min(oldText.length, newText.length);
+  while (start < minLen && oldText[start] === newText[start]) start++;
+  let endOld = oldText.length;
+  let endNew = newText.length;
+  while (
+    endOld > start &&
+    endNew > start &&
+    oldText[endOld - 1] === newText[endNew - 1]
+  ) {
+    endOld--;
+    endNew--;
+  }
+  const insert = newText.slice(start, endNew);
+  if (typeof el.setRangeText === "function") {
+    try {
+      el.setRangeText(insert, start, endOld, "preserve");
+      return { start, end: start + insert.length };
+    } catch (e) {}
+  }
+  el.value = newText;
+  return { start, end: start + insert.length };
 }
 
 const historyManager = {
@@ -3418,12 +3485,18 @@ const historyManager = {
       this.isPerformingUndoRedo = true;
       this.pointer--;
       const state = this.states[this.pointer];
-      textarea.val(state.text);
+      const _savedScroll = target.scrollTop;
+      ihApplyTextMinimalChange(target, state.text);
+      target.scrollTop = _savedScroll;
       target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.scrollTop = _savedScroll;
       setTimeout(() => {
         textarea.prop("selectionStart", state.cursorPos);
         textarea.prop("selectionEnd", state.cursorPos);
-        textarea.focus();
+        if (document.activeElement !== target) {
+          target.focus({ preventScroll: true });
+        }
+        target.scrollTop = _savedScroll;
         this.isPerformingUndoRedo = false;
         this.updateButtons();
         if (
@@ -3453,11 +3526,12 @@ const historyManager = {
       const state = h.states[h.pointer];
       const _savedScroll = target.scrollTop;
       const _wasFocused = document.activeElement === target;
-      target.value = state.text;
+      const _chg = ihApplyTextMinimalChange(target, state.text);
       target.scrollTop = _savedScroll;
       try {
-        target.selectionStart = state.cursorPos;
-        target.selectionEnd = state.cursorPos;
+        const _cp = _wasFocused && _chg ? _chg.end : state.cursorPos;
+        target.selectionStart = _cp;
+        target.selectionEnd = _cp;
       } catch (e) {}
       target.scrollTop = _savedScroll;
       target.dispatchEvent(new Event("input", { bubbles: true }));
@@ -3467,7 +3541,9 @@ const historyManager = {
       });
       setTimeout(() => {
         try {
-          if (_wasFocused) target.focus({ preventScroll: true });
+          if (_wasFocused && document.activeElement !== target) {
+            target.focus({ preventScroll: true });
+          }
           target.scrollTop = _savedScroll;
         } catch (e) {}
         h.isPerformingUndoRedo = false;
@@ -3570,12 +3646,18 @@ const historyManager = {
       this.isPerformingUndoRedo = true;
       this.pointer++;
       const state = this.states[this.pointer];
-      textarea.val(state.text);
+      const _savedScroll = target.scrollTop;
+      ihApplyTextMinimalChange(target, state.text);
+      target.scrollTop = _savedScroll;
       target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.scrollTop = _savedScroll;
       setTimeout(() => {
         textarea.prop("selectionStart", state.cursorPos);
         textarea.prop("selectionEnd", state.cursorPos);
-        textarea.focus();
+        if (document.activeElement !== target) {
+          target.focus({ preventScroll: true });
+        }
+        target.scrollTop = _savedScroll;
         this.isPerformingUndoRedo = false;
         this.updateButtons();
         if (
@@ -3605,11 +3687,12 @@ const historyManager = {
       const state = h.states[h.pointer];
       const _savedScrollR = target.scrollTop;
       const _wasFocusedR = document.activeElement === target;
-      target.value = state.text;
+      const _chgR = ihApplyTextMinimalChange(target, state.text);
       target.scrollTop = _savedScrollR;
       try {
-        target.selectionStart = state.cursorPos;
-        target.selectionEnd = state.cursorPos;
+        const _cpR = _wasFocusedR && _chgR ? _chgR.end : state.cursorPos;
+        target.selectionStart = _cpR;
+        target.selectionEnd = _cpR;
       } catch (e) {}
       target.scrollTop = _savedScrollR;
       target.dispatchEvent(new Event("input", { bubbles: true }));
@@ -3619,7 +3702,9 @@ const historyManager = {
       });
       setTimeout(() => {
         try {
-          if (_wasFocusedR) target.focus({ preventScroll: true });
+          if (_wasFocusedR && document.activeElement !== target) {
+            target.focus({ preventScroll: true });
+          }
           target.scrollTop = _savedScrollR;
         } catch (e) {}
         h.isPerformingUndoRedo = false;
@@ -5808,12 +5893,14 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.9.8";
+const CHANGELOG_VERSION = "2.9.9";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.8</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.9</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>新增「取色器」</b>：自动扫描输入框/编辑区里的颜色值（#十六进制、rgb/rgba、hsl/hsla），列成可拖动小面板，点行跳转、拖滑块调透明度、图钉固定，改完自动写回。适合调 CSS 配色。</li>
-  <li><b>性能优化</b>：悬浮球美化 CSS 检测改为缓存计算、撤回快照轮询降频、弹窗跟随改用微任务，减少后台空转。</li>
+  <li><b>优化撤销/重做体验</b>：在长文本框中编辑后执行撤销操作，视图将保持当前滚动位置，不再跳转至底部或出现闪烁，交互更符合主流编辑器习惯。</li>
+  <li><b>取色器面板记忆</b>：取色器面板的位置与尺寸现在会自动保存，再次打开时恢复至上一次的状态，无需重复调整。</li>
+  <li><b>修复取色器撤销冲突</b>：使用取色器修改颜色后执行撤销，现在仅准确撤销颜色变更，不再错误影响输入框中的文本内容。</li>
+  <li><b>修复文件夹层级遮挡</b>：悬浮面板中展开的文件夹在弹出窗口内显示时，层级关系已修正，不再被其他元素遮挡。</li>
 </ul>
 `;
 
@@ -8355,7 +8442,8 @@ const floatingPanelController = {
               ".popup, #shadow_popup, .mes_edit_buttons, " +
               "#input_helper_toolbar, .ih-find-bar, " +
               ".ih-folder-dropdown-portal, .ih-dialog-overlay, " +
-              ".input-helper-settings, .range-block",
+              ".input-helper-settings, .range-block, " +
+              ".ih-color-picker-portal",
           ).length
         )
           return;
@@ -9726,7 +9814,12 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
     dropdown.remove();
     return;
   }
-  $("body").append(dropdown);
+  const _fdOpenDialogs = document.querySelectorAll("dialog[open]");
+  const _fdHost =
+    _fdOpenDialogs.length > 0
+      ? _fdOpenDialogs[_fdOpenDialogs.length - 1]
+      : document.body;
+  $(_fdHost).append(dropdown);
   syncToolbarButtonStyles(dropdown);
   syncDialogTheme(dropdown[0]);
   [
@@ -12101,6 +12194,7 @@ async function loadSettings() {
   }
   if (!s.customSymbols) s.customSymbols = [];
   if (!s.folders) s.folders = [];
+  if (!s.colorPicker) s.colorPicker = { x: null, y: null, width: 0, height: 0 };
   if (s.enabled === undefined) s.enabled = true;
   if (s.confirmDangerousActions === undefined)
     s.confirmDangerousActions = false;
@@ -12413,7 +12507,8 @@ function setupGlobalFocusTracking() {
         $(el).closest(
           "#input_helper_toolbar, .ih-find-bar, .ih-folder-dropdown-portal, " +
             ".ih-floating-panel, .ih-floating-ball, .ih-dialog-overlay, " +
-            ".input-helper-settings, #extensions_settings, #extensions_settings2",
+            ".input-helper-settings, #extensions_settings, #extensions_settings2, " +
+            ".ih-color-picker-portal",
         ).length > 0
       );
     } catch (e) {

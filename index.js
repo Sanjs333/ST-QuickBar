@@ -5767,7 +5767,7 @@ function openBeautyPromptPanel() {
 
 ## 输出格式
 
-直接给我一段可以粘贴的 CSS 代码块，用  开头做注释标记。`;
+直接给我一段可以粘贴的 CSS 代码块，用 /* ===快捷工具栏=== */ 开头做注释标记。`;
 
   const { overlay, escHandler } = createDialogOverlay();
   const content = $(`

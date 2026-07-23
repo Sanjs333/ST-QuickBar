@@ -10645,6 +10645,15 @@ function _getThemeSample() {
     const selCs = rootWin.getComputedStyle(probeSelect);
     result.selColor = selCs.color;
     result.selBg = selCs.backgroundColor;
+    result.selBgImage = selCs.backgroundImage;
+    result.selBgSize = selCs.backgroundSize;
+    result.selBgPos = selCs.backgroundPosition;
+    result.selBgRepeat = selCs.backgroundRepeat;
+    result.selBoxShadow = selCs.boxShadow;
+    result.selBorderStyle = selCs.borderStyle;
+    result.selBorderWidth = selCs.borderWidth;
+    result.selBorderColor = selCs.borderColor;
+    result.selBorderRadius = selCs.borderRadius;
     probeSelect.remove();
     _cachedThemeSample = result;
     _cachedThemeSampleTime = now;
@@ -10681,6 +10690,21 @@ function syncDialogTheme(contentEl, options) {
       .forEach(function (el) {
         el.style.removeProperty("color");
         el.style.removeProperty("background-color");
+      });
+    contentEl
+      .querySelectorAll(
+        "select, .ih-mgr-select2-display, .ih-mgr-select2-dropdown",
+      )
+      .forEach(function (el) {
+        el.style.removeProperty("background-image");
+        el.style.removeProperty("background-size");
+        el.style.removeProperty("background-position");
+        el.style.removeProperty("background-repeat");
+        el.style.removeProperty("box-shadow");
+        el.style.removeProperty("border-style");
+        el.style.removeProperty("border-width");
+        el.style.removeProperty("border-color");
+        el.style.removeProperty("border-radius");
       });
   } catch (e) {}
   try {
@@ -10750,16 +10774,54 @@ function syncDialogTheme(contentEl, options) {
           el.style.setProperty("background-color", s.btnBg, "important");
         }
       });
-    contentEl.querySelectorAll("select").forEach(function (el) {
-      if (s.selColor) el.style.setProperty("color", s.selColor, "important");
-      if (
-        s.selBg &&
-        s.selBg !== "rgba(0, 0, 0, 0)" &&
-        s.selBg !== "transparent"
-      ) {
-        el.style.setProperty("background-color", s.selBg, "important");
-      }
-    });
+    contentEl
+      .querySelectorAll(
+        "select, .ih-mgr-select2-display, .ih-mgr-select2-dropdown",
+      )
+      .forEach(function (el) {
+        if (s.selColor) el.style.setProperty("color", s.selColor, "important");
+        if (
+          s.selBg &&
+          s.selBg !== "rgba(0, 0, 0, 0)" &&
+          s.selBg !== "transparent"
+        ) {
+          el.style.setProperty("background-color", s.selBg, "important");
+        }
+        if (s.selBgImage && s.selBgImage !== "none") {
+          el.style.setProperty("background-image", s.selBgImage, "important");
+          if (s.selBgSize)
+            el.style.setProperty("background-size", s.selBgSize, "important");
+          if (s.selBgPos)
+            el.style.setProperty(
+              "background-position",
+              s.selBgPos,
+              "important",
+            );
+          if (s.selBgRepeat)
+            el.style.setProperty(
+              "background-repeat",
+              s.selBgRepeat,
+              "important",
+            );
+        }
+        if (s.selBoxShadow && s.selBoxShadow !== "none") {
+          el.style.setProperty("box-shadow", s.selBoxShadow, "important");
+        }
+        if (
+          s.selBorderStyle &&
+          s.selBorderStyle !== "none" &&
+          s.selBorderWidth &&
+          s.selBorderWidth !== "0px"
+        ) {
+          el.style.setProperty("border-style", s.selBorderStyle, "important");
+          el.style.setProperty("border-width", s.selBorderWidth, "important");
+          if (s.selBorderColor)
+            el.style.setProperty("border-color", s.selBorderColor, "important");
+        }
+        if (s.selBorderRadius && s.selBorderRadius !== "0px") {
+          el.style.setProperty("border-radius", s.selBorderRadius, "important");
+        }
+      });
   } catch (e) {}
 }
 

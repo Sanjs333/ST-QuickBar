@@ -4744,3 +4744,6 @@ body.ih-cp-selecting input::-moz-selection {
   font-size: 11px;
   opacity: 0.5;
 }
+#ih_mgr_transfer_display .ih-mgr-select2-caret {
+  display: none !important;
+}

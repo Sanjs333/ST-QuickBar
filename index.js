@@ -1,9 +1,14 @@
 import {
   chat,
+  characters,
+  this_chid,
+  name1,
   event_types,
   eventSource,
   Generate,
   saveSettingsDebounced,
+  getRequestHeaders,
+  openCharacterChat,
 } from "../../../../script.js";
 import { extension_settings } from "../../../extensions.js";
 import { power_user } from "../../../power-user.js";
@@ -437,6 +442,7 @@ const defaultSettings = {
   buttonOrder: [...ALL_BUTTON_KEYS],
   customSymbols: [],
   folders: [],
+  transferHistory: {},
 };
 
 const shortcutFunctionMap = {
@@ -1385,7 +1391,7 @@ const autoScrollController = {
     }
 
     if (this._chatEl.scrollHeight <= this._chatEl.clientHeight) {
-      toastr.warning("当前目标内容不够多，没有可滚动的空间", "", {
+      toastr.warning("当前区域内容不足，无可滚动空间", "", {
         timeOut: 1500,
       });
       this.active = false;
@@ -2506,7 +2512,7 @@ const findReplaceController = {
     let hint = this._barEl.find(".ih-find-select-hint");
     if (!hint.length) {
       hint = $(
-        `<div class="ih-find-select-hint ih-hm-status"><i class="fa-solid fa-circle-info"></i><span>当前未选中匹配项，按一下"下一个"按钮（↓）选中后再替换</span></div>`,
+        `<div class="ih-find-select-hint ih-hm-status"><i class="fa-solid fa-circle-info"></i><span>当前未选中匹配项，请先点击"下一个"（↓）选中后再替换</span></div>`,
       );
       this._barEl.append(hint);
       syncDialogTheme(this._barEl[0]);
@@ -2765,7 +2771,7 @@ function openColorPicker() {
   if (target.isContentEditable) {
     cmView = getCodeMirrorView(target);
     if (!cmView) {
-      toastr.warning("这个编辑区暂不支持取色", "", { timeOut: 1500 });
+      toastr.warning("当前编辑区暂不支持取色", "", { timeOut: 1500 });
       return;
     }
   } else if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") {
@@ -2804,7 +2810,7 @@ function openColorPicker() {
   const initial = scan();
   if (initial.length === 0) {
     toastr.info(
-      "当前编辑框里没有找到颜色值，请先点一下要取色的编辑框，确认光标在正确的框内再试",
+      "当前编辑框中未找到颜色值，请先点击目标编辑框，确认光标位于正确位置后再试",
       "",
       { timeOut: 3000 },
     );
@@ -2883,7 +2889,7 @@ function openColorPicker() {
   closeAllFolderDropdowns();
 
   const portal = $(
-    `<div class="ih-color-picker-portal"><div class="ih-cp-header"><span class="ih-cp-drag" title="按住拖动面板"><i class="fa-solid fa-grip-lines"></i></span><div class="ih-cp-header-btns"><button class="ih-cp-pin" type="button" title="固定面板：点亮后点击外部不会关闭，再点一下解除"><i class="fa-solid fa-thumbtack"></i></button><button class="ih-cp-close" type="button" title="关闭取色面板"><i class="fa-solid fa-xmark"></i></button></div></div><div class="ih-cp-list"></div><div class="ih-cp-resize" title="拖动调整面板大小"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></div></div>`,
+    `<div class="ih-color-picker-portal"><div class="ih-cp-header"><span class="ih-cp-drag" title="按住拖动面板"><i class="fa-solid fa-grip-lines"></i></span><div class="ih-cp-header-btns"><button class="ih-cp-pin" type="button" title="固定面板：启用后点击外部不会关闭，再次点击解除"><i class="fa-solid fa-thumbtack"></i></button><button class="ih-cp-close" type="button" title="关闭取色面板"><i class="fa-solid fa-xmark"></i></button></div></div><div class="ih-cp-list"></div><div class="ih-cp-resize" title="拖动调整面板大小"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></div></div>`,
   );
   const _cpSaved = getSettings().colorPicker || {};
   if (_cpSaved.width > 0) portal.css("width", _cpSaved.width + "px");
@@ -2949,9 +2955,9 @@ function openColorPicker() {
       html += `
         <div class="ih-cp-row${i === activeIndex ? " ih-cp-row-active" : ""}" data-index="${i}">
           <span class="ih-cp-swatch" style="--cp-bg:${swatchBg};"></span>
-          <span class="ih-cp-text" title="点击跳转到编辑框里这个颜色">${ihEscapeHtml(c.raw)}</span>
+          <span class="ih-cp-text" title="点击跳转至编辑框中的此颜色">${ihEscapeHtml(c.raw)}</span>
           <span class="ih-cp-controls">
-            <input type="color" class="ih-cp-color" value="${hex}" title="选颜色" />
+            <input type="color" class="ih-cp-color" value="${hex}" title="选择颜色" />
             <span class="ih-cp-alpha-wrap">
               <input type="range" class="ih-cp-alpha" min="0" max="100" value="${alphaPct}" title="透明度" />
               <span class="ih-cp-alpha-val">${alphaPct}%</span>
@@ -3987,11 +3993,11 @@ const chatUndoManager = {
       await executeSlashCommandsWithOptions("/chat-reload");
       const remaining = this._snapshots.length;
       if (remaining > 0) {
-        toastr.success(`已撤回 1 步，还能撤回 ${remaining} 步`, "", {
+        toastr.success(`已撤回 1 步，剩余可撤回 ${remaining} 步`, "", {
           timeOut: 900,
         });
       } else {
-        toastr.success("已撤回 1 步，无多余可撤回步骤", "", {
+        toastr.success("已撤回 1 步，无剩余可撤回步骤", "", {
           timeOut: 900,
         });
       }
@@ -5180,7 +5186,9 @@ function doDeleteLastMsg() {
   }
   chatUndoManager.save();
   executeSlashCommandsWithOptions("/del 1");
-  toastr.info("已删除最后一条消息（可点撤回按钮还原）", "", { timeOut: 1000 });
+  toastr.info("已删除最后一条消息（可通过撤回按钮还原）", "", {
+    timeOut: 1000,
+  });
 }
 
 function doDeleteLastSwipe() {
@@ -5200,7 +5208,9 @@ function doDeleteLastSwipe() {
   }
   chatUndoManager.save();
   executeSlashCommandsWithOptions("/delswipe");
-  toastr.info("已删除当前备选回复（可点撤回按钮还原）", "", { timeOut: 1000 });
+  toastr.info("已删除当前备选回复（可通过撤回按钮还原）", "", {
+    timeOut: 1000,
+  });
 }
 
 function doContinueReply() {
@@ -5776,7 +5786,7 @@ function openBeautyPromptPanel() {
                 <i class="fa-solid fa-palette"></i> 快捷工具栏美化指南
             </h3>
             <div style="font-size:11px;opacity:0.6;margin-bottom:12px;line-height:1.6;">
-                将下面的提示词复制给 AI，并在「风格要求」处填写你的配色风格描述，即可生成匹配你主题的快捷工具栏美化 CSS。
+                将下方提示词复制给 AI，并在「风格要求」处填写配色风格描述，即可生成匹配当前主题的快捷工具栏美化 CSS。
             </div>
             <div class="ih-beauty-prompt-box">
                 <pre class="ih-beauty-prompt-text"></pre>
@@ -5893,14 +5903,16 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "2.9.9";
+const CHANGELOG_VERSION = "3.0.0";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v2.9.9</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.0.0</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>优化撤销/重做体验</b>：在长文本框中编辑后执行撤销操作，视图将保持当前滚动位置，不再跳转至底部或出现闪烁，交互更符合主流编辑器习惯。</li>
-  <li><b>取色器面板记忆</b>：取色器面板的位置与尺寸现在会自动保存，再次打开时恢复至上一次的状态，无需重复调整。</li>
-  <li><b>修复取色器撤销冲突</b>：使用取色器修改颜色后执行撤销，现在仅准确撤销颜色变更，不再错误影响输入框中的文本内容。</li>
-  <li><b>修复文件夹层级遮挡</b>：悬浮面板中展开的文件夹在弹出窗口内显示时，层级关系已修正，不再被其他元素遮挡。</li>
+  <li><b>消息管理新增「转存」标签</b>：可将当前聊天中的消息复制或移动至同一角色的其他聊天档，适用于小剧场搬家、剧情迁移、支线整理、场景归档等场景。</li>
+  <li><b>上下分栏预览</b>：上方显示当前聊天列表，下方显示目标聊天档预览。点击目标档中的某条消息（或其前方的落点按钮）即可设定插入位置，亦可选择「追加至末尾」。</li>
+  <li><b>支持双向转存</b>：通过列表工具栏的「上 / 下」切换按钮决定转存方向。切换至「上」时从当前聊天转出至目标档；切换至「下」时将其他聊天档中的消息转入当前聊天。全选、反选、范围选择、清除等操作会作用于当前显示勾选框的一侧。</li>
+  <li><b>复制与移动</b>：复制会在原聊天中保留消息；移动会将消息从来源中删除并写入目标档，转入当前聊天的操作可通过「撤回删除」还原。</li>
+  <li><b>目标档直接编辑</b>：目标聊天档预览中的每条消息可通过铅笔按钮直接修改内容，保存后写回目标档文件。</li>
+  <li><b>目标档记忆</b>：最近使用过的目标聊天档会置顶显示于下拉框顶部，便于快速再次选择。</li>
 </ul>
 `;
 
@@ -5974,8 +5986,8 @@ function openHelpPanel() {
 <div style="font-size:12px;line-height:1.8;opacity:0.92;">
 
 <h4 style="margin:8px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-info-circle"></i> 关于工具栏</h4>
-<p>工具栏默认在聚焦聊天输入框时展开，离开后自动收起。可在设置面板顶部开启<q>「工具栏固定展开」</q>让其始终保持展开状态。</p>
-<p><b>移动端开合手势</b>：点击输入框时工具栏会展开。在工具栏上向上滑动可展开、向下滑动可收起并收回键盘，方便单手操作。</p>
+<p>工具栏默认在聚焦聊天输入框时展开，离开后自动收起。可在设置面板顶部开启<q>「工具栏固定展开」</q>使其始终保持展开状态。</p>
+<p><b>移动端开合手势</b>：点击输入框时工具栏会展开。在工具栏上向上滑动可展开、向下滑动可收起并收回键盘，便于单手操作。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-globe"></i> 外部输入框支持</h4>
 <p>工具栏不仅作用于聊天输入框。当光标位于以下位置时，符号按钮、撤回/重做、查找替换等功能会作用于该位置：</p>
@@ -5986,50 +5998,50 @@ function openHelpPanel() {
     <li>CodeMirror 代码编辑器</li>
     <li>contentEditable 区域</li>
 </ul>
-<p>滚动类功能（跳转顶部/底部、翻页等）会自动作用于光标所在的可滚动容器，而不是默认的聊天区。</p>
+<p>滚动类功能（跳转顶部/底部、翻页等）会自动作用于光标所在的可滚动容器，而非默认的聊天区。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-pen"></i> 编辑功能</h4>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-rotate-left"></i> 撤回 / 重做</p>
-<p>支持多步撤回和重做，最多保留 50 步历史。外部编辑框拥有独立的历史记录。如果同一个 textarea 被酒馆复用来编辑不同内容，插件会自动重建历史，避免不同页面之间的撤回串台。</p>
+<p>支持多步撤回和重做，最多保留 50 步历史。外部编辑框拥有独立的历史记录。若同一个 textarea 被酒馆复用于编辑不同内容，插件会自动重建历史，避免不同页面之间的撤回历史相互干扰。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-up-down-left-right"></i> 选中模式</p>
-<p>移动端文本选择辅助工具。开启后，先在输入框中点击一个位置作为起点，再点击另一个位置，插件会将这两点之间的文本全部选中。再次点击按钮关闭该模式。</p>
+<p>移动端文本选择辅助工具。开启后，先在输入框中点击一个位置作为起点，再点击另一个位置，插件会将两点之间的文本全部选中。再次点击按钮关闭该模式。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-caret-left"></i><i class="fa-solid fa-caret-right"></i> 光标左移 / 右移</p>
-<p>移动端精确移动光标的辅助按钮。点击一下移动一个字符，按住不放可连续移动（约 0.35 秒后开始连续触发，松手停止）。光标移动不会触发输入事件，不会污染撤销历史。默认关闭，可在<q>「按钮管理」</q>中启用。</p>
+<p>移动端精确移动光标的辅助按钮。点击一次移动一个字符，长按可连续移动（约 0.35 秒后触发连续移动，松开按钮停止）。光标移动不会触发输入事件，不会影响撤销历史。默认关闭，可在<q>「按钮管理」</q>中启用。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-object-group"></i> 选中包裹模式</p>
-<p>全局开关。开启后，自定义按钮的<q>「插入内容」</q>会按照设置的<q>「光标位置」</q>切成左右两半，自动包裹选中的文本。例如：自定义内容是 <code>**粗体**</code>，光标位置设为<q>「中间」</q>，开启此模式选中 abc 再点按钮，会变成 <code>**abc**</code>。</p>
-<p>原生的 **、<q>""</q>、() 等内置符号按钮本身就是包裹模式，不受此开关影响。如果只想给个别按钮启用，可以在编辑该自定义按钮时勾选其专属的<q>「选中包裹」</q>选项。</p>
+<p>全局开关。开启后，自定义按钮的<q>「插入内容」</q>会按照设置的<q>「光标位置」</q>拆分为左右两半，自动包裹选中的文本。例如：自定义内容为 <code>**粗体**</code>，光标位置设为<q>「中间」</q>，开启此模式后选中 abc 再点击按钮，会变为 <code>**abc**</code>。</p>
+<p>原生的 **、<q>""</q>、() 等内置符号按钮本身即为包裹模式，不受此开关影响。如需仅对个别按钮启用，可在编辑该自定义按钮时勾选其专属的<q>「选中包裹」</q>选项。</p>
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-copy"></i> 复制 / 粘贴</p>
 <p><b>复制</b>：复制当前输入框或编辑区域中选中的文本。</p>
-<p><b>粘贴</b>：读取系统剪贴板内容并插入到当前光标位置。需要浏览器允许剪贴板权限，通常要求 HTTPS 或 localhost 环境。</p>
+<p><b>粘贴</b>：读取系统剪贴板内容并插入至当前光标位置。需要浏览器允许剪贴板权限，通常要求 HTTPS 或 localhost 环境。</p>
 <p>两个按钮默认关闭，可在<q>「按钮管理」</q>中启用，也支持绑定快捷键。</p>
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-eye-dropper"></i> 取色器</p>
-<p>自动扫描当前输入框或编辑区域里的颜色值（支持 #十六进制、rgb / rgba、hsl / hsla 写法），把它们列在一个可拖动的小面板里，方便快速预览和修改。</p>
+<p>自动扫描当前输入框或编辑区域中的颜色值（支持 #十六进制、rgb / rgba、hsl / hsla 写法），并在一个可拖动的面板中列出，便于预览和修改。</p>
 <ul>
-    <li>点某一行的颜色文字，会跳转并选中编辑框里对应的那段颜色，方便定位</li>
-    <li>点色块旁的取色按钮换颜色，拖动滑块调透明度，改完自动写回编辑框</li>
-    <li>面板可拖动位置、拖右下角调整大小；点图钉按钮钉住后，点击面板外部不会自动关闭，适合连续改多个颜色</li>
-    <li>把光标移到编辑框里某个颜色上，面板会自动高亮对应的那一行</li>
+    <li>点击某一行的颜色文本，可跳转并选中编辑框中对应的颜色，便于定位</li>
+    <li>点击色块旁的取色按钮更换颜色，拖动滑块调整透明度，修改后自动写回编辑框</li>
+    <li>面板支持拖动位置、拖动右下角调整大小；点击图钉按钮固定后，点击面板外部不会自动关闭，适合连续修改多个颜色</li>
+    <li>将光标移动到编辑框中某个颜色上，面板会自动高亮对应行</li>
 </ul>
 <p>默认关闭，可在<q>「按钮管理」</q>中启用，也支持绑定快捷键。适合美化 CSS、调整配色时使用。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-magnifying-glass"></i> 查找替换</p>
-<p>在输入框、正在编辑的消息、以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）中查找和替换文本。</p>
+<p>在输入框、正在编辑的消息以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）中查找和替换文本。</p>
 <p>键盘操作：</p>
 <ul>
-    <li>Enter：跳转到下一个匹配项</li>
-    <li>Shift+Enter：跳转到上一个匹配项</li>
+    <li>Enter：跳转至下一个匹配项</li>
+    <li>Shift+Enter：跳转至上一个匹配项</li>
     <li>Esc：关闭查找栏</li>
     <li>点击 Aa：切换是否区分大小写</li>
 </ul>
 <p>普通 textarea 中查找到的当前匹配会显示可视高亮。即使点击<q>「替换为」</q>输入框，当前匹配位置也会保持标记。</p>
-<p><b>移动端折叠模式</b>：点击替换行最右侧的折叠按钮（双左箭头），可将整个查找框收成屏幕左侧的窄竖条，只保留展开按钮、上/下导航、当前/总数。点击展开按钮（双右箭头）恢复完整面板。折叠状态下搜索状态、匹配位置、跨弹窗跟随等行为完全保留。</p>
+<p><b>移动端折叠模式</b>：点击替换行最右侧的折叠按钮（双左箭头），可将查找框折叠为屏幕左侧的窄竖条，仅保留展开按钮、上/下导航、当前/总数。点击展开按钮（双右箭头）恢复完整面板。折叠状态下搜索状态、匹配位置、跨弹窗跟随等行为完全保留。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-puzzle-piece"></i> 自定义内容</p>
-<p>在设置面板中可以添加自己的快捷输入按钮，点击后在输入框中插入预设内容。</p>
+<p>在设置面板中可添加自定义快捷输入按钮，点击后在输入框中插入预设内容。</p>
 <p><b>插入内容</b>支持多种形式：</p>
 <ul>
     <li>短符号：如 <code>**</code>、<code><q>「」</q></code>、<code><br></code></li>
@@ -6037,9 +6049,9 @@ function openHelpPanel() {
     <li>常用短语：签名、固定问候语等</li>
     <li>整段模板：剧情模板、人设片段、格式化指令等（支持多行）</li>
 </ul>
-<p>插入长段落时，建议给<q>「按钮显示」</q>填简短文字或选择 Font Awesome 图标，避免按钮过宽。</p>
-<p><b>光标位置</b>可设为开头/中间/结尾/自定义偏移。对模板文本来说，自定义偏移能让光标自动定位到需要补充内容的位置。</p>
-<p><b>选中包裹</b>勾选后：当输入框已经选中文本时点这个按钮，会按<q>「光标位置」</q>把插入内容切成左右两段包裹选区。例如内容是 <code>**符号**</code>、光标位置=中间，选中 hello 点按钮变成 <code>**hello**</code>。没选中文本时按正常方式插入。这是按钮专属设置，无需打开全局的<q>「选中包裹模式」</q>。</p>
+<p>插入长段落时，建议为<q>「按钮显示」</q>填写简短文字或选择 Font Awesome 图标，避免按钮过宽。</p>
+<p><b>光标位置</b>可设为开头/中间/结尾/自定义偏移。对于模板文本，自定义偏移可使光标自动定位到需要补充内容的位置。</p>
+<p><b>选中包裹</b>勾选后：当输入框中已选中文本时点击此按钮，会按<q>「光标位置」</q>将插入内容拆分为左右两段包裹选区。例如内容为 <code>**符号**</code>、光标位置=中间，选中 hello 后点击按钮，将变为 <code>**hello**</code>。未选中文本时按正常方式插入。此为按钮专属设置，无需开启全局的<q>「选中包裹模式」</q>。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-compass"></i> 导航功能</h4>
 
@@ -6047,7 +6059,7 @@ function openHelpPanel() {
 <ul>
     <li><i class="fa-solid fa-angles-up"></i> 跳转聊天顶部</li>
     <li><i class="fa-solid fa-arrow-down"></i> 跳转聊天底部</li>
-    <li><i class="fa-solid fa-arrow-up"></i> 跳转 AI 消息顶部：滚动到最新一条 AI 回复的顶部</li>
+    <li><i class="fa-solid fa-arrow-up"></i> 跳转 AI 消息顶部：滚动至最新一条 AI 回复的顶部</li>
     <li><i class="fa-solid fa-chevron-up"></i> / <i class="fa-solid fa-chevron-down"></i> 上 / 下一条 AI 消息</li>
 </ul>
 
@@ -6055,25 +6067,25 @@ function openHelpPanel() {
 <p>开启后，上/下一条按钮变为翻页操作。</p>
 <ul>
     <li><b>移动端</b>：点击聊天区域上半部分向上翻页，下半部分向下翻页</li>
-    <li><b>音量键</b>：单击音量上/下键翻页（需安装 Key Mapper），双击音量上键跳到最新 AI 消息顶部，双击音量下键跳到聊天底部</li>
+    <li><b>音量键</b>：单击音量上/下键翻页（需安装 Key Mapper），双击音量上键跳转至最新 AI 消息顶部，双击音量下键跳转至聊天底部</li>
 </ul>
-<p>可在设置中通过<q>「翻页滚动高度」</q>调整每次翻页的距离，100% 约等于一屏高度，数值越小翻得越细，数值越大翻得越快。</p>
-<p>翻页模式开启时，如果悬浮球设置了<q>「自动隐藏」</q>会自动出现以方便操作，关闭翻页后再隐藏。</p>
+<p>可在设置中通过<q>「翻页滚动高度」</q>调整每次翻页的距离，100% 约等于一屏高度，数值越小每次翻页距离越短，数值越大距离越长。</p>
+<p>翻页模式开启时，若悬浮球设置了<q>「自动隐藏」</q>将自动显示以便操作，关闭翻页模式后恢复隐藏。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-gauge-high"></i> 自动滚动</p>
-<p>以设定速度自动向下滚动，适合阅读长文。可在设置中调整<q>「自动滚动速度」</q>（单位 px/s）。用户手动滚动时自动暂停，2 秒后恢复。</p>
+<p>以设定速度自动向下滚动，适用于阅读长文。可在设置中调整<q>「自动滚动速度」</q>（单位 px/s）。用户手动滚动时自动暂停，2 秒后恢复。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-angle-double-down"></i> 底部跳转模式</p>
-<p>开启后，上/下一条消息跳转改为对齐消息底部，而不是顶部。适合从底部往上浏览的阅读习惯。</p>
+<p>开启后，上/下一条消息跳转改为对齐消息底部而非顶部，适用于从底部向上浏览的阅读习惯。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-arrows-up-down"></i> 包含用户消息导航</p>
-<p>默认上/下一条按钮只在 AI 消息间跳转。开启此模式后会一并跳转到用户消息。可与<q>「底部跳转模式」</q>叠加使用。</p>
+<p>默认上/下一条按钮仅在 AI 消息间跳转。开启此模式后会同时跳转到用户消息。可与<q>「底部跳转模式」</q>叠加使用。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">非流自动跳转至 AI 消息顶部</p>
-<p>在设置中开启此选项后，非流式模式下 AI 生成回复完毕会自动滚动到该条消息的顶部，方便从头阅读长回复。流式输出时不受影响。</p>
+<p>在设置中开启此选项后，非流式模式下 AI 生成回复完毕将自动滚动至该条消息的顶部，便于从头阅读长回复。流式输出时不受影响。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-lock"></i> 续写时锁定滚动位置</p>
-<p>在设置中开启此选项后，使用<q>「继续回复」</q>续写期间，聊天区域的滚动位置会被锁定。普通生成、重新生成、切换备选等其他场景不受影响。手动滚动（滑动或滚轮）会解除锁定。</p>
+<p>在设置中开启此选项后，使用<q>「继续回复」</q>续写期间，聊天区域的滚动位置将被锁定。普通生成、重新生成、切换备选等其他场景不受影响。手动滚动（滑动或滚轮）将解除锁定。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-wand-magic-sparkles"></i> 消息操作</h4>
 
@@ -6082,75 +6094,93 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-trash"></i> <b>删除最后消息</b>：删除聊天中的最后一条消息</li>
     <li><i class="fa-solid fa-scissors"></i> <b>删除当前备选</b>：删除最后一条消息的当前 Swipe</li>
     <li><i class="fa-solid fa-forward"></i> <b>继续回复</b>：让 AI 继续生成上一条回复</li>
-    <li><i class="fa-solid fa-pencil"></i> <b>编辑最后消息</b>：自动滚动到底并进入编辑模 式，相当于自动点击该消息的编辑按钮</li>
+    <li><i class="fa-solid fa-pencil"></i> <b>编辑最后消息</b>：自动滚动至末尾并进入编辑模式，等同于自动点击该消息的编辑按钮</li>
     <li><i class="fa-solid fa-rotate"></i> <b>重新生成</b>：重新生成最后一条 AI 回复</li>
     <li><i class="fa-solid fa-shuffle"></i> <b>生成备选回复</b>：为最后一条 AI 消息生成一条新的备选回复（Swipe）</li>
-    <li><i class="fa-solid fa-paper-plane"></i> <b>发送 / 中止</b>：发送和停止合并成一个按钮。空闲时显示发送图标，点击等同于点酒馆原生发送键，把输入框内容发出去；AI 生成中时自动变成停止图标并高亮，点击即中止生成。图标会实时跟随酒馆的真实状态自动切换。默认关闭，可在<q>「按钮管理」</q>中开启。</li>
+    <li><i class="fa-solid fa-paper-plane"></i> <b>发送 / 中止</b>：发送和停止合并为一个按钮。空闲时显示发送图标，点击等同于点击酒馆原生发送按钮，将输入框内容发送出去；AI 生成中时自动切换为停止图标并高亮，点击即中止生成。图标会实时跟随酒馆状态自动切换。默认关闭，可在<q>「按钮管理」</q>中启用。</li>
 </ul>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-trash-arrow-up"></i> 撤回删除</p>
-<p>在执行删除消息或删除备选等操作后，点击此按钮可撤回到操作前的状态。快照保留 5 分钟，过期或切换聊天后自动清除。最多保留 20 步快照，可连续撤回多次操作。</p>
+<p>在执行删除消息或删除备选等操作后，点击此按钮可撤回至操作前的状态。快照保留 5 分钟，过期或切换聊天后自动清除。最多保留 20 步快照，可连续撤回多次操作。</p>
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-eye-low-vision"></i> 快速隐藏</p>
-<p>一键快速隐藏最近的消息。第一次点击隐藏最后一条消息，继续点击依次向前隐藏倒数第二条、第三条……方便快速清理最近的消息上下文。</p>
-<p>5 秒无操作后计数自动重置，下次点击重新从最后一条开始。切换聊天时也会自动重置。按钮处于激活状态（高亮）时表示当前有连续隐藏记录。</p>
+<p>一键快速隐藏最近的消息。第一次点击隐藏最后一条消息，继续点击依次向前隐藏倒数第二条、第三条……便于快速清理最近的消息上下文。</p>
+<p>5 秒无操作后计数自动重置，下次点击将重新从最后一条开始。切换聊天时也会自动重置。按钮处于激活状态（高亮）时表示当前有连续隐藏记录。</p>
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-trash-can"></i> 进入删除模式</p>
-<p>一键进入或退出酒馆原生的消息多选删除模式。进入后可以勾选多条消息批量删除。再次点击按钮退出删除模式。</p>
+<p>一键进入或退出酒馆原生的消息多选删除模式。进入后可勾选多条消息批量删除。再次点击按钮退出删除模式。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-triangle-exclamation"></i> 删除操作前弹窗确认</p>
-<p>在设置中开启此选项后，所有涉及删除的操作（删除最后消息、删除备选、批量删除、删除聊天等）执行前会弹出二次确认弹窗，避免误操作。</p>
+<p>在设置中开启此选项后，所有涉及删除的操作（删除最后消息、删除备选、批量删除、删除聊天等）执行前将弹出二次确认弹窗，避免误操作。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-ghost"></i> 消息管理面板</h4>
-<p>统一的消息管理面板，包含四个标签页：</p>
+<p>统一的消息管理面板，包含五个标签页：</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">隐藏</p>
 <p>管理哪些消息对 AI 可见。支持单条隐藏/显示/跳转、范围隐藏/显示、保留最近 N 条可见、勾选多条批量隐藏/显示。隐藏的消息不会发送给 AI。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">删除</p>
-<p>可勾选任意多条消息（包括不连续楼层），或按范围批量删除。删除前会自动保存快照，5 分钟内可用<q>「撤回删除」</q>恢复。</p>
+<p>可勾选任意多条消息（包括不连续楼层），或按范围批量删除。删除前将自动保存快照，5 分钟内可通过<q>「撤回删除」</q>恢复。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">移动</p>
-<p>勾选要移动的消息（可多条，包括不连续楼层），输入目标楼层号后点移动，被选中的消息会整体搬到目标位置。移动前自动保存快照，可使用<q>「撤回删除」</q>恢复。</p>
-<p>输入目标楼层时，列表里会用箭头标记显示「插入到这里」的落点，方便你确认位置。</p>
+<p>勾选要移动的消息（可多条，包括不连续楼层），输入目标楼层号后点击移动，选中的消息将整体转移至目标位置。移动前自动保存快照，可通过<q>「撤回删除」</q>恢复。</p>
+<p>输入目标楼层时，列表中会以箭头标记显示<q>「插入到此」</q>的落点，便于确认位置。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">插入</p>
-<p>在指定楼层插入一条空白消息，支持选择角色身份（用户、AI角色、旁白/系统）。插入后自动跳转到该楼层并进入编辑状态，可以直接输入内容。操作前自动保存快照，可使用<q>「撤回删除」</q>恢复。</p>
+<p>在指定楼层插入一条空白消息，支持选择角色身份（用户、AI 角色、旁白/系统）。插入后自动跳转至该楼层并进入编辑状态，可直接输入内容。操作前自动保存快照，可通过<q>「撤回删除」</q>恢复。</p>
 <p>典型用途：在对话中间补充遗漏的内容、手动添加旁白/系统指令、在特定位置注入上下文等。</p>
+
+<p style="margin:10px 0 4px;font-weight:600;">转存</p>
+<p>将当前聊天中的消息复制或移动至<b>同一角色的其他聊天档</b>。适用于将某段剧情迁移至新聊天中延续、将偏离主线的分支整理至独立存档、或将正文中生成的额外场景楼层转移至专属存档等场景。</p>
+<p>转存面板采用上下分栏：</p>
+<ul>
+    <li><b>上方</b>为当前聊天，勾选需要转出的消息（可使用共享的全选、反选、范围选择等工具）</li>
+    <li><b>下方</b>为目标聊天档预览，点击某条消息（或其前方的 <i class="fa-solid fa-crosshairs"></i> 落点按钮）即可将插入位置设定至该消息之前，也可点击最底部的<q>「追加到末尾」</q></li>
+</ul>
+<p><b>操作步骤</b>：切换至<q>「转存」</q>标签 → 上方勾选消息 → 选择目标聊天档 → 下方点击某条消息设为落点 → 点击<q>「复制」</q>或<q>「移动」</q>，完成后自动打开目标聊天。</p>
+<p><b>复制与移动的区别</b>：复制会在原聊天中保留这些消息；移动会将这些消息从当前聊天中删除（数据并未丢失，仅转移至目标聊天档）。</p>
+<p><b>转存方向（上 / 下切换）</b>：列表工具栏的<q>「已选 X 条」</q>右侧有一个<q>「上 / 下」</q>切换按钮，用于决定转存方向：</p>
+<ul>
+    <li>切换至<q>「上」</q>：从当前聊天转出至目标聊天档。上方显示勾选框（选择要转出的消息），下方为目标聊天档预览（点击某条消息设定插入落点），完成后自动打开目标聊天。</li>
+    <li>切换至<q>「下」</q>：将其他聊天档中的消息转入当前聊天。下方显示勾选框（选择要转入的消息），上方显示当前聊天并标注插入落点（点击某条消息设定位置），完成后停留在当前聊天。</li>
+</ul>
+<p>全选、反选、范围选择、清除等操作会作用于当前显示勾选框的列表；倒序、楼层跳转、回到顶部、回到底部也会随方向切换同步调整。</p>
+<p><b>目标档预览编辑</b>：下方每条消息的铅笔按钮可直接修改该楼层内容，保存后将写回目标聊天档文件。</p>
+<p><b>注意</b>：转存功能目前<b>不支持群聊</b>。转入当前聊天的消息可通过<q>「撤回删除」</q>还原；但<q>「移动」</q>操作对来源聊天档的删除无法撤回，如需还原，可再次使用转存功能将消息转回。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">共享行为</p>
 <ul>
-    <li>四个标签页共用同一个工具栏：全选、反选、范围选择、清除</li>
+    <li>五个标签页共用同一工具栏：全选、反选、范围选择、清除</li>
     <li>勾选状态和滚动位置在标签页之间保留，切换标签不会丢失</li>
-    <li>输入楼层号时列表会实时高亮对应消息：单条用强色、范围用主题色、保留最近用绿色</li>
-    <li>每条消息的箭头按钮可一键跳转到原聊天位置</li>
-    <li>每条消息的编辑按钮（铅笔图标）可直接修改该楼层内容，保存后聊天界面实时更新，无需刷新或重进聊天</li>
-    <li>消息倒序按钮可切换列表显示方向，方便从最新消息往前管理</li>
-    <li>列表工具栏内置回到顶部、回到底部按钮，以及楼层跳转框，输入楼层号回车或点跳转，列表会平滑滚动并把该消息居中显示</li>
-        <li>顶部「Token」徽章：点击展开显示当前聊天总 Token 数（数字在上、tokens 在下），再次点击收起；开启后，每条消息临时显示该楼 Token 数</li>
+    <li>输入楼层号时列表会实时高亮对应消息：单条使用强调色、范围使用主题色、保留最近使用绿色</li>
+    <li>每条消息的箭头按钮可一键跳转至原聊天位置</li>
+    <li>每条消息的编辑按钮（铅笔图标）可直接修改该楼层内容，保存后聊天界面实时更新，无需刷新或重新进入聊天</li>
+    <li>消息倒序按钮可切换列表显示方向，便于从最新消息向前浏览管理</li>
+    <li>列表工具栏内置回到顶部、回到底部按钮以及楼层跳转框，输入楼层号并回车或点击跳转，列表将平滑滚动并将目标消息居中显示</li>
+    <li>顶部「Token」徽章：点击展开显示当前聊天总 Token 数（数字在上、tokens 在下），再次点击收起；开启后，每条消息临时显示该楼层的 Token 数</li>
     <li>采用按需渲染，大量消息时也能保持流畅</li>
 </ul>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-address-book"></i> 聊天管理</h4>
 <ul>
     <li><i class="fa-solid fa-address-book"></i> <b>聊天管理器</b>：打开当前角色或群聊的聊天列表</li>
-    <li><i class="fa-solid fa-comments"></i> <b>新建聊天</b>：和当前角色开启一个全新的聊天</li>
-    <li><i class="fa-solid fa-pen-to-square"></i> <b>重命名聊天</b>：弹窗输入新名字，回车或点确定即可重命名</li>
+    <li><i class="fa-solid fa-comments"></i> <b>新建聊天</b>：与当前角色开启一个全新的聊天</li>
+    <li><i class="fa-solid fa-pen-to-square"></i> <b>重命名聊天</b>：弹窗输入新名称，回车或点击确定即可完成重命名</li>
     <li><i class="fa-solid fa-comment-slash"></i> <b>删除聊天</b>：删除当前聊天，删除前自动保存快照</li>
-    <li><i class="fa-solid fa-xmark"></i> <b>关闭聊天</b>：关闭当前聊天回到角色选择页</li>
+    <li><i class="fa-solid fa-xmark"></i> <b>关闭聊天</b>：关闭当前聊天并返回角色选择页</li>
 </ul>
-<p><b>删除聊天的撤回机制</b>：删除后会弹出<q>「点此撤回」</q>的提示（5 分钟内有效），点击即可恢复。</p>
-<p><b>注意</b>：删除聊天会真实从酒馆里删除文件，5 分钟撤回窗口过后无法再恢复。重要聊天建议先备份。</p>
+<p><b>删除聊天的撤回机制</b>：删除后会弹出<q>「点击此处撤回」</q>的提示（5 分钟内有效），点击即可恢复。</p>
+<p><b>注意</b>：删除聊天会实际从酒馆中删除文件，5 分钟撤回窗口过期后无法恢复。重要聊天建议提前备份。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-folder"></i> 按钮分组</h4>
-<p>可以将按钮收纳到文件夹中，工具栏只显示一个折叠按钮，点击展开内部按钮。</p>
-<p><b>设置方式</b>：在设置中拖动按钮到文件夹上方可放入文件夹，从文件夹中的按钮拖出可移回主工具栏。也可以使用<q>「移出文件夹」</q>的小按钮快速移回。</p>
-<p>文件夹按钮放入悬浮面板后，展开子菜单会自动选择弹出方向并避开屏幕边缘。</p>
-<p><b>展开方向</b>：点击文件夹旁的方向按钮，可切换横向/竖向排列。子按钮少时横排节省空间，多时竖排便于查找。工具栏和悬浮面板中的文件夹均适用。</p>
-<p><b>展开保持（图钉）</b>：点击文件夹旁的图钉按钮，可切换该文件夹展开后的关闭方式。钉住（图钉高亮）后，展开的子菜单点击外部不会自动关闭，适合连续插入符号、括号等；不钉住时点击外部会自动收起，适合点一下就走的功能按钮。再次点击文件夹本身随时可手动关闭。此设置每个文件夹独立保存。</p>
+<p>可将按钮收纳至文件夹中，工具栏仅显示一个折叠按钮，点击后展开内部按钮。</p>
+<p><b>设置方式</b>：在设置中将按钮拖动至文件夹上方即可放入文件夹，从文件夹中的按钮拖出即可移回主工具栏。也可使用<q>「移出文件夹」</q>按钮快速移回。</p>
+<p>文件夹按钮放入悬浮面板后，展开子菜单时将自动选择弹出方向并避开屏幕边缘。</p>
+<p><b>展开方向</b>：点击文件夹旁的方向按钮，可切换横向/竖向排列。子按钮较少时横排节省空间，较多时竖排便于查找。工具栏和悬浮面板中的文件夹均适用。</p>
+<p><b>展开保持（图钉）</b>：点击文件夹旁的图钉按钮，可切换该文件夹展开后的关闭方式。开启固定（图钉高亮）后，展开的子菜单点击外部不会自动关闭，适用于连续插入符号、括号等操作；未开启固定时点击外部会自动收起，适用于单次点击即完成的功能按钮。再次点击文件夹本身可随时手动关闭。此设置对每个文件夹独立保存。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-circle-dot"></i> 悬浮面板</h4>
 
 <p style="margin:10px 0 4px;font-weight:600;">基础说明</p>
-<p>开启后会出现一个可拖拽的悬浮球或固定面板。可以把导航跳转等功能按钮放进去。放进悬浮面板的按钮不会在主工具栏中重复显示。面板中的按钮可拖拽排序。</p>
+<p>开启后将显示一个可拖拽的悬浮球或固定面板。可将导航跳转等功能按钮添加至面板。已添加至悬浮面板的按钮不会在主工具栏中重复显示。面板中的按钮支持拖拽排序。</p>
 <ul>
     <li><b>悬浮球模式</b>：点击展开面板，点击其他区域自动收起</li>
     <li><b>固定面板模式</b>：常驻显示，可拖动手柄移动位置</li>
@@ -6170,16 +6200,16 @@ function openHelpPanel() {
     <li>支持自定义图片 URL（GIF / JPG / PNG）</li>
     <li>支持单独设置展开状态的图片，留空则使用默认图片</li>
     <li>形状可选圆形或方形</li>
-    <li>大小可在 32~80px 范围调整</li>
-    <li><b>透明背景</b>：仅在上传了自定义图片时生效，开启后悬浮球的边框、阴影、背景色都会隐藏，只显示图片本身</li>
+    <li>大小可在 32~80px 范围内调整</li>
+    <li><b>透明背景</b>：仅在上传了自定义图片时生效，开启后悬浮球的边框、阴影、背景色都将隐藏，只显示图片本身</li>
     <li><b>跟随美化</b>：开启后全局 CSS 可控制悬浮球外观；关闭后插件自定义设置优先于美化 CSS</li>
 </ul>
 
 <p style="margin:10px 0 4px;font-weight:600;">面板方案</p>
-<p>可创建多套面板按钮配置（例如<q>「全屏模式」</q>用翻页按钮、<q>「编辑模式」</q>用符号按钮），通过设置面板里的方案管理器切换，或将<q>「切换面板方案」</q>按钮放到工具栏或悬浮面板中循环切换，也支持绑定快捷键。</p>
+<p>可创建多套面板按钮配置（例如<q>「全屏模式」</q>使用翻页按钮、<q>「编辑模式」</q>使用符号按钮），可通过设置面板中的方案管理器切换，或将<q>「切换面板方案」</q>按钮添加至工具栏或悬浮面板中循环切换，也支持绑定快捷键。</p>
 <p><b>面板方案保存以下五项设置</b>：</p>
 <ul>
-    <li>面板按钮列表（哪些按钮、排列顺序）</li>
+    <li>面板按钮列表（按钮内容及排列顺序）</li>
     <li>面板方向（竖向 / 横向 / 自定义）</li>
     <li>面板按钮大小</li>
     <li>面板宽度</li>
@@ -6199,52 +6229,50 @@ function openHelpPanel() {
 </ul>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-eye-slash"></i> 自动隐藏</p>
-<p>开启后悬浮球或面板平时隐藏，点击屏幕任意空白位置即可切换显示或隐藏（包括聊天区域、抽屉空白处等）。点击悬浮球、面板自身、输入框、按钮、链接、弹窗等交互元素时不会触发切换。</p>
-<p>翻页模式开启时会自动显示悬浮球，关闭翻页后自动隐藏。</p>
+<p>开启后悬浮球或面板默认处于隐藏状态，点击屏幕任意空白位置即可切换显示或隐藏（包括聊天区域、抽屉空白处等）。点击悬浮球、面板自身、输入框、按钮、链接、弹窗等交互元素时不会触发切换。</p>
+<p>翻页模式开启时将自动显示悬浮球，关闭翻页后自动隐藏。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">移动端使用提示</p>
 <ul>
-    <li>悬浮球可自由拖到屏幕任意位置，下次会记住</li>
-    <li>设置面板顶部的<q>「重置位置」</q>按钮（图钉图标）可将悬浮球或面板拉回默认位置，遇到拖到屏幕外找不回来时使用</li>
-    <li>面板会自动避开手机软键盘，键盘弹起时如果面板太长会自动加滚动条而不是被裁切</li>
-    <li>展开后的面板会自动选择有空间的方向（左 / 右 / 上 / 下）</li>
-    <li>如果上下空间都不够，会限制最大高度并加滚动条</li>
-    <li>悬浮球与展开后的面板默认会自动绑定到当前打开的弹窗内，关闭弹窗后回到主界面</li>
-    <li>开启<q>「自动隐藏」</q>时，切换聊天或切换角色等操作会保持当前的隐藏 / 显示状态</li>
+    <li>悬浮球可自由拖动至屏幕任意位置，位置会自动保存</li>
+    <li>设置面板顶部的<q>「重置位置」</q>按钮（图钉图标）可将悬浮球或面板恢复至默认位置，适用于悬浮球被拖出屏幕边缘无法找回的情况</li>
+    <li>面板会自动避开手机软键盘；键盘弹出时若面板高度过大，将自动添加滚动条而不会被裁切</li>
+    <li>展开后的面板会自动选择空间充足的方向（左 / 右 / 上 / 下）</li>
+    <li>若上下空间均不足，将限制最大高度并添加滚动条</li>
+    <li>悬浮球与展开后的面板默认会自动绑定至当前打开的弹窗内，关闭弹窗后返回主界面</li>
+    <li>开启<q>「自动隐藏」</q>时，切换聊天或切换角色等操作将保持当前的隐藏 / 显示状态</li>
 </ul>
 
 <p style="margin:10px 0 4px;font-weight:600;">常见问题</p>
 <ul>
-    <li><b>球点击后面板闪一下消失</b>：移动端 touchend + click 双重触发导致，插件已自带 400ms 防抖，正常情况下不会出现</li>
-    <li><b>键盘弹起或收起时面板意外关闭</b>：插件会忽略键盘动画期间（600ms 内）的关闭操作</li>
-    <li><b>面板看不见但球还在</b>：检查是否开启了自动隐藏，再点一下聊天区域即可显示</li>
-    <li><b>美化 CSS 控制不了悬浮球</b>：在设置里开启<q>「跟随美化」</q>开关</li>
+    <li><b>面板不可见但悬浮球仍在</b>：请确认是否已开启自动隐藏，点击聊天区域即可重新显示</li>
+    <li><b>美化 CSS 无法控制悬浮球</b>：请在设置中开启<q>「跟随美化」</q>开关</li>
 </ul>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-rocket"></i> 其他功能</h4>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-rocket"></i> QR 助手面板</p>
-<p>点击 QR 助手按钮可快速打开 Quick Reply 助手面板（需要安装 QR 助手插件）。</p>
+<p>点击 QR 助手按钮可快速打开 Quick Reply 助手面板（需安装 QR 助手插件）。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">
   <i class="fa-solid fa-paintbrush"></i>
   智绘姬面板
 </p>
-<p>点击 智绘姬面板 按钮可快速打开智绘姬生图插件面板（需要先安装并启用 <a href="https://github.com/damoshen123/st-chatu8" target="_blank">智绘姬</a> 插件）。</p>
+<p>点击智绘姬面板按钮可快速打开智绘姬生图插件面板（需先安装并启用 <a href="https://github.com/damoshen123/st-chatu8" target="_blank">智绘姬</a> 插件）。</p>
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-arrows-to-dot"></i> 重置悬浮球位置</p>
-<p>将此按钮添加至工具栏后，点击即可将悬浮球/悬浮面板重置为默认位置，适用于悬浮球被拖出屏幕边缘无法找回的情况。功能与设置面板中的「重置位置」按钮相同。</p>
+<p>将此按钮添加至工具栏后，点击即可将悬浮球/悬浮面板重置为默认位置，适用于悬浮球被拖出屏幕边缘无法找回的情况。功能与设置面板中的<q>「重置位置」</q>按钮相同。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;"><i class="fa-solid fa-palette"></i> 美化指南</p>
 <p>在设置面板底部点击<q>「美化指南」</q>按钮，可获取一段提示词。将提示词复制给 AI 并填写配色风格描述，即可生成匹配主题的快捷工具栏美化 CSS。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-keyboard"></i> 快捷键</h4>
-<p>在按钮管理中，点击每个按钮右边的快捷键输入框，按下想要的组合键即可绑定。按 Esc 清除。</p>
+<p>在按钮管理中，点击每个按钮右侧的快捷键输入框，按下所需的组合键即可绑定。按 Esc 键清除。</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">生效范围</p>
 <ul>
     <li><b>输入类快捷键</b>（符号插入、撤回重做等）：仅在发送输入框聚焦时生效</li>
     <li><b>导航 / 操作类快捷键</b>（翻页、滚动、删除等）：在聊天界面全局生效</li>
-    <li>在设置面板等其他输入框中打字时不会误触</li>
+    <li>在设置面板等其他输入框中输入内容时不会误触</li>
 </ul>
 <p>移动端不显示快捷键设置。</p>
 </div>
@@ -6373,6 +6401,19 @@ function openHideManagerPanel() {
     _jumpHlTimer: null,
     showToken: false,
     tokenCache: new Map(),
+    transferTargetChat: null,
+    transferTargetHeader: null,
+    transferInsertAt: null,
+    transferLoading: false,
+    _transferListLoaded: false,
+    manageTarget: "upper",
+    transferReverseOrder: false,
+    transferJumpHighlight: null,
+    _transferJumpHlTimer: null,
+    transferSelected: new Set(),
+    transferRangeStart: null,
+    transferRangeMode: false,
+    transferUpperInsertAt: null,
   };
 
   const ROW_HEIGHT = 36;
@@ -6400,6 +6441,9 @@ function openHideManagerPanel() {
         </button>
         <button class="ih-mgr-tab" data-tab="insert">
           <i class="fa-solid fa-plus-circle"></i><span>插入</span>
+        </button>
+        <button class="ih-mgr-tab" data-tab="transfer">
+          <i class="fa-solid fa-file-export"></i><span>转存</span>
         </button>
       </div>
 
@@ -6500,9 +6544,43 @@ function openHideManagerPanel() {
           </div>
         </div>
       </div>
+
+      <div class="ih-mgr-tab-panel" data-panel="transfer" style="display:none;">
+        <div class="ih-mgr-status">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>「上/下」按钮切换转存方向：显示勾选框的一侧为消息来源，另一侧点击某条消息设定插入落点</span>
+        </div>
+
+        <div class="ih-mgr-inline-row">
+          <label class="ih-mgr-inline-label">当前聊天档</label>
+          <span class="ih-mgr-transfer-current" id="ih_mgr_transfer_current" title="正在从这个聊天档转存">—</span>
+        </div>
+
+        <div class="ih-mgr-inline-row">
+          <label class="ih-mgr-inline-label">目标聊天档</label>
+          <div class="ih-mgr-select2" id="ih_mgr_transfer_select2">
+            <div class="ih-mgr-select2-display" id="ih_mgr_transfer_display" tabindex="0">
+              <span class="ih-mgr-select2-text">加载中…</span>
+              <i class="fa-solid fa-chevron-down ih-mgr-select2-caret"></i>
+            </div>
+            <div class="ih-mgr-select2-dropdown" id="ih_mgr_transfer_dropdown">
+              <div class="ih-mgr-select2-search-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" class="ih-mgr-select2-search ih-fp-transparent-input" id="ih_mgr_transfer_search" placeholder="搜索聊天档…" />
+                <button class="ih-mgr-select2-search-clear" id="ih_mgr_transfer_search_clear" title="清空搜索"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+              <div class="ih-mgr-select2-list" id="ih_mgr_transfer_options"></div>
+            </div>
+          </div>
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_transfer_refresh" title="刷新列表"><i class="fa-solid fa-rotate"></i></button>
+        </div>
+      </div>
       <div class="ih-mgr-shared-list-area">
         <div class="ih-mgr-toolbar">
           <span class="ih-mgr-count" id="ih_mgr_count">已选 0 条</span>
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-manage-toggle" id="ih_mgr_manage_toggle" title="切换工具栏管理对象（上方当前聊天 / 下方目标聊天）" style="display:none;">
+            <i class="fa-solid fa-arrow-up"></i><span class="ih-mgr-manage-toggle-text">上</span>
+          </button>
           <div class="ih-mgr-btn-scroll">
           <div class="ih-mgr-btn-group ih-mgr-select-group">
             <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_reverse_order" title="消息倒序"><i class="fa-solid fa-arrow-down-wide-short"></i></button>
@@ -6523,7 +6601,7 @@ function openHideManagerPanel() {
             </div>
           </div>
           </div>
-          <span class="ih-mgr-total-badge ih-mgr-token-total" id="ih_mgr_token_total" title="点击计算 Token 数（再点收起）">
+          <span class="ih-mgr-total-badge ih-mgr-token-total" id="ih_mgr_token_total" title="点击计算 Token 数（再次点击收起）">
             <span class="ih-mgr-token-idle"><i class="fa-solid fa-calculator"></i> Token</span>
             <span class="ih-mgr-token-active">
               <span class="ih-mgr-token-total-num">…</span>
@@ -6557,6 +6635,27 @@ function openHideManagerPanel() {
 
         <div class="ih-mgr-footer-actions" data-footer="delete" style="display:none;">
           <button class="ih-mgr-btn ih-mgr-btn-warn ih-mgr-btn-primary" id="ih_mgr_del_confirm"><i class="fa-solid fa-trash"></i> 删除选中</button>
+        </div>
+      </div>
+
+      <div class="ih-mgr-transfer-area">
+        <div class="ih-mgr-transfer-target-label">
+          <i class="fa-solid fa-arrow-down-long" id="ih_mgr_transfer_target_arrow"></i>
+          <span id="ih_mgr_transfer_target_label_text">目标聊天档预览（点击某条消息＝插入到该消息前）</span>
+        </div>
+        <div class="ih-mgr-transfer-list-wrap">
+          <div class="ih-mgr-transfer-target-list" id="ih_mgr_transfer_target_list">
+            <div class="ih-mgr-tvlist-spacer-top"></div>
+            <div class="ih-mgr-tvlist-rows"></div>
+            <div class="ih-mgr-tvlist-spacer-bottom"></div>
+            <div class="ih-mgr-tvlist-tail"><div class="ih-mgr-transfer-empty">请在上方选择目标聊天档</div></div>
+          </div>
+        </div>
+        <div class="ih-mgr-transfer-footer">
+          <div class="ih-mgr-btn-group">
+            <button class="ih-mgr-btn ih-mgr-btn-ok ih-mgr-btn-primary" id="ih_mgr_transfer_copy"><i class="fa-solid fa-copy"></i> 复制</button>
+            <button class="ih-mgr-btn ih-mgr-btn-warn ih-mgr-btn-primary" id="ih_mgr_transfer_move"><i class="fa-solid fa-scissors"></i> 移动</button>
+          </div>
         </div>
       </div>
     </div>
@@ -6632,6 +6731,16 @@ function openHideManagerPanel() {
         else if (!isNaN(t) && t >= total && total > 0)
           set.insertBelow = total - 1;
       }
+    } else if (
+      sharedState.activeTab === "transfer" &&
+      sharedState.manageTarget === "lower"
+    ) {
+      const t =
+        sharedState.transferUpperInsertAt == null
+          ? total
+          : sharedState.transferUpperInsertAt;
+      if (t >= 0 && t < total) set.insertAbove = t;
+      else if (t >= total && total > 0) set.insertBelow = total - 1;
     }
     return set;
   }
@@ -6815,13 +6924,33 @@ function openHideManagerPanel() {
     vlistEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
   }
 
+  function _getActiveSel() {
+    if (
+      sharedState.activeTab === "transfer" &&
+      sharedState.manageTarget === "lower"
+    ) {
+      return {
+        set: sharedState.transferSelected,
+        total: (sharedState.transferTargetChat || []).length,
+        isLower: true,
+      };
+    }
+    return { set: sharedState.selected, total: total, isLower: false };
+  }
+
   function updateCount() {
-    content.find("#ih_mgr_count").text(`已选 ${sharedState.selected.size} 条`);
+    const a = _getActiveSel();
+    content.find("#ih_mgr_count").text(`已选 ${a.set.size} 条`);
     content
       .find("#ih_mgr_reverse_order")
-      .toggleClass("ih-mgr-btn-active", sharedState.reverseOrder);
+      .toggleClass(
+        "ih-mgr-btn-active",
+        sharedState.manageTarget === "lower"
+          ? sharedState.transferReverseOrder
+          : sharedState.reverseOrder,
+      );
     const allBtn = content.find("#ih_mgr_select_all");
-    if (sharedState.selected.size === total && total > 0) {
+    if (a.total > 0 && a.set.size === a.total) {
       allBtn
         .html('<i class="fa-solid fa-square-xmark"></i>')
         .attr("title", "取消全选")
@@ -6835,7 +6964,14 @@ function openHideManagerPanel() {
   }
 
   function refreshList() {
-    renderVisible();
+    if (
+      sharedState.activeTab === "transfer" &&
+      sharedState.manageTarget === "lower"
+    ) {
+      renderTransferTarget();
+    } else {
+      renderVisible();
+    }
     updateCount();
   }
 
@@ -6881,6 +7017,13 @@ function openHideManagerPanel() {
     content
       .find(".ih-mgr-shared-list-area")
       .toggleClass("ih-mgr-insert-mode", tab === "insert");
+    content.toggleClass("ih-mgr-transfer-active", tab === "transfer");
+    if (tab !== "transfer") {
+      sharedState.manageTarget = "upper";
+      content.removeClass("ih-mgr-manage-lower");
+    }
+    content.find("#ih_mgr_manage_toggle").toggle(tab === "transfer");
+    _syncManageToggleUI();
     content.find(".ih-mgr-tab-panel").hide();
     content.find(`.ih-mgr-tab-panel[data-panel="${tab}"]`).show();
     content.find(".ih-mgr-footer-actions").hide();
@@ -6894,6 +7037,13 @@ function openHideManagerPanel() {
       .toggleClass("ih-mgr-range-mode", false);
     content.find("#ih_mgr_range_toggle").removeClass("ih-mgr-btn-active");
     refreshList();
+    if (tab === "transfer") {
+      if (!sharedState._transferListLoaded) {
+        sharedState._transferListLoaded = true;
+        loadTransferChatList();
+      }
+      renderTransferTarget();
+    }
     setTimeout(() => {
       vlistEl.scrollTop = sharedState.scrollTop;
       renderVisible();
@@ -6942,6 +7092,15 @@ function openHideManagerPanel() {
     const floor = parseInt(item.dataset.floor);
     if (isNaN(floor)) return;
 
+    if (
+      sharedState.activeTab === "transfer" &&
+      sharedState.manageTarget === "lower"
+    ) {
+      sharedState.transferUpperInsertAt = floor >= total ? null : floor;
+      renderVisible();
+      return;
+    }
+
     if (sharedState.rangeMode) {
       e.preventDefault();
       e.stopPropagation();
@@ -6977,10 +7136,18 @@ function openHideManagerPanel() {
   });
 
   content.find("#ih_mgr_scroll_top").on("click", () => {
-    vlistEl.scrollTo({ top: 0, behavior: "smooth" });
+    const el =
+      sharedState.manageTarget === "lower"
+        ? content.find("#ih_mgr_transfer_target_list")[0]
+        : vlistEl;
+    if (el) el.scrollTo({ top: 0, behavior: "smooth" });
   });
   content.find("#ih_mgr_scroll_bottom").on("click", () => {
-    vlistEl.scrollTo({ top: vlistEl.scrollHeight, behavior: "smooth" });
+    const el =
+      sharedState.manageTarget === "lower"
+        ? content.find("#ih_mgr_transfer_target_list")[0]
+        : vlistEl;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   });
   const _doMgrJumpFloor = () => {
     const v = content.find("#ih_mgr_jump_floor").val();
@@ -6989,6 +7156,29 @@ function openHideManagerPanel() {
       return;
     }
     const f = parseInt(v);
+    if (sharedState.manageTarget === "lower") {
+      const arr = sharedState.transferTargetChat || [];
+      if (arr.length === 0) {
+        toastr.warning("目标聊天档还没加载", "", { timeOut: 1200 });
+        return;
+      }
+      if (isNaN(f) || f < 0 || f >= arr.length) {
+        toastr.warning(`楼层超出范围（0~${arr.length - 1}）`, "", {
+          timeOut: 1200,
+        });
+        return;
+      }
+      sharedState.transferJumpHighlight = f;
+      scrollTransferToFloor(f);
+      renderTransferTarget();
+      if (sharedState._transferJumpHlTimer)
+        clearTimeout(sharedState._transferJumpHlTimer);
+      sharedState._transferJumpHlTimer = setTimeout(() => {
+        sharedState.transferJumpHighlight = null;
+        renderTransferTarget();
+      }, 3000);
+      return;
+    }
     if (isNaN(f) || f < 0 || f >= total) {
       toastr.warning(`楼层超出范围（0~${total - 1}）`, "", { timeOut: 1200 });
       return;
@@ -7016,6 +7206,16 @@ function openHideManagerPanel() {
     }
   });
   content.find("#ih_mgr_reverse_order").on("click", () => {
+    if (sharedState.manageTarget === "lower") {
+      sharedState.transferReverseOrder = !sharedState.transferReverseOrder;
+      const tl = content.find("#ih_mgr_transfer_target_list")[0];
+      if (tl) tl.scrollTop = 0;
+      renderTransferTarget();
+      content
+        .find("#ih_mgr_reverse_order")
+        .toggleClass("ih-mgr-btn-active", sharedState.transferReverseOrder);
+      return;
+    }
     sharedState.reverseOrder = !sharedState.reverseOrder;
     sharedState.scrollTop = 0;
     vlistEl.scrollTop = 0;
@@ -7031,28 +7231,48 @@ function openHideManagerPanel() {
     }
   });
   content.find("#ih_mgr_select_all").on("click", () => {
-    if (sharedState.selected.size === total) {
-      sharedState.selected.clear();
+    const a = _getActiveSel();
+    if (a.total > 0 && a.set.size === a.total) {
+      a.set.clear();
     } else {
-      for (let i = 0; i < total; i++) sharedState.selected.add(i);
+      for (let i = 0; i < a.total; i++) a.set.add(i);
     }
     refreshList();
   });
 
   content.find("#ih_mgr_invert").on("click", () => {
-    for (let i = 0; i < total; i++) {
-      if (sharedState.selected.has(i)) sharedState.selected.delete(i);
-      else sharedState.selected.add(i);
+    const a = _getActiveSel();
+    for (let i = 0; i < a.total; i++) {
+      if (a.set.has(i)) a.set.delete(i);
+      else a.set.add(i);
     }
     refreshList();
   });
 
   content.find("#ih_mgr_clear").on("click", () => {
-    sharedState.selected.clear();
+    _getActiveSel().set.clear();
     refreshList();
   });
 
   content.find("#ih_mgr_range_toggle").on("click", function () {
+    if (
+      sharedState.activeTab === "transfer" &&
+      sharedState.manageTarget === "lower"
+    ) {
+      sharedState.transferRangeMode = !sharedState.transferRangeMode;
+      if (!sharedState.transferRangeMode) sharedState.transferRangeStart = null;
+      $(this).toggleClass("ih-mgr-btn-active", sharedState.transferRangeMode);
+      content
+        .find(".ih-mgr-transfer-target-list")
+        .toggleClass("ih-mgr-range-mode", sharedState.transferRangeMode);
+      if (sharedState.transferRangeMode) {
+        toastr.info("范围选择：点起点，再点终点，中间自动勾选", "", {
+          timeOut: 1500,
+        });
+      }
+      renderTransferTarget();
+      return;
+    }
     sharedState.rangeMode = !sharedState.rangeMode;
     if (!sharedState.rangeMode) sharedState.rangeStart = null;
     $(this).toggleClass("ih-mgr-btn-active", sharedState.rangeMode);
@@ -7060,7 +7280,7 @@ function openHideManagerPanel() {
       .find(".ih-mgr-shared-list-area")
       .toggleClass("ih-mgr-range-mode", sharedState.rangeMode);
     if (sharedState.rangeMode) {
-      toastr.info("范围选择：点起点，再点终点，中间自动勾选", "", {
+      toastr.info("范围选择：点击起点，再点击终点，中间自动勾选", "", {
         timeOut: 1500,
       });
     }
@@ -7294,7 +7514,7 @@ function openHideManagerPanel() {
       await executeSlashCommandsWithOptions("/forcesave");
       await executeSlashCommandsWithOptions("/chat-reload");
       toastr.success(
-        `已删除 ${selected.length} 条消息（可点撤回按钮还原）`,
+        `已删除 ${selected.length} 条消息（可通过撤回按钮还原）`,
         "",
         {
           timeOut: 2000,
@@ -7432,6 +7652,927 @@ function openHideManagerPanel() {
       toastr.error("插入失败，请尝试撤回", "", { timeOut: 1500 });
     }
   });
+  function _getTransferChar() {
+    let groupId = null;
+    try {
+      groupId = SillyTavern.getContext().groupId;
+    } catch (e) {}
+    if (groupId) return { group: true };
+    const chid = this_chid;
+    const character =
+      chid !== undefined && chid !== null ? characters[chid] : null;
+    if (!character || !character.avatar) return null;
+    return {
+      character,
+      avatar: character.avatar,
+      chatFile: character.chat,
+    };
+  }
+
+  let _transferAllOptions = [];
+  let _transferSelectedValue = "";
+
+  function _getTransferHistory() {
+    const info = _getTransferChar();
+    if (!info || info.group || !info.avatar) return [];
+    const all = getSettings().transferHistory || {};
+    const arr = all[info.avatar];
+    return Array.isArray(arr) ? arr : [];
+  }
+
+  function _pushTransferHistory(fileNameWithExt) {
+    const info = _getTransferChar();
+    if (!info || info.group || !info.avatar) return;
+    const all = getSettings().transferHistory || {};
+    let arr = Array.isArray(all[info.avatar]) ? all[info.avatar] : [];
+    arr = arr.filter((x) => x !== fileNameWithExt);
+    arr.unshift(fileNameWithExt);
+    arr = arr.slice(0, 5);
+    all[info.avatar] = arr;
+    getSettings().transferHistory = all;
+    saveSettingsDebounced();
+  }
+
+  function _getTransferTargetValue() {
+    return _transferSelectedValue;
+  }
+
+  function _setTransferSelected(fileNameWithExt) {
+    _transferSelectedValue = fileNameWithExt || "";
+    const opt = _transferAllOptions.find(
+      (o) => o.value === _transferSelectedValue,
+    );
+    const displayText = opt ? opt.label : "请选择目标聊天档…";
+    content
+      .find("#ih_mgr_transfer_display .ih-mgr-select2-text")
+      .text(displayText);
+    _closeTransferDropdown();
+    loadTransferTarget(_transferSelectedValue);
+  }
+
+  function _renderTransferOptions(filterText) {
+    const listEl = content.find("#ih_mgr_transfer_options")[0];
+    if (!listEl) return;
+    const kw = String(filterText || "")
+      .trim()
+      .toLowerCase();
+    const history = _getTransferHistory();
+    const matched = _transferAllOptions.filter(
+      (o) => !kw || o.label.toLowerCase().includes(kw),
+    );
+    let html = "";
+    if (!kw) {
+      const historyOpts = history
+        .map((h) => _transferAllOptions.find((o) => o.value === h))
+        .filter(Boolean);
+      if (historyOpts.length > 0) {
+        html += `<div class="ih-mgr-select2-group">最近使用</div>`;
+        historyOpts.forEach((o) => {
+          html += `<div class="ih-mgr-select2-opt" data-value="${ihEscapeAttr(o.value)}"><i class="fa-solid fa-clock-rotate-left"></i> ${ihEscapeHtml(o.label)}</div>`;
+        });
+        html += `<div class="ih-mgr-select2-group">全部聊天档</div>`;
+      }
+    }
+    if (matched.length === 0) {
+      html += `<div class="ih-mgr-select2-empty">没有匹配的聊天档</div>`;
+    } else {
+      matched.forEach((o) => {
+        html += `<div class="ih-mgr-select2-opt${o.value === _transferSelectedValue ? " ih-mgr-select2-opt-active" : ""}" data-value="${ihEscapeAttr(o.value)}">${ihEscapeHtml(o.label)}</div>`;
+      });
+    }
+    listEl.innerHTML = html;
+  }
+
+  function _openTransferDropdown() {
+    content.find("#ih_mgr_transfer_select2").addClass("ih-mgr-select2-open");
+    content.find("#ih_mgr_transfer_search").val("");
+    content.find("#ih_mgr_transfer_search_clear").removeClass("ih-visible");
+    _renderTransferOptions("");
+    const dd = content.find("#ih_mgr_transfer_dropdown")[0];
+    const select2El = content.find("#ih_mgr_transfer_select2")[0];
+    if (dd && select2El) {
+      const panelEl = content[0];
+      const panelStyle = window.getComputedStyle(panelEl);
+      const panelPadLeft = parseFloat(panelStyle.paddingLeft) || 0;
+      const panelPadRight = parseFloat(panelStyle.paddingRight) || 0;
+      const panelRect = panelEl.getBoundingClientRect();
+      const selRect = select2El.getBoundingClientRect();
+      const contentLeft = panelRect.left + panelPadLeft;
+      const contentRight = panelRect.right - panelPadRight;
+      dd.style.left = contentLeft - selRect.left + "px";
+      const width = contentRight - contentLeft;
+      if (width > 0) dd.style.width = width + "px";
+    }
+    if (dd) syncDialogTheme(dd);
+    generateFaIconProtectionCSS();
+    setTimeout(() => {
+      const si = content.find("#ih_mgr_transfer_search")[0];
+      if (si) si.focus();
+    }, 30);
+  }
+
+  function _closeTransferDropdown() {
+    content.find("#ih_mgr_transfer_select2").removeClass("ih-mgr-select2-open");
+  }
+
+  async function loadTransferChatList() {
+    const actionBtns = content.find(
+      "#ih_mgr_transfer_copy, #ih_mgr_transfer_move",
+    );
+    const curEl = content.find("#ih_mgr_transfer_current");
+    const displayText = content.find(
+      "#ih_mgr_transfer_display .ih-mgr-select2-text",
+    );
+    const info = _getTransferChar();
+    _transferAllOptions = [];
+    _transferSelectedValue = "";
+    if (!info) {
+      displayText.text("无法获取当前角色");
+      actionBtns.prop("disabled", true);
+      curEl.text("—");
+      return;
+    }
+    if (info.group) {
+      displayText.text("群聊暂不支持转存");
+      actionBtns.prop("disabled", true);
+      curEl.text("群聊暂不支持");
+      return;
+    }
+    curEl.text(String(info.chatFile || "—"));
+    displayText.text("加载中…");
+    let chats = [];
+    try {
+      const resp = await fetch("/api/characters/chats", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ avatar_url: info.avatar }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && typeof data === "object" && !data.error) {
+          chats = Object.values(data);
+        }
+      }
+    } catch (e) {
+      console.error("快捷工具栏: 获取聊天档列表失败", e);
+    }
+    const currentChat = String(info.chatFile || "");
+    chats.forEach((c) => {
+      if (!c || !c.file_name) return;
+      const nameNoExt = String(c.file_name).replace(/\.jsonl$/i, "");
+      if (nameNoExt === currentChat) return;
+      const count = c.message_count != null ? `（${c.message_count}条）` : "";
+      _transferAllOptions.push({
+        value: c.file_name,
+        label: nameNoExt + count,
+      });
+    });
+    if (_transferAllOptions.length === 0) {
+      displayText.text("没有其他聊天档可选");
+      actionBtns.prop("disabled", true);
+      return;
+    }
+    displayText.text("请选择目标聊天档…");
+    actionBtns.prop("disabled", false);
+  }
+
+  async function _fetchTargetChat(nameNoExt) {
+    const info = _getTransferChar();
+    if (!info || info.group) return null;
+    const resp = await fetch("/api/chats/get", {
+      method: "POST",
+      headers: getRequestHeaders(),
+      cache: "no-cache",
+      body: JSON.stringify({
+        ch_name: info.character.name,
+        file_name: nameNoExt,
+        avatar_url: info.avatar,
+      }),
+    });
+    if (!resp.ok) throw new Error("读取失败");
+    const data = await resp.json();
+    if (Array.isArray(data) && data.length > 0) {
+      return { header: data[0], messages: data.slice(1) };
+    }
+    return { header: null, messages: [] };
+  }
+
+  function _transferBuildRow(floor, insertAt) {
+    const arr = sharedState.transferTargetChat || [];
+    const msg = arr[floor];
+    if (!msg) return "";
+    const sender = ihEscapeHtml(msg.name || (msg.is_user ? "User" : "AI"));
+    const rawMes = String(msg.mes || "");
+    const preview =
+      ihEscapeHtml(rawMes.replace(/\s+/g, " ").substring(0, 60)) +
+      (rawMes.length > 60 ? "..." : "");
+    const hidden = isMessageHidden(msg);
+    const isLower = sharedState.manageTarget === "lower";
+    const isChecked = sharedState.transferSelected.has(floor);
+    const cls = ["ih-mgr-tmsg-item"];
+    if (hidden) cls.push("ih-mgr-msg-is-hidden");
+    if (!isLower && insertAt === floor) cls.push("ih-mgr-tmsg-insert-above");
+    if (isLower && isChecked) cls.push("ih-mgr-tmsg-checked");
+    if (isLower && sharedState.transferRangeStart === floor)
+      cls.push("ih-mgr-tmsg-range-start");
+    if (sharedState.transferJumpHighlight === floor)
+      cls.push("ih-mgr-jump-highlight");
+    const ghost = hidden
+      ? '<span class="ih-mgr-msg-ghost"><i class="fa-solid fa-ghost"></i></span>'
+      : "";
+    return `
+      <div class="${cls.join(" ")}" data-tfloor="${floor}" style="height:${ROW_HEIGHT}px;">
+        <span class="ih-mgr-tmsg-check"><input type="checkbox" data-tfloor="${floor}" ${isChecked ? "checked" : ""} /></span>
+        <span class="ih-mgr-msg-lead">
+          <button class="ih-mgr-tmsg-jump" data-tfloor="${floor}" title="打开目标聊天档并跳转到此消息"><i class="fa-solid fa-location-arrow"></i></button>
+          <span class="ih-mgr-msg-floor">#${floor}</span>
+        </span>
+        <span class="ih-mgr-msg-sender">${sender}</span>
+        <span class="ih-mgr-msg-preview">${preview}</span>
+        <button class="ih-mgr-tmsg-edit" data-tfloor="${floor}" title="编辑此楼层（保存后写回目标聊天档）"><i class="fa-solid fa-pen"></i></button>
+        ${ghost}
+      </div>`;
+  }
+
+  function renderTransferTarget() {
+    const listEl = content.find("#ih_mgr_transfer_target_list")[0];
+    if (!listEl) return;
+    const spacerTop = listEl.querySelector(".ih-mgr-tvlist-spacer-top");
+    const spacerBottom = listEl.querySelector(".ih-mgr-tvlist-spacer-bottom");
+    const rowsHost = listEl.querySelector(".ih-mgr-tvlist-rows");
+    const tail = listEl.querySelector(".ih-mgr-tvlist-tail");
+    if (!spacerTop || !spacerBottom || !rowsHost || !tail) return;
+
+    if (sharedState.transferLoading) {
+      spacerTop.style.height = "0px";
+      spacerBottom.style.height = "0px";
+      rowsHost.innerHTML = "";
+      tail.innerHTML = '<div class="ih-mgr-transfer-empty">加载中…</div>';
+      return;
+    }
+    const arr = sharedState.transferTargetChat;
+    if (!arr) {
+      spacerTop.style.height = "0px";
+      spacerBottom.style.height = "0px";
+      rowsHost.innerHTML = "";
+      tail.innerHTML =
+        '<div class="ih-mgr-transfer-empty">请在上方选择目标聊天档</div>';
+      return;
+    }
+    const total2 = arr.length;
+    const insertAt =
+      sharedState.transferInsertAt == null
+        ? total2
+        : sharedState.transferInsertAt;
+    const scrollTop = listEl.scrollTop;
+    const viewH = listEl.clientHeight || 300;
+    const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER);
+    const endIdx = Math.min(
+      total2,
+      Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + BUFFER,
+    );
+    spacerTop.style.height = startIdx * ROW_HEIGHT + "px";
+    spacerBottom.style.height = (total2 - endIdx) * ROW_HEIGHT + "px";
+    let html = "";
+    for (let i = startIdx; i < endIdx; i++) {
+      const floor = sharedState.transferReverseOrder ? total2 - 1 - i : i;
+      html += _transferBuildRow(floor, insertAt);
+    }
+    rowsHost.innerHTML = html;
+    const endActive = insertAt >= total2 ? " ih-mgr-tmsg-end-active" : "";
+    tail.innerHTML = `<div class="ih-mgr-tmsg-end${endActive}" data-tfloor="${total2}"><i class="fa-solid fa-arrow-down-long"></i> 追加到末尾（共 ${total2} 条）</div>`;
+  }
+
+  function scrollTransferToFloor(floor) {
+    const listEl = content.find("#ih_mgr_transfer_target_list")[0];
+    const arr = sharedState.transferTargetChat || [];
+    if (!listEl || floor < 0 || floor >= arr.length) return;
+    const displayIndex = sharedState.transferReverseOrder
+      ? arr.length - 1 - floor
+      : floor;
+    const targetTop =
+      displayIndex * ROW_HEIGHT - listEl.clientHeight / 2 + ROW_HEIGHT / 2;
+    listEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+  }
+
+  async function loadTransferTarget(fileNameWithExt) {
+    sharedState.transferSelected.clear();
+    sharedState.transferRangeStart = null;
+    sharedState.transferRangeMode = false;
+    content.find("#ih_mgr_range_toggle").removeClass("ih-mgr-btn-active");
+    content
+      .find(".ih-mgr-transfer-target-list")
+      .removeClass("ih-mgr-range-mode");
+    updateCount();
+    if (!fileNameWithExt) {
+      sharedState.transferTargetChat = null;
+      sharedState.transferTargetHeader = null;
+      sharedState.transferInsertAt = null;
+      renderTransferTarget();
+      return;
+    }
+    sharedState.transferLoading = true;
+    renderTransferTarget();
+    const nameNoExt = String(fileNameWithExt).replace(/\.jsonl$/i, "");
+    try {
+      const result = await _fetchTargetChat(nameNoExt);
+      sharedState.transferTargetHeader = result.header;
+      sharedState.transferTargetChat = result.messages;
+      sharedState.transferInsertAt = null;
+    } catch (e) {
+      console.error("快捷工具栏: 读取目标聊天档失败", e);
+      sharedState.transferTargetChat = null;
+      sharedState.transferTargetHeader = null;
+      toastr.error("读取目标聊天档失败", "", { timeOut: 1500 });
+    } finally {
+      sharedState.transferLoading = false;
+      renderTransferTarget();
+    }
+  }
+
+  content.on("click", "#ih_mgr_transfer_display", function (e) {
+    e.stopPropagation();
+    const isOpen = content
+      .find("#ih_mgr_transfer_select2")
+      .hasClass("ih-mgr-select2-open");
+    if (isOpen) {
+      _closeTransferDropdown();
+    } else {
+      if (_transferAllOptions.length === 0) return;
+      _openTransferDropdown();
+    }
+  });
+  content.on("input", "#ih_mgr_transfer_search", function () {
+    const v = $(this).val();
+    content
+      .find("#ih_mgr_transfer_search_clear")
+      .toggleClass("ih-visible", !!String(v).length);
+    _renderTransferOptions(v);
+  });
+  content.on("click", "#ih_mgr_transfer_search_clear", function (e) {
+    e.stopPropagation();
+    const si = content.find("#ih_mgr_transfer_search");
+    si.val("");
+    content.find("#ih_mgr_transfer_search_clear").removeClass("ih-visible");
+    _renderTransferOptions("");
+    si.focus();
+  });
+  content.on(
+    "click",
+    "#ih_mgr_transfer_options .ih-mgr-select2-opt",
+    function () {
+      const val = $(this).attr("data-value");
+      if (val) _setTransferSelected(val);
+    },
+  );
+  content.on("click", "#ih_mgr_transfer_dropdown", function (e) {
+    e.stopPropagation();
+  });
+  content.find("#ih_mgr_transfer_refresh").on("click", () => {
+    loadTransferChatList();
+  });
+  function _syncManageToggleUI() {
+    const isLower = sharedState.manageTarget === "lower";
+    const btn = content.find("#ih_mgr_manage_toggle");
+    btn
+      .find("i")
+      .attr(
+        "class",
+        isLower ? "fa-solid fa-arrow-down" : "fa-solid fa-arrow-up",
+      );
+    btn.find(".ih-mgr-manage-toggle-text").text(isLower ? "下" : "上");
+    btn.toggleClass("ih-mgr-btn-active", isLower);
+    content.toggleClass("ih-mgr-manage-lower", isLower);
+    updateCount();
+    _updateTransferDirectionUI();
+  }
+
+  function _updateTransferDirectionUI() {
+    const isLower = sharedState.manageTarget === "lower";
+    if (isLower) {
+      content
+        .find("#ih_mgr_transfer_target_label_text")
+        .text("来源聊天档预览（勾选要转入当前聊天的消息）");
+      content
+        .find("#ih_mgr_transfer_target_arrow")
+        .attr("class", "fa-solid fa-arrow-up-long");
+      content
+        .find("#ih_mgr_transfer_copy")
+        .html('<i class="fa-solid fa-copy"></i> 复制至当前');
+      content
+        .find("#ih_mgr_transfer_move")
+        .html('<i class="fa-solid fa-scissors"></i> 移动至当前');
+    } else {
+      content
+        .find("#ih_mgr_transfer_target_label_text")
+        .text("目标聊天档预览（点击某条消息＝插入到该消息前）");
+      content
+        .find("#ih_mgr_transfer_target_arrow")
+        .attr("class", "fa-solid fa-arrow-down-long");
+      content
+        .find("#ih_mgr_transfer_copy")
+        .html('<i class="fa-solid fa-copy"></i> 复制');
+      content
+        .find("#ih_mgr_transfer_move")
+        .html('<i class="fa-solid fa-scissors"></i> 移动');
+    }
+    generateFaIconProtectionCSS();
+    renderVisible();
+    renderTransferTarget();
+  }
+
+  content.find("#ih_mgr_manage_toggle").on("click", () => {
+    sharedState.manageTarget =
+      sharedState.manageTarget === "lower" ? "upper" : "lower";
+    sharedState.rangeMode = false;
+    sharedState.rangeStart = null;
+    sharedState.transferRangeMode = false;
+    sharedState.transferRangeStart = null;
+    content.find(".ih-mgr-shared-list-area").removeClass("ih-mgr-range-mode");
+    content
+      .find(".ih-mgr-transfer-target-list")
+      .removeClass("ih-mgr-range-mode");
+    content.find("#ih_mgr_range_toggle").removeClass("ih-mgr-btn-active");
+    _syncManageToggleUI();
+  });
+
+  const _transferListEl = content.find("#ih_mgr_transfer_target_list")[0];
+  if (_transferListEl) {
+    let _tRaf = null;
+    _transferListEl.addEventListener(
+      "scroll",
+      () => {
+        if (_tRaf) return;
+        _tRaf = requestAnimationFrame(() => {
+          _tRaf = null;
+          renderTransferTarget();
+        });
+      },
+      { passive: true },
+    );
+  }
+
+  function _setTransferInsert(f) {
+    const arr = sharedState.transferTargetChat || [];
+    sharedState.transferInsertAt = f >= arr.length ? null : f;
+    renderTransferTarget();
+  }
+
+  content.on("click", ".ih-mgr-tmsg-item, .ih-mgr-tmsg-end", function (e) {
+    if ($(e.target).closest(".ih-mgr-tmsg-edit").length) return;
+    if ($(e.target).closest(".ih-mgr-tmsg-jump").length) return;
+    const f = parseInt($(this).attr("data-tfloor"));
+    if (isNaN(f)) return;
+
+    if (sharedState.manageTarget === "lower") {
+      if ($(this).hasClass("ih-mgr-tmsg-end")) return;
+      if (sharedState.transferRangeMode) {
+        if (sharedState.transferRangeStart === null) {
+          sharedState.transferRangeStart = f;
+          renderTransferTarget();
+        } else {
+          const a = Math.min(sharedState.transferRangeStart, f);
+          const b = Math.max(sharedState.transferRangeStart, f);
+          for (let i = a; i <= b; i++) sharedState.transferSelected.add(i);
+          sharedState.transferRangeStart = null;
+          sharedState.transferRangeMode = false;
+          content
+            .find(".ih-mgr-transfer-target-list")
+            .removeClass("ih-mgr-range-mode");
+          content.find("#ih_mgr_range_toggle").removeClass("ih-mgr-btn-active");
+          renderTransferTarget();
+          updateCount();
+        }
+        return;
+      }
+      if ($(e.target).is("input[type=checkbox]")) {
+        if (e.target.checked) sharedState.transferSelected.add(f);
+        else sharedState.transferSelected.delete(f);
+      } else {
+        if (sharedState.transferSelected.has(f))
+          sharedState.transferSelected.delete(f);
+        else sharedState.transferSelected.add(f);
+      }
+      renderTransferTarget();
+      updateCount();
+      return;
+    }
+
+    _setTransferInsert(f);
+  });
+  content.on("click", ".ih-mgr-tmsg-jump", async function (e) {
+    e.stopPropagation();
+    const f = parseInt($(this).attr("data-tfloor"));
+    if (isNaN(f)) return;
+    const info = _getTransferChar();
+    const targetFile = _getTransferTargetValue();
+    if (!info || info.group || !targetFile) {
+      toastr.warning("请先选择目标聊天档", "", { timeOut: 1200 });
+      return;
+    }
+    const nameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
+    closeDialog();
+    try {
+      if (typeof openCharacterChat === "function") {
+        await openCharacterChat(nameNoExt);
+      } else {
+        info.character.chat = nameNoExt;
+        await executeSlashCommandsWithOptions("/chat-reload");
+      }
+      setTimeout(() => {
+        const chatEl = document.getElementById("chat");
+        if (!chatEl) return;
+        const mesEl = chatEl.querySelector(`.mes[mesid="${f}"]`);
+        if (mesEl) {
+          const r = mesEl.getBoundingClientRect();
+          const useCenter = r.height < chatEl.clientHeight - 40;
+          scrollChatToElement(mesEl, "smooth", useCenter);
+        } else {
+          executeSlashCommandsWithOptions(`/chat-jump ${f}`);
+        }
+      }, 600);
+    } catch (e2) {
+      console.error("快捷工具栏: 打开目标聊天档跳转失败", e2);
+      toastr.warning("打开目标聊天档失败，请手动切换", "", { timeOut: 2000 });
+    }
+  });
+  content.on("click", ".ih-mgr-tmsg-edit", function (e) {
+    e.stopPropagation();
+    e.preventDefault();
+    const f = parseInt($(this).attr("data-tfloor"));
+    const arr = sharedState.transferTargetChat || [];
+    if (isNaN(f) || !arr[f]) return;
+    openTransferEditDialog(f);
+  });
+
+  function openTransferEditDialog(floor) {
+    const arr = sharedState.transferTargetChat || [];
+    const msg = arr[floor];
+    if (!msg) return;
+    const info = _getTransferChar();
+    const targetFile = _getTransferTargetValue();
+    if (!info || info.group || !targetFile) {
+      toastr.warning("无法编辑目标楼层", "", { timeOut: 1200 });
+      return;
+    }
+    const sender = msg.name || (msg.is_user ? "User" : "AI");
+    const { overlay, escHandler } = createDialogOverlay();
+    const dlg = $(`
+      <div class="ih-mgr-edit-content">
+        <h3><i class="fa-solid fa-pen"></i> 编辑目标楼层 #${floor}<span style="font-size:12px;opacity:0.6;font-weight:normal;margin-left:6px;">${ihEscapeHtml(sender)}</span></h3>
+        <textarea class="ih-mgr-edit-textarea" placeholder="在此编辑消息内容..."></textarea>
+        <div class="ih-mgr-edit-actions">
+          <button class="ih-hm-btn" data-act="cancel">取消</button>
+          <button class="ih-hm-btn ih-hm-btn-ok" data-act="save"><i class="fa-solid fa-check"></i> 保存</button>
+        </div>
+      </div>
+    `);
+    dlg.find("textarea").val(String(msg.mes || ""));
+    overlay.append(dlg);
+    syncDialogTheme(dlg[0]);
+    dlg.on("click", (e) => e.stopPropagation());
+    generateFaIconProtectionCSS();
+    const close = () => {
+      document.removeEventListener("keydown", escHandler, true);
+      overlay.remove();
+    };
+    overlay.off("click").on("click", (e) => {
+      if (e.target === overlay[0]) close();
+    });
+    dlg.find('[data-act="cancel"]').on("click", close);
+    dlg.find('[data-act="save"]').on("click", async () => {
+      const newText = dlg.find("textarea").val();
+      msg.mes = newText;
+      if (
+        Array.isArray(msg.swipes) &&
+        typeof msg.swipe_id === "number" &&
+        msg.swipe_id >= 0 &&
+        msg.swipe_id < msg.swipes.length
+      ) {
+        msg.swipes[msg.swipe_id] = newText;
+      }
+      const nameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
+      const header = sharedState.transferTargetHeader || {
+        user_name: name1 || "User",
+        character_name: info.character.name,
+        create_date: new Date().toISOString(),
+        chat_metadata: {},
+      };
+      let ok = false;
+      try {
+        const resp = await fetch("/api/chats/save", {
+          method: "POST",
+          headers: getRequestHeaders(),
+          cache: "no-cache",
+          body: JSON.stringify({
+            ch_name: info.character.name,
+            file_name: nameNoExt,
+            chat: [header, ...arr],
+            avatar_url: info.avatar,
+            force: true,
+          }),
+        });
+        ok = resp.ok;
+      } catch (e) {
+        console.error("快捷工具栏: 写回目标楼层失败", e);
+      }
+      close();
+      if (ok) {
+        renderTransferTarget();
+        toastr.success(`已保存目标楼层 #${floor}`, "", { timeOut: 1000 });
+      } else {
+        toastr.error("保存失败", "", { timeOut: 1500 });
+      }
+    });
+    setTimeout(() => {
+      const ta = dlg.find("textarea")[0];
+      if (ta) ta.focus();
+    }, 100);
+  }
+
+  async function doTransfer(isMove) {
+    const info = _getTransferChar();
+    if (!info || info.group) {
+      toastr.warning("当前无法转存", "", { timeOut: 1200 });
+      return;
+    }
+    const targetFile = _getTransferTargetValue();
+    if (!targetFile) {
+      toastr.warning("请先选择目标聊天档", "", { timeOut: 1200 });
+      return;
+    }
+    if (sharedState.manageTarget === "lower") {
+      return _doTransferIntoCurrent(isMove, info, targetFile);
+    }
+    const selected = getSortedSelected();
+    if (selected.length === 0) {
+      toastr.warning("请先在上方勾选要转存的消息", "", { timeOut: 1200 });
+      return;
+    }
+    const nameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
+    let header = null;
+    let targetMsgs = [];
+    try {
+      const result = await _fetchTargetChat(nameNoExt);
+      header = result.header;
+      targetMsgs = result.messages;
+    } catch (e) {
+      console.error("快捷工具栏: 转存前读取目标失败", e);
+      toastr.error("读取目标聊天档失败，转存已取消", "", { timeOut: 1800 });
+      return;
+    }
+    if (!header) {
+      header = {
+        user_name: name1 || "User",
+        character_name: info.character.name,
+        create_date: new Date().toISOString(),
+        chat_metadata: {},
+      };
+    }
+    if (getSettings().confirmDangerousActions) {
+      const modeText = isMove ? "移动" : "复制";
+      const extra = isMove ? "\n（移动后这些消息将从当前聊天中删除）" : "";
+      if (
+        !confirm(
+          `确定将选中的 ${selected.length} 条消息${modeText}至「${nameNoExt}」吗？${extra}`,
+        )
+      )
+        return;
+    }
+    let toTransfer;
+    try {
+      toTransfer = JSON.parse(JSON.stringify(selected.map((f) => chat[f])));
+    } catch (e) {
+      toastr.error("消息数据异常，转存失败", "", { timeOut: 1500 });
+      return;
+    }
+    let insertAt =
+      sharedState.transferInsertAt == null
+        ? targetMsgs.length
+        : sharedState.transferInsertAt;
+    insertAt = Math.max(0, Math.min(targetMsgs.length, insertAt));
+    targetMsgs.splice(insertAt, 0, ...toTransfer);
+    const jumpToFloor = insertAt;
+    const transferCount = toTransfer.length;
+    let saveOk = false;
+    try {
+      const saveResp = await fetch("/api/chats/save", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        cache: "no-cache",
+        body: JSON.stringify({
+          ch_name: info.character.name,
+          file_name: nameNoExt,
+          chat: [header, ...targetMsgs],
+          avatar_url: info.avatar,
+          force: true,
+        }),
+      });
+      saveOk = saveResp.ok;
+    } catch (e) {
+      console.error("快捷工具栏: 写入目标聊天档失败", e);
+    }
+    if (!saveOk) {
+      toastr.error("写入目标聊天档失败，转存已取消", "", { timeOut: 1800 });
+      return;
+    }
+    _pushTransferHistory(targetFile);
+    if (isMove) {
+      const reversed = [...selected].sort((a, b) => b - a);
+      for (const f of reversed) chat.splice(f, 1);
+      try {
+        await executeSlashCommandsWithOptions("/forcesave");
+      } catch (e) {
+        console.error("快捷工具栏: 保存当前聊天失败", e);
+      }
+    }
+    closeDialog();
+    toastr.success(
+      `已${isMove ? "移动" : "复制"} ${selected.length} 条消息到「${nameNoExt}」，正在打开…`,
+      "",
+      { timeOut: 1500 },
+    );
+    try {
+      if (typeof openCharacterChat === "function") {
+        await openCharacterChat(nameNoExt);
+      } else {
+        info.character.chat = nameNoExt;
+        await executeSlashCommandsWithOptions("/chat-reload");
+      }
+      setTimeout(() => {
+        const chatEl = document.getElementById("chat");
+        if (!chatEl) return;
+        const mesEl = chatEl.querySelector(`.mes[mesid="${jumpToFloor}"]`);
+        if (mesEl) {
+          const r = mesEl.getBoundingClientRect();
+          const useCenter = r.height < chatEl.clientHeight - 40;
+          scrollChatToElement(mesEl, "smooth", useCenter);
+        } else {
+          executeSlashCommandsWithOptions(`/chat-jump ${jumpToFloor}`);
+        }
+        setTimeout(() => {
+          const flashChatEl = document.getElementById("chat");
+          if (!flashChatEl) return;
+          const flashed = [];
+          for (let i = 0; i < transferCount; i++) {
+            const el = flashChatEl.querySelector(
+              `.mes[mesid="${jumpToFloor + i}"]`,
+            );
+            if (el) {
+              el.classList.add("ih-transfer-landed");
+              flashed.push(el);
+            }
+          }
+          setTimeout(() => {
+            flashed.forEach((el) => el.classList.remove("ih-transfer-landed"));
+          }, 2200);
+        }, 400);
+      }, 600);
+    } catch (e) {
+      console.error("快捷工具栏: 打开目标聊天档失败", e);
+      toastr.warning("转存成功，但自动打开失败，请手动切换聊天", "", {
+        timeOut: 2000,
+      });
+    }
+  }
+
+  async function _doTransferIntoCurrent(isMove, info, targetFile) {
+    const selected = Array.from(sharedState.transferSelected).sort(
+      (a, b) => a - b,
+    );
+    if (selected.length === 0) {
+      toastr.warning("请先在下方勾选要转入当前聊天的消息", "", {
+        timeOut: 1200,
+      });
+      return;
+    }
+    const nameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
+    let header = null;
+    let srcMsgs = [];
+    try {
+      const result = await _fetchTargetChat(nameNoExt);
+      header = result.header;
+      srcMsgs = result.messages;
+    } catch (e) {
+      console.error("快捷工具栏: 转存前读取来源档失败", e);
+      toastr.error("读取来源聊天档失败，转存已取消", "", { timeOut: 1800 });
+      return;
+    }
+    const maxIdx = srcMsgs.length - 1;
+    const validSelected = selected.filter((f) => f >= 0 && f <= maxIdx);
+    if (validSelected.length === 0) {
+      toastr.warning("选中的楼层在来源聊天档中已不存在", "", { timeOut: 1500 });
+      return;
+    }
+    if (getSettings().confirmDangerousActions) {
+      const modeText = isMove ? "移动" : "复制";
+      const extra = isMove ? "\n（移动后这些消息将从来源聊天档中删除）" : "";
+      if (
+        !confirm(
+          `确定将来源聊天档「${nameNoExt}」中选中的 ${validSelected.length} 条消息${modeText}至当前聊天吗？${extra}`,
+        )
+      )
+        return;
+    }
+    let toTransfer;
+    try {
+      toTransfer = JSON.parse(
+        JSON.stringify(validSelected.map((f) => srcMsgs[f])),
+      );
+    } catch (e) {
+      toastr.error("消息数据异常，转存失败", "", { timeOut: 1500 });
+      return;
+    }
+    if (isMove) {
+      if (!header) {
+        header = {
+          user_name: name1 || "User",
+          character_name: info.character.name,
+          create_date: new Date().toISOString(),
+          chat_metadata: {},
+        };
+      }
+      const newSrc = [...srcMsgs];
+      const reversed = [...validSelected].sort((a, b) => b - a);
+      for (const f of reversed) newSrc.splice(f, 1);
+      let saveOk = false;
+      try {
+        const resp = await fetch("/api/chats/save", {
+          method: "POST",
+          headers: getRequestHeaders(),
+          cache: "no-cache",
+          body: JSON.stringify({
+            ch_name: info.character.name,
+            file_name: nameNoExt,
+            chat: [header, ...newSrc],
+            avatar_url: info.avatar,
+            force: true,
+          }),
+        });
+        saveOk = resp.ok;
+      } catch (e) {
+        console.error("快捷工具栏: 从来源档删除失败", e);
+      }
+      if (!saveOk) {
+        toastr.error("更新来源聊天档失败，转存已取消", "", { timeOut: 1800 });
+        return;
+      }
+    }
+    let insertAt =
+      sharedState.transferUpperInsertAt == null
+        ? chat.length
+        : sharedState.transferUpperInsertAt;
+    insertAt = Math.max(0, Math.min(chat.length, insertAt));
+    const jumpToFloor = insertAt;
+    const transferCount = toTransfer.length;
+    chatUndoManager.save();
+    chat.splice(insertAt, 0, ...toTransfer);
+    _pushTransferHistory(targetFile);
+    closeDialog();
+    try {
+      await executeSlashCommandsWithOptions("/forcesave");
+      await executeSlashCommandsWithOptions("/chat-reload");
+      toastr.success(
+        `已${isMove ? "移动" : "复制"} ${transferCount} 条消息到当前聊天`,
+        "",
+        { timeOut: 1500 },
+      );
+      setTimeout(() => {
+        const chatEl = document.getElementById("chat");
+        if (!chatEl) return;
+        const mesEl = chatEl.querySelector(`.mes[mesid="${jumpToFloor}"]`);
+        if (mesEl) {
+          const r = mesEl.getBoundingClientRect();
+          const useCenter = r.height < chatEl.clientHeight - 40;
+          scrollChatToElement(mesEl, "smooth", useCenter);
+        } else {
+          executeSlashCommandsWithOptions(`/chat-jump ${jumpToFloor}`);
+        }
+        setTimeout(() => {
+          const flashChatEl = document.getElementById("chat");
+          if (!flashChatEl) return;
+          const flashed = [];
+          for (let i = 0; i < transferCount; i++) {
+            const el = flashChatEl.querySelector(
+              `.mes[mesid="${jumpToFloor + i}"]`,
+            );
+            if (el) {
+              el.classList.add("ih-transfer-landed");
+              flashed.push(el);
+            }
+          }
+          setTimeout(() => {
+            flashed.forEach((el) => el.classList.remove("ih-transfer-landed"));
+          }, 2200);
+        }, 400);
+      }, 600);
+    } catch (e) {
+      console.error("转入当前聊天失败", e);
+      toastr.error("转存失败", "", { timeOut: 1500 });
+    }
+  }
+  content.find("#ih_mgr_transfer_copy").on("click", () => doTransfer(false));
+  content.find("#ih_mgr_transfer_move").on("click", () => doTransfer(true));
 }
 
 function doChatManager() {
@@ -7608,7 +8749,7 @@ async function doChatDelete() {
     await executeSlashCommandsWithOptions("/delchat");
     setTimeout(_restoreToastr, 1500);
     toastr.success(
-      `已删除聊天"${snapshot.name}"，点此撤回（5分钟内有效）`,
+      `已删除聊天"${snapshot.name}"，点击此处撤回（5 分钟内有效）`,
       "",
       {
         timeOut: 0,
@@ -11225,7 +12366,7 @@ function renderFloatingPanelSettings() {
       toastr.info("已经是空的啦", "", { timeOut: 1200 });
       return;
     }
-    if (!confirm("确定清空悬浮面板里的所有按钮吗？\n按钮会回到主工具栏。"))
+    if (!confirm("确定清空悬浮面板中的所有按钮吗？\n按钮将返回主工具栏。"))
       return;
     getSettings().floatingPanel.buttons = [];
     saveSettingsDebounced();
@@ -11355,8 +12496,8 @@ function renderFolderSettings() {
       closeAllFolderDropdowns();
       toastr.info(
         folder.dropdownPersist
-          ? "该文件夹展开后，点外部不会自动关闭"
-          : "该文件夹展开后，点外部会自动关闭",
+          ? "该文件夹展开后，点击面板外部不会自动关闭"
+          : "该文件夹展开后，点击面板外部会自动关闭",
         "",
         { timeOut: 1200 },
       );
@@ -11365,7 +12506,7 @@ function renderFolderSettings() {
     .off("click", ".ih-folder-delete-btn")
     .on("click", ".ih-folder-delete-btn", function () {
       const fi = parseInt($(this).data("folder-index"));
-      if (!confirm("确定删除这个文件夹吗？里面的按钮会恢复为独立显示。"))
+      if (!confirm("确定删除该文件夹吗？文件夹内的按钮将恢复为独立显示。"))
         return;
       const oldFolderKey = `folder_${fi}`;
       const oldOrder = [...getSettings().buttonOrder];
@@ -11444,7 +12585,7 @@ function renderFolderSettings() {
       }
       if (
         !confirm(
-          `确定清空文件夹"${folder.name}"里的所有按钮吗？\n按钮会回到主工具栏。`,
+          `确定清空文件夹"${folder.name}"中的所有按钮吗？\n按钮将返回主工具栏。`,
         )
       )
         return;
@@ -12194,6 +13335,8 @@ async function loadSettings() {
   }
   if (!s.customSymbols) s.customSymbols = [];
   if (!s.folders) s.folders = [];
+  if (!s.transferHistory || typeof s.transferHistory !== "object")
+    s.transferHistory = {};
   if (!s.colorPicker) s.colorPicker = { x: null, y: null, width: 0, height: 0 };
   if (s.enabled === undefined) s.enabled = true;
   if (s.confirmDangerousActions === undefined)

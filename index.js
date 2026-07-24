@@ -2481,17 +2481,6 @@ const findReplaceController = {
 
   _showNoMatchHint() {
     if (!this._barEl) return;
-    const term = this._searchTerm || "";
-    let textLen = 0;
-    if (this._cmView) {
-      textLen = this._cmView.state.doc.length;
-    } else if (this._targetTextarea && this._targetTextarea.length) {
-      textLen = (this._targetTextarea.val() || "").length;
-    }
-    if (textLen >= term.length && textLen > 0) {
-      this._hideNoMatchHint();
-      return;
-    }
     let hint = this._barEl.find(".ih-find-hint");
     if (!hint.length) {
       hint = $(
@@ -3884,7 +3873,6 @@ const historyManager = {
 const chatUndoManager = {
   _snapshots: [],
   _stableSnapshot: null,
-  _lastSaveTime: 0,
   _autoClearTimers: [],
   _stableSnapshotTimer: null,
   _justSaved: false,
@@ -5903,16 +5891,18 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "3.0.0";
+const CHANGELOG_VERSION = "3.1.0";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.0.0</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.1.0</h4>
 <ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.7;">
-  <li><b>消息管理新增「转存」标签</b>：可将当前聊天中的消息复制或移动至同一角色的其他聊天档，适用于小剧场搬家、剧情迁移、支线整理、场景归档等场景。</li>
-  <li><b>上下分栏预览</b>：上方显示当前聊天列表，下方显示目标聊天档预览。点击目标档中的某条消息（或其前方的落点按钮）即可设定插入位置，亦可选择「追加至末尾」。</li>
-  <li><b>支持双向转存</b>：通过列表工具栏的「上 / 下」切换按钮决定转存方向。切换至「上」时从当前聊天转出至目标档；切换至「下」时将其他聊天档中的消息转入当前聊天。全选、反选、范围选择、清除等操作会作用于当前显示勾选框的一侧。</li>
-  <li><b>复制与移动</b>：复制会在原聊天中保留消息；移动会将消息从来源中删除并写入目标档，转入当前聊天的操作可通过「撤回删除」还原。</li>
-  <li><b>目标档直接编辑</b>：目标聊天档预览中的每条消息可通过铅笔按钮直接修改内容，保存后写回目标档文件。</li>
-  <li><b>目标档记忆</b>：最近使用过的目标聊天档会置顶显示于下拉框顶部，便于快速再次选择。</li>
+  <li><b>消息管理新增「搜索」标签</b>：可直接检索聊天消息，无需逐层翻找，支持搜索当前聊天档、指定聊天档或同一角色的全部聊天档。</li>
+  <li><b>支持多聊天档联合搜索</b>：搜索结果会按聊天档分组展示，并标出命中楼层、发送者、匹配次数及关键词上下文。</li>
+  <li><b>关键词高亮与完整预览</b>：命中内容会在摘要中高亮显示；同一条消息包含多处匹配时可逐处切换，也可打开完整内容预览并依次定位所有高亮位置。</li>
+  <li><b>快速跳转</b>：点击搜索结果右侧的定位按钮，可直接跳转至当前聊天对应楼层；其他聊天档的结果会自动打开目标聊天并定位到命中消息。</li>
+  <li><b>搜索范围与大小写控制</b>：可随时切换当前、指定或全部聊天档，并通过 Aa 按钮启用区分大小写搜索。</li>
+  <li><b>指定聊天档多选</b>：支持一次选择多个聊天档进行定向检索，最近使用过的聊天档会优先显示，查找支线、旧剧情和角色设定更省事。</li>
+  <li><b>搜索结果转存篮</b>：可将来自不同聊天档的搜索结果加入转存篮，统一复制或移动至目标聊天档，适合整理散落剧情、片段归档和跨档合并。</li>
+  <li><b>搜索缓存优化</b>：已读取的聊天档会短暂缓存，重复搜索时减少文件读取等待，同时避免不同角色之间的缓存混用。</li>
 </ul>
 `;
 
@@ -6112,7 +6102,7 @@ function openHelpPanel() {
 <p>在设置中开启此选项后，所有涉及删除的操作（删除最后消息、删除备选、批量删除、删除聊天等）执行前将弹出二次确认弹窗，避免误操作。</p>
 
 <h4 style="margin:18px 0 8px;font-size:14px;font-weight:700;border-bottom:1px solid color-mix(in srgb, currentColor 30%, transparent);padding-bottom:4px;"><i class="fa-solid fa-ghost"></i> 消息管理面板</h4>
-<p>统一的消息管理面板，包含五个标签页：</p>
+<p>统一的消息管理面板，包含六个标签页：</p>
 
 <p style="margin:10px 0 4px;font-weight:600;">隐藏</p>
 <p>管理哪些消息对 AI 可见。支持单条隐藏/显示/跳转、范围隐藏/显示、保留最近 N 条可见、勾选多条批量隐藏/显示。隐藏的消息不会发送给 AI。</p>
@@ -6144,11 +6134,13 @@ function openHelpPanel() {
 </ul>
 <p>全选、反选、范围选择、清除等操作会作用于当前显示勾选框的列表；倒序、楼层跳转、回到顶部、回到底部也会随方向切换同步调整。</p>
 <p><b>目标档预览编辑</b>：下方每条消息的铅笔按钮可直接修改该楼层内容，保存后将写回目标聊天档文件。</p>
-<p><b>注意</b>：转存功能目前<b>不支持群聊</b>。转入当前聊天的消息可通过<q>「撤回删除」</q>还原；但<q>「移动」</q>操作对来源聊天档的删除无法撤回，如需还原，可再次使用转存功能将消息转回。</p>
-
-<p style="margin:10px 0 4px;font-weight:600;">共享行为</p>
+<p style="margin:10px 0 4px;font-weight:600;">搜索</p>
+<p>按关键词检索聊天消息，支持当前聊天档、指定聊天档和同一角色的全部聊天档三种范围，并可通过 <q>Aa</q> 按钮切换是否区分大小写。</p>
+<p>搜索结果会按聊天档分组显示命中楼层、发送者、匹配次数和上下文摘要。点击结果可直接打开对应聊天并跳转至命中楼层；眼睛按钮可预览完整消息，并依次定位其中的所有匹配位置。</p>
+<p>搜索结果右侧的转存按钮可将消息加入转存篮。转存篮支持收集多个聊天档中的消息，再统一复制或移动至指定聊天档。</p>
+<p><b>注意</b>：指定聊天档和全部聊天档搜索目前仅支持单角色聊天，不支持群聊。</p>
 <ul>
-    <li>五个标签页共用同一工具栏：全选、反选、范围选择、清除</li>
+    <li>隐藏、删除、移动、插入和转存标签共用同一工具栏：全选、反选、范围选择、清除；搜索标签使用独立的搜索与转存篮工具</li>
     <li>勾选状态和滚动位置在标签页之间保留，切换标签不会丢失</li>
     <li>输入楼层号时列表会实时高亮对应消息：单条使用强调色、范围使用主题色、保留最近使用绿色</li>
     <li>每条消息的箭头按钮可一键跳转至原聊天位置</li>
@@ -6382,6 +6374,49 @@ function openMgrEditDialog(floor, onSaved) {
   }, 100);
 }
 
+const _IH_SEARCH_CACHE = new Map();
+const _IH_SEARCH_CACHE_TTL = 30 * 60 * 1000; // 缓存有效期：30 分钟，想更久就调大（单位毫秒），越久越占内存
+const _IH_SEARCH_CACHE_MAX = 300; // 最多缓存多少个聊天档，防止内存吃太多，聊天档特别多可再调大
+
+function _ihGetSearchCacheKey(fileName) {
+  let avatar = "";
+  try {
+    const chid = this_chid;
+    const character =
+      chid !== undefined && chid !== null ? characters[chid] : null;
+    avatar = character?.avatar || "";
+  } catch (e) {}
+  return `${avatar}::${String(fileName || "")}`;
+}
+
+function _ihGetSearchCache(fileName) {
+  const cacheKey = _ihGetSearchCacheKey(fileName);
+  const item = _IH_SEARCH_CACHE.get(cacheKey);
+  if (!item) return null;
+  if (Date.now() - item.time > _IH_SEARCH_CACHE_TTL) {
+    _IH_SEARCH_CACHE.delete(cacheKey);
+    return null;
+  }
+  return item.messages;
+}
+
+function _ihSetSearchCache(fileName, messages) {
+  const now = Date.now();
+  for (const [k, v] of _IH_SEARCH_CACHE) {
+    if (now - v.time > _IH_SEARCH_CACHE_TTL) _IH_SEARCH_CACHE.delete(k);
+  }
+  while (_IH_SEARCH_CACHE.size >= _IH_SEARCH_CACHE_MAX) {
+    const oldest = _IH_SEARCH_CACHE.keys().next().value;
+    _IH_SEARCH_CACHE.delete(oldest);
+  }
+  const cacheKey = _ihGetSearchCacheKey(fileName);
+  _IH_SEARCH_CACHE.set(cacheKey, { messages, time: now });
+}
+
+function _ihDeleteSearchCache(fileName) {
+  _IH_SEARCH_CACHE.delete(_ihGetSearchCacheKey(fileName));
+}
+
 function openHideManagerPanel() {
   if (chat.length === 0) {
     toastr.warning("当前没有聊天消息", "", { timeOut: 1000 });
@@ -6414,6 +6449,19 @@ function openHideManagerPanel() {
     transferRangeStart: null,
     transferRangeMode: false,
     transferUpperInsertAt: null,
+    searchQuery: "",
+    searchScope: "current",
+    searchCaseSensitive: false,
+    searchResults: [],
+    searchExpanded: {},
+    searchLoading: false,
+    searchDone: false,
+    _searchProgress: "",
+    searchSpecifiedFiles: [],
+    searchBasket: [],
+    _searchLocateIndex: -1,
+    searchEverRun: false,
+    _searchRunId: 0,
   };
 
   const ROW_HEIGHT = 36;
@@ -6443,7 +6491,10 @@ function openHideManagerPanel() {
           <i class="fa-solid fa-plus-circle"></i><span>插入</span>
         </button>
         <button class="ih-mgr-tab" data-tab="transfer">
-          <i class="fa-solid fa-file-export"></i><span>转存</span>
+          <i class="fa-solid fa-right-left"></i><span>转存</span>
+        </button>
+        <button class="ih-mgr-tab" data-tab="search">
+          <i class="fa-solid fa-magnifying-glass"></i><span>搜索</span>
         </button>
       </div>
 
@@ -6551,7 +6602,14 @@ function openHideManagerPanel() {
           <span>「上/下」按钮切换转存方向：显示勾选框的一侧为消息来源，另一侧点击某条消息设定插入落点</span>
         </div>
 
-        <div class="ih-mgr-inline-row">
+        <div class="ih-mgr-basket-banner" id="ih_mgr_basket_banner" style="display:none;">
+          <i class="fa-solid fa-basket-shopping"></i>
+          <span class="ih-mgr-basket-text">转存篮：0 条</span>
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-transfer-basket-locate" id="ih_mgr_transfer_basket_locate" title="切换到搜索tab并依次定位篮里的消息"><i class="fa-solid fa-crosshairs"></i> <span class="ih-search-locate-count">0/0</span></button>
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-basket-clear" id="ih_mgr_basket_clear" title="清空转存篮"><i class="fa-solid fa-trash"></i></button>
+        </div>
+
+        <div class="ih-mgr-inline-row ih-mgr-transfer-current-row">
           <label class="ih-mgr-inline-label">当前聊天档</label>
           <span class="ih-mgr-transfer-current" id="ih_mgr_transfer_current" title="正在从这个聊天档转存">—</span>
         </div>
@@ -6572,7 +6630,55 @@ function openHideManagerPanel() {
               <div class="ih-mgr-select2-list" id="ih_mgr_transfer_options"></div>
             </div>
           </div>
-          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_transfer_refresh" title="刷新列表"><i class="fa-solid fa-rotate"></i></button>
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_transfer_clear_selected" title="清除已选聊天档"><i class="fa-solid fa-eraser"></i></button>
+        </div>
+      </div>
+      <div class="ih-mgr-tab-panel" data-panel="search" style="display:none;">
+        <div class="ih-mgr-status">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>选择搜索范围并输入关键词，点击结果右侧的定位按钮可跳转至对应楼层；搜索范围仅包含当前角色的聊天档</span>
+        </div>
+          <div class="ih-mgr-search-bar">
+            <div class="ih-mgr-search-scope">
+              <button class="ih-mgr-search-scope-btn ih-mgr-search-scope-active" data-scope="current"><i class="fa-solid fa-comment"></i> 当前聊天档</button>
+              <button class="ih-mgr-search-scope-btn" data-scope="specified"><i class="fa-solid fa-file-lines"></i> 指定聊天档</button>
+              <button class="ih-mgr-search-scope-btn" data-scope="all"><i class="fa-solid fa-layer-group"></i> 全部聊天档</button>
+            </div>
+            <div class="ih-mgr-search-specified" style="display:none;">
+              <div class="ih-mgr-select2" id="ih_mgr_search_select2">
+                <div class="ih-mgr-select2-display" id="ih_mgr_search_display" tabindex="0">
+                  <span class="ih-mgr-select2-text">加载中…</span>
+                  <i class="fa-solid fa-chevron-down ih-mgr-select2-caret"></i>
+                </div>
+                <div class="ih-mgr-select2-dropdown" id="ih_mgr_search_dropdown">
+                  <div class="ih-mgr-select2-search-wrap">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" class="ih-mgr-select2-search ih-fp-transparent-input" id="ih_mgr_search_s2_search" placeholder="搜索聊天档…" />
+                    <button class="ih-mgr-select2-search-clear" id="ih_mgr_search_s2_clear" title="清空搜索"><i class="fa-solid fa-xmark"></i></button>
+                  </div>
+                  <div class="ih-mgr-select2-list" id="ih_mgr_search_options"></div>
+                </div>
+              </div>
+              <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_search_clear_selected" title="清除已选聊天档"><i class="fa-solid fa-eraser"></i></button>
+            </div>
+          <div class="ih-mgr-search-input-row">
+            <div class="ih-mgr-search-input-wrap">
+              <input type="text" id="ih_mgr_search_input" class="ih-mgr-search-input ih-fp-transparent-input" placeholder="输入关键词…" />
+              <button class="ih-mgr-search-input-clear" id="ih_mgr_search_clear" title="清空"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <button class="ih-mgr-search-case-btn" id="ih_mgr_search_case" title="区分大小写"><span>Aa</span></button>
+            <button class="ih-mgr-btn ih-mgr-btn-ok ih-mgr-btn-primary" id="ih_mgr_search_go"><i class="fa-solid fa-magnifying-glass"></i> 搜索</button>
+          </div>
+        </div>
+        <div class="ih-mgr-search-status" id="ih_mgr_search_status" style="display:none;"></div>
+        <div class="ih-mgr-basket-banner" id="ih_mgr_search_basket_bar" style="display:none;">
+          <i class="fa-solid fa-basket-shopping"></i>
+          <span class="ih-mgr-basket-text ih-search-basket-text">转存篮：0 条</span>
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-search-basket-locate" id="ih_mgr_search_basket_locate" title="依次定位并高亮转存篮里的消息"><i class="fa-solid fa-crosshairs"></i> <span class="ih-search-locate-count">0/0</span></button>
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-basket-clear" id="ih_mgr_search_basket_clear" title="清空转存篮"><i class="fa-solid fa-trash"></i></button>
+        </div>
+        <div class="ih-mgr-search-results" id="ih_mgr_search_results">
+          <div class="ih-search-empty">输入关键词后点击搜索</div>
         </div>
       </div>
       <div class="ih-mgr-shared-list-area">
@@ -7026,6 +7132,8 @@ function openHideManagerPanel() {
     _syncManageToggleUI();
     content.find(".ih-mgr-tab-panel").hide();
     content.find(`.ih-mgr-tab-panel[data-panel="${tab}"]`).show();
+    content.find(".ih-mgr-shared-list-area").toggle(tab !== "search");
+    if (tab === "search") renderSearchResults();
     content.find(".ih-mgr-footer-actions").hide();
     if (tab === "hide" || tab === "delete") {
       content
@@ -7043,6 +7151,7 @@ function openHideManagerPanel() {
         loadTransferChatList();
       }
       renderTransferTarget();
+      _updateBasketBanner();
     }
     setTimeout(() => {
       vlistEl.scrollTop = sharedState.scrollTop;
@@ -8028,8 +8137,8 @@ function openHideManagerPanel() {
   content.on("click", "#ih_mgr_transfer_dropdown", function (e) {
     e.stopPropagation();
   });
-  content.find("#ih_mgr_transfer_refresh").on("click", () => {
-    loadTransferChatList();
+  content.find("#ih_mgr_transfer_clear_selected").on("click", () => {
+    _setTransferSelected("");
   });
   function _syncManageToggleUI() {
     const isLower = sharedState.manageTarget === "lower";
@@ -8278,6 +8387,7 @@ function openHideManagerPanel() {
       }
       close();
       if (ok) {
+        _ihDeleteSearchCache(targetFile);
         renderTransferTarget();
         toastr.success(`已保存目标楼层 #${floor}`, "", { timeOut: 1000 });
       } else {
@@ -8376,6 +8486,7 @@ function openHideManagerPanel() {
       toastr.error("写入目标聊天档失败，转存已取消", "", { timeOut: 1800 });
       return;
     }
+    _ihSetSearchCache(targetFile, targetMsgs);
     _pushTransferHistory(targetFile);
     if (isMove) {
       const reversed = [...selected].sort((a, b) => b - a);
@@ -8571,8 +8682,1369 @@ function openHideManagerPanel() {
       toastr.error("转存失败", "", { timeOut: 1500 });
     }
   }
-  content.find("#ih_mgr_transfer_copy").on("click", () => doTransfer(false));
-  content.find("#ih_mgr_transfer_move").on("click", () => doTransfer(true));
+  content.find("#ih_mgr_transfer_copy").on("click", () => {
+    if (sharedState.searchBasket.length > 0) _doBasketCopy();
+    else doTransfer(false);
+  });
+  content.find("#ih_mgr_transfer_move").on("click", () => {
+    if (sharedState.searchBasket.length > 0) _doBasketMove();
+    else doTransfer(true);
+  });
+  function _updateBasketBanner() {
+    const n = sharedState.searchBasket.length;
+    content.toggleClass("ih-mgr-has-basket", n > 0);
+    const banner = content.find("#ih_mgr_basket_banner");
+    if (n > 0) {
+      banner.css("display", "flex");
+      banner
+        .find(".ih-mgr-basket-text")
+        .text(`转存篮：${n} 条 · 选好目标档和落点后点下方「复制/移动」`);
+    } else {
+      banner.hide();
+    }
+    const searchBar = content.find("#ih_mgr_search_basket_bar");
+    if (n > 0) {
+      searchBar.css("display", "flex");
+      searchBar.find(".ih-search-basket-text").text(`转存篮：${n} 条`);
+    } else {
+      searchBar.hide();
+    }
+    _updateSearchLocateBtn();
+  }
+
+  function _clearBasket() {
+    sharedState.searchBasket = [];
+    sharedState._searchLocateIndex = -1;
+    _updateBasketBanner();
+    if (sharedState.activeTab === "search") renderSearchResults();
+    toastr.info("已清空转存篮", "", { timeOut: 800 });
+  }
+  content.find("#ih_mgr_basket_clear").on("click", _clearBasket);
+  content.find("#ih_mgr_search_basket_clear").on("click", _clearBasket);
+
+  function _updateSearchLocateBtn() {
+    const n = sharedState.searchBasket.length;
+    const idx = sharedState._searchLocateIndex;
+    const cur = typeof idx === "number" && idx >= 0 && idx < n ? idx + 1 : 0;
+    content.find(".ih-search-locate-count").text(cur + "/" + n);
+  }
+
+  function _switchSearchScope(scope) {
+    if (sharedState.searchScope === scope) return;
+    sharedState.searchScope = scope;
+    content
+      .find(".ih-mgr-search-scope-btn")
+      .removeClass("ih-mgr-search-scope-active");
+    content
+      .find(`.ih-mgr-search-scope-btn[data-scope="${scope}"]`)
+      .addClass("ih-mgr-search-scope-active");
+    content.find(".ih-mgr-search-specified").toggle(scope === "specified");
+    if (scope === "specified" && !_searchS2Loaded) {
+      _loadSearchChatList();
+    }
+  }
+
+  function _scrollHighlightSearchItem(item) {
+    const area = content.find("#ih_mgr_search_results")[0];
+    if (!area) return;
+    const fileVal = item.file || "";
+    let target = null;
+    area.querySelectorAll(".ih-search-item").forEach((el) => {
+      if (
+        parseInt(el.getAttribute("data-floor")) === item.floor &&
+        (el.getAttribute("data-file") || "") === fileVal
+      ) {
+        target = el;
+      }
+    });
+    area
+      .querySelectorAll(".ih-search-item.ih-search-locate-hl")
+      .forEach((el) => el.classList.remove("ih-search-locate-hl"));
+    if (target) {
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.classList.add("ih-search-locate-hl");
+    } else {
+      toastr.info("这条消息在搜索结果里没找到（可能已被删除）", "", {
+        timeOut: 1500,
+      });
+    }
+  }
+
+  function _isBasketItemInResults(item) {
+    const gid = item.file || "__current__";
+    const group = sharedState.searchResults.find(
+      (g) => (g.fileName || "__current__") === gid,
+    );
+    if (!group) return false;
+    return group.matches.some((m) => m.floor === item.floor);
+  }
+
+  async function _searchLocateNext() {
+    const basket = sharedState.searchBasket;
+    if (basket.length === 0) {
+      toastr.info("转存篮是空的", "", { timeOut: 1000 });
+      return;
+    }
+    let idx = sharedState._searchLocateIndex;
+    if (typeof idx !== "number" || idx < 0 || idx >= basket.length) idx = 0;
+    else idx = (idx + 1) % basket.length;
+    sharedState._searchLocateIndex = idx;
+    _updateSearchLocateBtn();
+    const item = basket[idx];
+    const gid = item.file || "__current__";
+
+    if (!sharedState.searchDone || !_isBasketItemInResults(item)) {
+      const kw = String(
+        content.find("#ih_mgr_search_input").val() || "",
+      ).trim();
+      if (!kw) {
+        toastr.info("请先在搜索框输入关键词再定位", "", { timeOut: 1800 });
+        return;
+      }
+      _switchSearchScope(item.file ? "all" : "current");
+      await runSearch();
+    }
+
+    if (sharedState.searchExpanded[gid] === false) {
+      sharedState.searchExpanded[gid] = true;
+      renderSearchResults();
+    }
+    setTimeout(() => {
+      _scrollHighlightSearchItem(item);
+    }, 80);
+  }
+
+  content.find("#ih_mgr_search_basket_locate").on("click", function (e) {
+    e.stopPropagation();
+    _searchLocateNext();
+  });
+
+  content.find("#ih_mgr_transfer_basket_locate").on("click", function (e) {
+    e.stopPropagation();
+    if (sharedState.searchBasket.length === 0) {
+      toastr.info("转存篮是空的", "", { timeOut: 1000 });
+      return;
+    }
+    content.find('.ih-mgr-tab[data-tab="search"]').trigger("click");
+    setTimeout(() => {
+      _searchLocateNext();
+    }, 120);
+  });
+
+  async function _doBasketCopy() {
+    const info = _getTransferChar();
+    if (!info || info.group) {
+      toastr.warning("当前无法转存", "", { timeOut: 1200 });
+      return;
+    }
+    const targetFile = _getTransferTargetValue();
+    if (!targetFile) {
+      toastr.warning("请先选择目标聊天档", "", { timeOut: 1200 });
+      return;
+    }
+    if (sharedState.searchBasket.length === 0) {
+      toastr.warning("转存篮是空的", "", { timeOut: 1200 });
+      return;
+    }
+    const basket = [...sharedState.searchBasket];
+    const bySource = {};
+    basket.forEach((b) => {
+      bySource[b.file] = null;
+    });
+    for (const file of Object.keys(bySource)) {
+      if (file === "") {
+        bySource[file] = chat;
+      } else {
+        const nameNoExt = String(file).replace(/\.jsonl$/i, "");
+        try {
+          const r = await _fetchTargetChat(nameNoExt);
+          bySource[file] = r.messages;
+        } catch (e) {
+          console.error("快捷工具栏: 读取来源聊天档失败", e);
+          toastr.error(`读取来源「${nameNoExt}」失败，转存已取消`, "", {
+            timeOut: 1800,
+          });
+          return;
+        }
+      }
+    }
+    let toTransfer = [];
+    try {
+      basket.forEach((b) => {
+        const arr = bySource[b.file];
+        if (arr && arr[b.floor]) {
+          toTransfer.push(JSON.parse(JSON.stringify(arr[b.floor])));
+        }
+      });
+    } catch (e) {
+      toastr.error("消息数据异常，转存失败", "", { timeOut: 1500 });
+      return;
+    }
+    if (toTransfer.length === 0) {
+      toastr.warning("转存篮里的消息在来源中已不存在", "", { timeOut: 1500 });
+      return;
+    }
+    const nameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
+    let header = null;
+    let targetMsgs = [];
+    try {
+      const result = await _fetchTargetChat(nameNoExt);
+      header = result.header;
+      targetMsgs = result.messages;
+    } catch (e) {
+      console.error("快捷工具栏: 转存前读取目标失败", e);
+      toastr.error("读取目标聊天档失败，转存已取消", "", { timeOut: 1800 });
+      return;
+    }
+    if (!header) {
+      header = {
+        user_name: name1 || "User",
+        character_name: info.character.name,
+        create_date: new Date().toISOString(),
+        chat_metadata: {},
+      };
+    }
+    if (getSettings().confirmDangerousActions) {
+      if (
+        !confirm(
+          `确定将转存篮中的 ${toTransfer.length} 条消息复制至「${nameNoExt}」吗？`,
+        )
+      )
+        return;
+    }
+    let insertAt =
+      sharedState.transferInsertAt == null
+        ? targetMsgs.length
+        : sharedState.transferInsertAt;
+    insertAt = Math.max(0, Math.min(targetMsgs.length, insertAt));
+    targetMsgs.splice(insertAt, 0, ...toTransfer);
+    const jumpToFloor = insertAt;
+    const transferCount = toTransfer.length;
+    let saveOk = false;
+    try {
+      const saveResp = await fetch("/api/chats/save", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        cache: "no-cache",
+        body: JSON.stringify({
+          ch_name: info.character.name,
+          file_name: nameNoExt,
+          chat: [header, ...targetMsgs],
+          avatar_url: info.avatar,
+          force: true,
+        }),
+      });
+      saveOk = saveResp.ok;
+    } catch (e) {
+      console.error("快捷工具栏: 写入目标聊天档失败", e);
+    }
+    if (!saveOk) {
+      toastr.error("写入目标聊天档失败，转存已取消", "", { timeOut: 1800 });
+      return;
+    }
+    _ihSetSearchCache(targetFile, targetMsgs);
+    _pushTransferHistory(targetFile);
+    sharedState.searchBasket = [];
+    closeDialog();
+    toastr.success(
+      `已复制 ${transferCount} 条消息到「${nameNoExt}」，正在打开…`,
+      "",
+      { timeOut: 1500 },
+    );
+    try {
+      if (typeof openCharacterChat === "function") {
+        await openCharacterChat(nameNoExt);
+      } else {
+        info.character.chat = nameNoExt;
+        await executeSlashCommandsWithOptions("/chat-reload");
+      }
+      setTimeout(() => {
+        const chatEl = document.getElementById("chat");
+        if (!chatEl) return;
+        const mesEl = chatEl.querySelector(`.mes[mesid="${jumpToFloor}"]`);
+        if (mesEl) {
+          const r = mesEl.getBoundingClientRect();
+          const useCenter = r.height < chatEl.clientHeight - 40;
+          scrollChatToElement(mesEl, "smooth", useCenter);
+        } else {
+          executeSlashCommandsWithOptions(`/chat-jump ${jumpToFloor}`);
+        }
+        setTimeout(() => {
+          const flashChatEl = document.getElementById("chat");
+          if (!flashChatEl) return;
+          const flashed = [];
+          for (let i = 0; i < transferCount; i++) {
+            const el = flashChatEl.querySelector(
+              `.mes[mesid="${jumpToFloor + i}"]`,
+            );
+            if (el) {
+              el.classList.add("ih-transfer-landed");
+              flashed.push(el);
+            }
+          }
+          setTimeout(() => {
+            flashed.forEach((el) => el.classList.remove("ih-transfer-landed"));
+          }, 2200);
+        }, 400);
+      }, 600);
+    } catch (e) {
+      console.error("快捷工具栏: 打开目标聊天档失败", e);
+      toastr.warning("转存成功，但自动打开失败，请手动切换聊天", "", {
+        timeOut: 2000,
+      });
+    }
+  }
+  async function _doBasketMove() {
+    const info = _getTransferChar();
+    if (!info || info.group) {
+      toastr.warning("当前无法转存", "", { timeOut: 1200 });
+      return;
+    }
+    const targetFile = _getTransferTargetValue();
+    if (!targetFile) {
+      toastr.warning("请先选择目标聊天档", "", { timeOut: 1200 });
+      return;
+    }
+    if (sharedState.searchBasket.length === 0) {
+      toastr.warning("转存篮是空的", "", { timeOut: 1200 });
+      return;
+    }
+    const targetNameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
+    const basket = [...sharedState.searchBasket];
+    const curChatName = String(info.chatFile || "");
+    const targetIsSource = basket.some((b) => {
+      if (b.file === "") return curChatName === targetNameNoExt;
+      return String(b.file).replace(/\.jsonl$/i, "") === targetNameNoExt;
+    });
+    if (targetIsSource) {
+      toastr.warning(
+        "转存篮里有来自目标聊天档自己的消息，无法移动到它自己，请改用复制或去掉这些消息",
+        "",
+        { timeOut: 3000 },
+      );
+      return;
+    }
+    const bySource = {};
+    basket.forEach((b) => {
+      bySource[b.file] = null;
+    });
+    for (const file of Object.keys(bySource)) {
+      if (file === "") {
+        bySource[file] = { header: null, messages: chat };
+      } else {
+        const nameNoExt = String(file).replace(/\.jsonl$/i, "");
+        try {
+          const r = await _fetchTargetChat(nameNoExt);
+          bySource[file] = { header: r.header, messages: r.messages };
+        } catch (e) {
+          console.error("快捷工具栏: 读取来源聊天档失败", e);
+          toastr.error(`读取来源「${nameNoExt}」失败，移动已取消`, "", {
+            timeOut: 1800,
+          });
+          return;
+        }
+      }
+    }
+    let toTransfer = [];
+    try {
+      basket.forEach((b) => {
+        const arr = bySource[b.file].messages;
+        if (arr && arr[b.floor]) {
+          toTransfer.push(JSON.parse(JSON.stringify(arr[b.floor])));
+        }
+      });
+    } catch (e) {
+      toastr.error("消息数据异常，移动失败", "", { timeOut: 1500 });
+      return;
+    }
+    if (toTransfer.length === 0) {
+      toastr.warning("转存篮里的消息在来源中已不存在", "", { timeOut: 1500 });
+      return;
+    }
+    let header = null;
+    let targetMsgs = [];
+    try {
+      const result = await _fetchTargetChat(targetNameNoExt);
+      header = result.header;
+      targetMsgs = result.messages;
+    } catch (e) {
+      console.error("快捷工具栏: 转存前读取目标失败", e);
+      toastr.error("读取目标聊天档失败，移动已取消", "", { timeOut: 1800 });
+      return;
+    }
+    if (!header) {
+      header = {
+        user_name: name1 || "User",
+        character_name: info.character.name,
+        create_date: new Date().toISOString(),
+        chat_metadata: {},
+      };
+    }
+    if (getSettings().confirmDangerousActions) {
+      if (
+        !confirm(
+          `确定将转存篮中的 ${toTransfer.length} 条消息移动至「${targetNameNoExt}」吗？\n（这些消息会从各自来源聊天档中删除，来自其他聊天档的删除无法撤回）`,
+        )
+      )
+        return;
+    }
+    let insertAt =
+      sharedState.transferInsertAt == null
+        ? targetMsgs.length
+        : sharedState.transferInsertAt;
+    insertAt = Math.max(0, Math.min(targetMsgs.length, insertAt));
+    targetMsgs.splice(insertAt, 0, ...toTransfer);
+    const jumpToFloor = insertAt;
+    const transferCount = toTransfer.length;
+    let saveOk = false;
+    try {
+      const saveResp = await fetch("/api/chats/save", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        cache: "no-cache",
+        body: JSON.stringify({
+          ch_name: info.character.name,
+          file_name: targetNameNoExt,
+          chat: [header, ...targetMsgs],
+          avatar_url: info.avatar,
+          force: true,
+        }),
+      });
+      saveOk = saveResp.ok;
+    } catch (e) {
+      console.error("快捷工具栏: 写入目标聊天档失败", e);
+    }
+    if (!saveOk) {
+      toastr.error("写入目标聊天档失败，移动已取消", "", { timeOut: 1800 });
+      return;
+    }
+    _ihSetSearchCache(targetFile, targetMsgs);
+    const floorsBySource = {};
+    basket.forEach((b) => {
+      if (!floorsBySource[b.file]) floorsBySource[b.file] = [];
+      floorsBySource[b.file].push(b.floor);
+    });
+    if (Object.prototype.hasOwnProperty.call(floorsBySource, "")) {
+      chatUndoManager.save();
+    }
+    let currentChatChanged = false;
+    for (const file of Object.keys(floorsBySource)) {
+      const floors = [...new Set(floorsBySource[file])].sort((a, b) => b - a);
+      if (file === "") {
+        floors.forEach((f) => {
+          if (f >= 0 && f < chat.length) chat.splice(f, 1);
+        });
+        currentChatChanged = true;
+      } else {
+        const nameNoExt = String(file).replace(/\.jsonl$/i, "");
+        const src = bySource[file];
+        const newMsgs = [...src.messages];
+        floors.forEach((f) => {
+          if (f >= 0 && f < newMsgs.length) newMsgs.splice(f, 1);
+        });
+        const srcHeader = src.header || {
+          user_name: name1 || "User",
+          character_name: info.character.name,
+          create_date: new Date().toISOString(),
+          chat_metadata: {},
+        };
+        try {
+          await fetch("/api/chats/save", {
+            method: "POST",
+            headers: getRequestHeaders(),
+            cache: "no-cache",
+            body: JSON.stringify({
+              ch_name: info.character.name,
+              file_name: nameNoExt,
+              chat: [srcHeader, ...newMsgs],
+              avatar_url: info.avatar,
+              force: true,
+            }),
+          });
+        } catch (e) {
+          console.error("快捷工具栏: 从来源档删除失败 " + nameNoExt, e);
+        }
+        _ihSetSearchCache(file, newMsgs);
+      }
+    }
+    _pushTransferHistory(targetFile);
+    sharedState.searchBasket = [];
+    if (currentChatChanged) {
+      try {
+        await executeSlashCommandsWithOptions("/forcesave");
+      } catch (e) {}
+    }
+    closeDialog();
+    toastr.success(
+      `已移动 ${transferCount} 条消息到「${targetNameNoExt}」，正在打开…`,
+      "",
+      { timeOut: 1500 },
+    );
+    try {
+      if (typeof openCharacterChat === "function") {
+        await openCharacterChat(targetNameNoExt);
+      } else {
+        info.character.chat = targetNameNoExt;
+        await executeSlashCommandsWithOptions("/chat-reload");
+      }
+      setTimeout(() => {
+        const chatEl = document.getElementById("chat");
+        if (!chatEl) return;
+        const mesEl = chatEl.querySelector(`.mes[mesid="${jumpToFloor}"]`);
+        if (mesEl) {
+          const r = mesEl.getBoundingClientRect();
+          const useCenter = r.height < chatEl.clientHeight - 40;
+          scrollChatToElement(mesEl, "smooth", useCenter);
+        } else {
+          executeSlashCommandsWithOptions(`/chat-jump ${jumpToFloor}`);
+        }
+        setTimeout(() => {
+          const flashChatEl = document.getElementById("chat");
+          if (!flashChatEl) return;
+          const flashed = [];
+          for (let i = 0; i < transferCount; i++) {
+            const el = flashChatEl.querySelector(
+              `.mes[mesid="${jumpToFloor + i}"]`,
+            );
+            if (el) {
+              el.classList.add("ih-transfer-landed");
+              flashed.push(el);
+            }
+          }
+          setTimeout(() => {
+            flashed.forEach((el) => el.classList.remove("ih-transfer-landed"));
+          }, 2200);
+        }, 400);
+      }, 600);
+    } catch (e) {
+      console.error("快捷工具栏: 打开目标聊天档失败", e);
+      toastr.warning("移动成功，但自动打开失败，请手动切换聊天", "", {
+        timeOut: 2000,
+      });
+    }
+  }
+
+  function _searchScanMsg(rawText, kw, caseSensitive) {
+    const hay = caseSensitive ? rawText : rawText.toLowerCase();
+    const needle = caseSensitive ? kw : kw.toLowerCase();
+    const positions = [];
+    let pos = 0;
+    while ((pos = hay.indexOf(needle, pos)) !== -1) {
+      positions.push(pos);
+      pos += needle.length || 1;
+      if (positions.length >= 50) break;
+    }
+    return positions;
+  }
+
+  function _searchBuildSnippet(rawText, matchIndex, kwLen) {
+    const CONTEXT_BUFFER = 120;
+    const start = Math.max(0, matchIndex - CONTEXT_BUFFER);
+    const end = Math.min(rawText.length, matchIndex + kwLen + CONTEXT_BUFFER);
+    const before = rawText.substring(start, matchIndex).replace(/\s+/g, " ");
+    const mid = rawText.substring(matchIndex, matchIndex + kwLen);
+    const after = rawText
+      .substring(matchIndex + kwLen, end)
+      .replace(/\s+/g, " ");
+    const prefix = start > 0 ? "…" : "";
+    const suffix = end < rawText.length ? "…" : "";
+    return (
+      prefix +
+      ihEscapeHtml(before) +
+      '<mark class="ih-search-hl">' +
+      ihEscapeHtml(mid) +
+      "</mark>" +
+      ihEscapeHtml(after) +
+      suffix
+    );
+  }
+
+  function _searchInMessages(messages, kw, caseSensitive) {
+    const out = [];
+    if (!Array.isArray(messages)) return out;
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      if (!m) continue;
+      const raw = String(m.mes || "");
+      if (!raw) continue;
+      const positions = _searchScanMsg(raw, kw, caseSensitive);
+      if (positions.length > 0) {
+        out.push({
+          floor: i,
+          sender: m.name || (m.is_user ? "User" : "AI"),
+          count: positions.length,
+          positions: positions,
+          rawText: raw,
+          kwLen: kw.length,
+          hlIndex: 0,
+        });
+      }
+    }
+    return out;
+  }
+
+  function renderSearchResults() {
+    const area = content.find("#ih_mgr_search_results")[0];
+    if (!area) return;
+    _updateBasketBanner();
+    const statusEl = content.find("#ih_mgr_search_status");
+    if (sharedState.searchLoading) {
+      statusEl
+        .html(
+          '<i class="fa-solid fa-spinner fa-spin"></i><span>' +
+            ihEscapeHtml(sharedState._searchProgress || "正在搜索…") +
+            "</span>",
+        )
+        .show();
+      area.innerHTML = "";
+      return;
+    }
+    if (!sharedState.searchDone) {
+      statusEl.hide();
+      area.innerHTML =
+        '<div class="ih-search-empty">输入关键词后点击搜索</div>';
+      return;
+    }
+    const totalMatches = sharedState.searchResults.reduce(
+      (a, g) => a + g.matches.length,
+      0,
+    );
+    if (totalMatches === 0) {
+      statusEl
+        .html(
+          '<i class="fa-solid fa-circle-info"></i><span>没有找到包含「' +
+            ihEscapeHtml(sharedState.searchQuery) +
+            "」的消息</span>",
+        )
+        .show();
+      area.innerHTML =
+        '<div class="ih-search-empty">换个关键词或切换搜索范围试试</div>';
+      return;
+    }
+    statusEl
+      .html(
+        '<i class="fa-solid fa-circle-check"></i><span>共找到 ' +
+          totalMatches +
+          " 处匹配（" +
+          sharedState.searchResults.length +
+          " 个聊天档）</span>",
+      )
+      .show();
+    let html = "";
+    sharedState.searchResults.forEach((group) => {
+      const gid = group.fileName || "__current__";
+      const expanded = sharedState.searchExpanded[gid] !== false;
+      const fileAttr = group.fileName ? ihEscapeAttr(group.fileName) : "";
+      html +=
+        '<div class="ih-search-group" data-gid="' + ihEscapeAttr(gid) + '">';
+      html +=
+        '<div class="ih-search-group-header" data-gid="' +
+        ihEscapeAttr(gid) +
+        '">';
+      html +=
+        '<button class="ih-search-toggle" data-gid="' +
+        ihEscapeAttr(gid) +
+        '"><i class="fa-solid ' +
+        (expanded ? "fa-chevron-down" : "fa-chevron-right") +
+        '"></i></button>';
+      html +=
+        '<span class="ih-search-group-name">' +
+        (group.isCurrent
+          ? '<i class="fa-solid fa-star" style="opacity:0.55;margin-right:5px;"></i>'
+          : "") +
+        ihEscapeHtml(group.label) +
+        "</span>";
+      html +=
+        '<span class="ih-search-group-count">' +
+        group.matches.length +
+        " 处</span>";
+      html += "</div>";
+      html +=
+        '<div class="ih-search-group-body" style="display:' +
+        (expanded ? "flex" : "none") +
+        ';">';
+      group.matches.forEach((mt) => {
+        const hlIdx = mt.hlIndex || 0;
+        const cnt =
+          mt.count > 1
+            ? '<span class="ih-search-hit-count">×' + mt.count + "</span>"
+            : "";
+        const switchBtn =
+          mt.count > 1
+            ? '<button class="ih-search-switch" data-gid="' +
+              ihEscapeAttr(gid) +
+              '" data-floor="' +
+              mt.floor +
+              '" title="切换到下一处匹配">' +
+              (hlIdx + 1) +
+              "/" +
+              mt.count +
+              ' <i class="fa-solid fa-arrow-right"></i></button>'
+            : "";
+        const _bkFile = group.fileName || "";
+        const _inBasket = sharedState.searchBasket.some(
+          (b) => b.file === _bkFile && b.floor === mt.floor,
+        );
+        const basketBtn =
+          '<button class="ih-search-basket' +
+          (_inBasket ? " ih-search-basket-active" : "") +
+          '" data-file="' +
+          fileAttr +
+          '" data-floor="' +
+          mt.floor +
+          '" data-sender="' +
+          ihEscapeAttr(mt.sender) +
+          '" title="' +
+          (_inBasket ? "从转存篮移除" : "加入转存篮") +
+          '"><i class="fa-solid fa-' +
+          (_inBasket ? "check" : "right-left") +
+          '"></i></button>';
+        const snippetHtml = _searchBuildSnippet(
+          mt.rawText,
+          mt.positions[hlIdx],
+          mt.kwLen,
+        );
+        html +=
+          '<div class="ih-search-item" data-floor="' +
+          mt.floor +
+          '" data-file="' +
+          fileAttr +
+          '">';
+        html +=
+          '<div class="ih-search-item-head"><span class="ih-search-item-floor">#' +
+          mt.floor +
+          '</span><span class="ih-search-item-sender">' +
+          ihEscapeHtml(mt.sender) +
+          "</span>" +
+          cnt +
+          '<span class="ih-search-actions">' +
+          switchBtn +
+          basketBtn +
+          '<button class="ih-search-preview" data-gid="' +
+          ihEscapeAttr(gid) +
+          '" data-floor="' +
+          mt.floor +
+          '" title="预览完整内容"><i class="fa-solid fa-eye"></i></button>' +
+          '<button class="ih-search-jump" data-floor="' +
+          mt.floor +
+          '" data-file="' +
+          fileAttr +
+          '" title="跳转到此消息"><i class="fa-solid fa-location-arrow"></i></button>' +
+          "</span></div>";
+        html += '<div class="ih-search-item-snippet">' + snippetHtml + "</div>";
+        html += "</div>";
+      });
+      html += "</div></div>";
+    });
+    area.innerHTML = html;
+    generateFaIconProtectionCSS();
+  }
+
+  async function runSearch() {
+    const kw = String(content.find("#ih_mgr_search_input").val() || "").trim();
+    if (!kw) {
+      toastr.warning("请先输入关键词", "", { timeOut: 1200 });
+      return;
+    }
+    const runId = ++sharedState._searchRunId;
+    sharedState.searchEverRun = true;
+    sharedState.searchQuery = kw;
+    const caseSensitive = sharedState.searchCaseSensitive;
+    sharedState.searchResults = [];
+    sharedState.searchDone = false;
+    sharedState.searchExpanded = {};
+
+    if (sharedState.searchScope === "current") {
+      const matches = _searchInMessages(chat, kw, caseSensitive);
+      if (matches.length > 0) {
+        let curName = "当前聊天档";
+        try {
+          curName = SillyTavern.getContext().getCurrentChatId() || "当前聊天档";
+        } catch (e) {}
+        sharedState.searchResults.push({
+          fileName: null,
+          label: curName,
+          isCurrent: true,
+          matches,
+        });
+        sharedState.searchExpanded["__current__"] = true;
+      }
+      sharedState.searchDone = true;
+      renderSearchResults();
+      return;
+    }
+
+    if (sharedState.searchScope === "specified") {
+      const files = sharedState.searchSpecifiedFiles || [];
+      if (files.length === 0) {
+        toastr.warning("请先选择要搜索的聊天档", "", { timeOut: 1500 });
+        return;
+      }
+      const info2 = _getTransferChar();
+      if (!info2 || info2.group) {
+        toastr.warning("指定聊天档搜索暂不支持群聊", "", { timeOut: 1800 });
+        return;
+      }
+      sharedState.searchLoading = true;
+      renderSearchResults();
+      const totalSpec = files.length;
+      let doneSpec = 0;
+      const specResults = [];
+      for (const fileWithExt of files) {
+        const nameNoExt2 = String(fileWithExt).replace(/\.jsonl$/i, "");
+        doneSpec++;
+        let msgs2 = _ihGetSearchCache(fileWithExt);
+        if (!msgs2) {
+          sharedState._searchProgress =
+            "正在读取 " + doneSpec + "/" + totalSpec + "：" + nameNoExt2;
+          renderSearchResults();
+          try {
+            const result = await _fetchTargetChat(nameNoExt2);
+            if (runId !== sharedState._searchRunId) return;
+            msgs2 = result.messages;
+            _ihSetSearchCache(fileWithExt, msgs2);
+          } catch (e) {
+            if (runId !== sharedState._searchRunId) return;
+            console.warn("快捷工具栏: 搜索指定聊天档失败 " + nameNoExt2, e);
+            continue;
+          }
+        }
+        if (runId !== sharedState._searchRunId) return;
+        const matches2 = _searchInMessages(msgs2, kw, caseSensitive);
+        if (matches2.length > 0) {
+          specResults.push({
+            fileName: fileWithExt,
+            label: nameNoExt2,
+            isCurrent: false,
+            matches: matches2,
+          });
+          sharedState.searchExpanded[fileWithExt] = files.length === 1;
+          _pushTransferHistory(fileWithExt);
+        }
+      }
+      sharedState.searchResults = specResults;
+      sharedState.searchLoading = false;
+      sharedState.searchDone = true;
+      sharedState._searchProgress = "";
+      renderSearchResults();
+      return;
+    }
+
+    const info = _getTransferChar();
+    if (!info || info.group) {
+      toastr.warning("全部聊天档搜索暂不支持群聊", "", { timeOut: 1800 });
+      return;
+    }
+    sharedState.searchLoading = true;
+    sharedState._searchProgress = "正在获取聊天档列表…";
+    renderSearchResults();
+    let chats = [];
+    try {
+      const resp = await fetch("/api/characters/chats", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ avatar_url: info.avatar }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && typeof data === "object" && !data.error) {
+          chats = Object.values(data);
+        }
+      }
+    } catch (e) {
+      if (runId !== sharedState._searchRunId) return;
+      console.error("快捷工具栏: 获取聊天档列表失败", e);
+    }
+    if (runId !== sharedState._searchRunId) return;
+    const currentChatName = String(info.chatFile || "");
+    const fileList = chats.map((c) => c && c.file_name).filter(Boolean);
+    const results = [];
+    const curMatches = _searchInMessages(chat, kw, caseSensitive);
+    if (curMatches.length > 0) {
+      results.push({
+        fileName: null,
+        label: currentChatName || "当前聊天档",
+        isCurrent: true,
+        matches: curMatches,
+      });
+      sharedState.searchExpanded["__current__"] = true;
+    }
+    const total2 = fileList.length;
+    let done = 0;
+    for (const fn of fileList) {
+      const nameNoExt = String(fn).replace(/\.jsonl$/i, "");
+      done++;
+      if (nameNoExt === currentChatName) continue;
+      let msgs = _ihGetSearchCache(fn);
+      if (!msgs) {
+        sharedState._searchProgress =
+          "正在读取 " + done + "/" + total2 + "：" + nameNoExt;
+        renderSearchResults();
+        try {
+          const result = await _fetchTargetChat(nameNoExt);
+          if (runId !== sharedState._searchRunId) return;
+          msgs = result.messages;
+          _ihSetSearchCache(fn, msgs);
+        } catch (e) {
+          if (runId !== sharedState._searchRunId) return;
+          console.warn("快捷工具栏: 搜索聊天档失败 " + nameNoExt, e);
+          continue;
+        }
+      }
+      if (runId !== sharedState._searchRunId) return;
+      const matches = _searchInMessages(msgs, kw, caseSensitive);
+      if (matches.length > 0) {
+        results.push({
+          fileName: fn,
+          label: nameNoExt,
+          isCurrent: false,
+          matches,
+        });
+        sharedState.searchExpanded[fn] = false;
+      }
+    }
+    sharedState.searchResults = results;
+    sharedState.searchLoading = false;
+    sharedState.searchDone = true;
+    sharedState._searchProgress = "";
+    renderSearchResults();
+  }
+
+  content.on("click", ".ih-mgr-search-scope-btn", function () {
+    const scope = $(this).data("scope");
+    if (scope === sharedState.searchScope) return;
+    sharedState._searchRunId++;
+    sharedState.searchScope = scope;
+    content
+      .find(".ih-mgr-search-scope-btn")
+      .removeClass("ih-mgr-search-scope-active");
+    $(this).addClass("ih-mgr-search-scope-active");
+    content.find(".ih-mgr-search-specified").toggle(scope === "specified");
+    if (scope === "specified" && !_searchS2Loaded) {
+      _loadSearchChatList();
+    }
+    sharedState.searchDone = false;
+    sharedState.searchResults = [];
+    sharedState._searchLocateIndex = -1;
+    renderSearchResults();
+    const kw = String(content.find("#ih_mgr_search_input").val() || "").trim();
+    if (kw && sharedState.searchEverRun) {
+      if (
+        scope === "specified" &&
+        (sharedState.searchSpecifiedFiles || []).length === 0
+      )
+        return;
+      runSearch();
+    }
+  });
+
+  content.find("#ih_mgr_search_case").on("click", function () {
+    sharedState.searchCaseSensitive = !sharedState.searchCaseSensitive;
+    $(this).toggleClass("ih-mgr-btn-active", sharedState.searchCaseSensitive);
+  });
+
+  content.find("#ih_mgr_search_go").on("click", () => runSearch());
+  content.find("#ih_mgr_search_input").on("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      runSearch();
+    }
+  });
+
+  content.find("#ih_mgr_search_input").on("input", function () {
+    content
+      .find("#ih_mgr_search_clear")
+      .toggleClass("ih-visible", !!String($(this).val()).length);
+  });
+  content.find("#ih_mgr_search_clear").on("click", function () {
+    const inp = content.find("#ih_mgr_search_input");
+    inp.val("");
+    $(this).removeClass("ih-visible");
+    inp.focus();
+  });
+  let _searchAllOptions = [];
+  let _searchS2Loaded = false;
+
+  function _renderSearchS2Options(filterText) {
+    const listEl = content.find("#ih_mgr_search_options")[0];
+    if (!listEl) return;
+    const kw = String(filterText || "")
+      .trim()
+      .toLowerCase();
+    const selected = sharedState.searchSpecifiedFiles || [];
+    const matched = _searchAllOptions.filter(
+      (o) => !kw || o.label.toLowerCase().includes(kw),
+    );
+    const selectedOpts = matched.filter((o) => selected.includes(o.value));
+    const unselectedOpts = matched.filter((o) => !selected.includes(o.value));
+    let html = "";
+    if (selectedOpts.length > 0) {
+      html += `<div class="ih-mgr-select2-group">已选 ${selected.length} 个</div>`;
+      selectedOpts.forEach((o) => {
+        html += `<div class="ih-mgr-select2-opt ih-mgr-select2-opt-active" data-value="${ihEscapeAttr(o.value)}"><i class="fa-solid fa-check"></i> ${ihEscapeHtml(o.label)}</div>`;
+      });
+    }
+    if (!kw) {
+      const history = _getTransferHistory();
+      const historyOpts = history
+        .map((h) => _searchAllOptions.find((o) => o.value === h))
+        .filter(Boolean)
+        .filter((o) => !selected.includes(o.value));
+      if (historyOpts.length > 0) {
+        html += `<div class="ih-mgr-select2-group">最近使用</div>`;
+        historyOpts.forEach((o) => {
+          html += `<div class="ih-mgr-select2-opt" data-value="${ihEscapeAttr(o.value)}"><i class="fa-solid fa-clock-rotate-left"></i> ${ihEscapeHtml(o.label)}</div>`;
+        });
+      }
+    }
+    if (unselectedOpts.length === 0 && selectedOpts.length === 0) {
+      html += `<div class="ih-mgr-select2-empty">没有匹配的聊天档</div>`;
+    } else if (unselectedOpts.length > 0) {
+      html += `<div class="ih-mgr-select2-group">${selectedOpts.length > 0 ? "未选" : "全部聊天档"}</div>`;
+      unselectedOpts.forEach((o) => {
+        html += `<div class="ih-mgr-select2-opt" data-value="${ihEscapeAttr(o.value)}">${ihEscapeHtml(o.label)}</div>`;
+      });
+    }
+    listEl.innerHTML = html;
+  }
+
+  function _openSearchS2Dropdown() {
+    content.find("#ih_mgr_search_select2").addClass("ih-mgr-select2-open");
+    content.find("#ih_mgr_search_s2_search").val("");
+    content.find("#ih_mgr_search_s2_clear").removeClass("ih-visible");
+    _renderSearchS2Options("");
+    const dd = content.find("#ih_mgr_search_dropdown")[0];
+    const select2El = content.find("#ih_mgr_search_select2")[0];
+    if (dd && select2El) {
+      const panelEl = content[0];
+      const panelStyle = window.getComputedStyle(panelEl);
+      const panelPadLeft = parseFloat(panelStyle.paddingLeft) || 0;
+      const panelPadRight = parseFloat(panelStyle.paddingRight) || 0;
+      const panelRect = panelEl.getBoundingClientRect();
+      const selRect = select2El.getBoundingClientRect();
+      const contentLeft = panelRect.left + panelPadLeft;
+      const contentRight = panelRect.right - panelPadRight;
+      dd.style.left = contentLeft - selRect.left + "px";
+      const width = contentRight - contentLeft;
+      if (width > 0) dd.style.width = width + "px";
+    }
+    if (dd) syncDialogTheme(dd);
+    generateFaIconProtectionCSS();
+    setTimeout(() => {
+      const si = content.find("#ih_mgr_search_s2_search")[0];
+      if (si) si.focus();
+    }, 30);
+  }
+
+  function _closeSearchS2Dropdown() {
+    content.find("#ih_mgr_search_select2").removeClass("ih-mgr-select2-open");
+  }
+
+  async function _loadSearchChatList() {
+    const displayText = content.find(
+      "#ih_mgr_search_display .ih-mgr-select2-text",
+    );
+    const info = _getTransferChar();
+    _searchAllOptions = [];
+    if (!info) {
+      displayText.text("无法获取当前角色");
+      return;
+    }
+    if (info.group) {
+      displayText.text("群聊暂不支持");
+      return;
+    }
+    displayText.text("加载中…");
+    let chats = [];
+    try {
+      const resp = await fetch("/api/characters/chats", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ avatar_url: info.avatar }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && typeof data === "object" && !data.error) {
+          chats = Object.values(data);
+        }
+      }
+    } catch (e) {
+      console.error("快捷工具栏: 获取聊天档列表失败", e);
+    }
+    const currentChat = String(info.chatFile || "");
+    chats.forEach((c) => {
+      if (!c || !c.file_name) return;
+      const nameNoExt = String(c.file_name).replace(/\.jsonl$/i, "");
+      if (nameNoExt === currentChat) return;
+      const count = c.message_count != null ? `（${c.message_count}条）` : "";
+      _searchAllOptions.push({ value: c.file_name, label: nameNoExt + count });
+    });
+    _searchS2Loaded = true;
+    if (_searchAllOptions.length === 0) {
+      displayText.text("没有其他聊天档可选");
+      return;
+    }
+    _updateSearchS2DisplayText();
+  }
+
+  function _updateSearchS2DisplayText() {
+    const n = (sharedState.searchSpecifiedFiles || []).length;
+    let text;
+    if (n === 0) {
+      text = _searchAllOptions.length
+        ? "请选择要搜索的聊天档…"
+        : "没有其他聊天档可选";
+    } else if (n === 1) {
+      const opt = _searchAllOptions.find(
+        (o) => o.value === sharedState.searchSpecifiedFiles[0],
+      );
+      text = opt ? opt.label : "已选 1 个";
+    } else {
+      text = `已选 ${n} 个聊天档`;
+    }
+    content.find("#ih_mgr_search_display .ih-mgr-select2-text").text(text);
+  }
+
+  function _toggleSearchSpecified(fileWithExt) {
+    if (!fileWithExt) return;
+    const arr = sharedState.searchSpecifiedFiles;
+    const idx = arr.indexOf(fileWithExt);
+    if (idx > -1) arr.splice(idx, 1);
+    else arr.push(fileWithExt);
+    _updateSearchS2DisplayText();
+    _renderSearchS2Options(content.find("#ih_mgr_search_s2_search").val());
+  }
+
+  content.on("click", "#ih_mgr_search_display", function (e) {
+    e.stopPropagation();
+    const isOpen = content
+      .find("#ih_mgr_search_select2")
+      .hasClass("ih-mgr-select2-open");
+    if (isOpen) {
+      _closeSearchS2Dropdown();
+    } else {
+      if (_searchAllOptions.length === 0) return;
+      _openSearchS2Dropdown();
+    }
+  });
+  content.on("input", "#ih_mgr_search_s2_search", function () {
+    const v = $(this).val();
+    content
+      .find("#ih_mgr_search_s2_clear")
+      .toggleClass("ih-visible", !!String(v).length);
+    _renderSearchS2Options(v);
+  });
+  content.on("click", "#ih_mgr_search_s2_clear", function (e) {
+    e.stopPropagation();
+    const si = content.find("#ih_mgr_search_s2_search");
+    si.val("");
+    content.find("#ih_mgr_search_s2_clear").removeClass("ih-visible");
+    _renderSearchS2Options("");
+    si.focus();
+  });
+  content.on(
+    "click",
+    "#ih_mgr_search_options .ih-mgr-select2-opt",
+    function () {
+      const val = $(this).attr("data-value");
+      if (val) _toggleSearchSpecified(val);
+    },
+  );
+  content.on("click", "#ih_mgr_search_dropdown", function (e) {
+    e.stopPropagation();
+  });
+  content.find("#ih_mgr_search_clear_selected").on("click", function () {
+    sharedState.searchSpecifiedFiles = [];
+    _updateSearchS2DisplayText();
+    if (
+      content.find("#ih_mgr_search_select2").hasClass("ih-mgr-select2-open")
+    ) {
+      _renderSearchS2Options(content.find("#ih_mgr_search_s2_search").val());
+    }
+  });
+  content.on("click", ".ih-search-group-header", function (e) {
+    if ($(e.target).closest(".ih-search-toggle").length) return;
+    const gid = $(this).data("gid");
+    sharedState.searchExpanded[gid] =
+      sharedState.searchExpanded[gid] === false ? true : false;
+    renderSearchResults();
+  });
+  content.on("click", ".ih-search-toggle", function (e) {
+    e.stopPropagation();
+    const gid = $(this).data("gid");
+    sharedState.searchExpanded[gid] =
+      sharedState.searchExpanded[gid] === false ? true : false;
+    renderSearchResults();
+  });
+
+  content.on("click", ".ih-search-jump", async function (e) {
+    e.stopPropagation();
+
+    const floor = parseInt($(this).attr("data-floor"));
+    const fileName = $(this).attr("data-file");
+    if (isNaN(floor)) return;
+    const nameNoExt = fileName ? String(fileName).replace(/\.jsonl$/i, "") : "";
+    closeDialog();
+    if (!nameNoExt) {
+      const chatEl = document.getElementById("chat");
+      if (!chatEl) return;
+      const mesEl = chatEl.querySelector(`.mes[mesid="${floor}"]`);
+      if (mesEl) {
+        const r = mesEl.getBoundingClientRect();
+        const useCenter = r.height < chatEl.clientHeight - 40;
+        scrollChatToElement(mesEl, "smooth", useCenter);
+      } else {
+        executeSlashCommandsWithOptions(`/chat-jump ${floor}`);
+      }
+      toastr.info(`已跳转到楼层 ${floor}`, "", { timeOut: 1000 });
+      return;
+    }
+    const info = _getTransferChar();
+    if (!info || info.group) {
+      toastr.warning("无法打开该聊天档", "", { timeOut: 1500 });
+      return;
+    }
+    try {
+      if (typeof openCharacterChat === "function") {
+        await openCharacterChat(nameNoExt);
+      } else {
+        info.character.chat = nameNoExt;
+        await executeSlashCommandsWithOptions("/chat-reload");
+      }
+      setTimeout(() => {
+        const chatEl = document.getElementById("chat");
+        if (!chatEl) return;
+        const mesEl = chatEl.querySelector(`.mes[mesid="${floor}"]`);
+        if (mesEl) {
+          const r = mesEl.getBoundingClientRect();
+          const useCenter = r.height < chatEl.clientHeight - 40;
+          scrollChatToElement(mesEl, "smooth", useCenter);
+        } else {
+          executeSlashCommandsWithOptions(`/chat-jump ${floor}`);
+        }
+      }, 600);
+    } catch (e2) {
+      console.error("快捷工具栏: 打开聊天档跳转失败", e2);
+      toastr.warning("打开聊天档失败，请手动切换聊天", "", { timeOut: 2000 });
+    }
+  });
+
+  content.on("click", ".ih-search-switch", function (e) {
+    e.stopPropagation();
+    const gid = $(this).attr("data-gid");
+    const floor = parseInt($(this).attr("data-floor"));
+    const group = sharedState.searchResults.find(
+      (g) => (g.fileName || "__current__") === gid,
+    );
+    if (!group) return;
+    const mt = group.matches.find((m) => m.floor === floor);
+    if (!mt || !mt.positions || mt.positions.length <= 1) return;
+    mt.hlIndex = ((mt.hlIndex || 0) + 1) % mt.positions.length;
+    renderSearchResults();
+  });
+
+  content.on("click", ".ih-search-preview", function (e) {
+    e.stopPropagation();
+    const gid = $(this).attr("data-gid");
+    const floor = parseInt($(this).attr("data-floor"));
+    if (isNaN(floor)) return;
+    const group = sharedState.searchResults.find(
+      (g) => (g.fileName || "__current__") === gid,
+    );
+    if (!group) return;
+    const mt = group.matches.find((m) => m.floor === floor);
+    if (!mt) return;
+    openSearchPreviewDialog(mt, group);
+  });
+
+  content.on("click", ".ih-search-basket", function (e) {
+    e.stopPropagation();
+    const file = $(this).attr("data-file") || "";
+    const floor = parseInt($(this).attr("data-floor"));
+    const sender = $(this).attr("data-sender") || "";
+    if (isNaN(floor)) return;
+    const idx = sharedState.searchBasket.findIndex(
+      (b) => b.file === file && b.floor === floor,
+    );
+    if (idx > -1) sharedState.searchBasket.splice(idx, 1);
+    else sharedState.searchBasket.push({ file, floor, sender });
+    sharedState._searchLocateIndex = -1;
+    renderSearchResults();
+    _updateBasketBanner();
+  });
+
+  function _searchBuildFullHtml(rawText, positions, kwLen) {
+    let html = "";
+    let last = 0;
+    for (const p of positions) {
+      if (p < last) continue;
+      html += ihEscapeHtml(rawText.substring(last, p));
+      html +=
+        '<mark class="ih-search-hl">' +
+        ihEscapeHtml(rawText.substring(p, p + kwLen)) +
+        "</mark>";
+      last = p + kwLen;
+    }
+    html += ihEscapeHtml(rawText.substring(last));
+    return html;
+  }
+
+  function openSearchPreviewDialog(mt, group) {
+    const { overlay, escHandler } = createDialogOverlay();
+    const fullHtml = _searchBuildFullHtml(mt.rawText, mt.positions, mt.kwLen);
+    const srcLabel = group.isCurrent
+      ? "当前聊天档"
+      : ihEscapeHtml(group.label || "");
+    const dlg = $(
+      '<div class="ih-search-preview-content">' +
+        '<h3><i class="fa-solid fa-eye"></i> 楼层 #' +
+        mt.floor +
+        ' 完整内容<span class="ih-search-preview-sub">' +
+        ihEscapeHtml(mt.sender) +
+        " · " +
+        srcLabel +
+        '</span><span class="ih-search-preview-count" id="ih_search_prev_count">共 ' +
+        mt.count +
+        " 处</span></h3>" +
+        '<div class="ih-search-preview-box"><div class="ih-search-preview-text">' +
+        fullHtml +
+        "</div></div>" +
+        '<div class="ih-search-preview-actions">' +
+        '<button class="ih-hm-btn ih-hm-btn-ok" data-act="locate"><i class="fa-solid fa-crosshairs"></i> 定位高亮</button>' +
+        '<button class="ih-hm-btn ih-hm-btn-close" data-act="close">关闭</button>' +
+        "</div>" +
+        "</div>",
+    );
+    overlay.append(dlg);
+    syncDialogTheme(dlg[0]);
+    dlg.on("click", (e) => e.stopPropagation());
+    generateFaIconProtectionCSS();
+    const close = () => {
+      document.removeEventListener("keydown", escHandler, true);
+      overlay.remove();
+    };
+    overlay.off("click").on("click", (e) => {
+      if (e.target === overlay[0]) close();
+    });
+    let _locIdx = -1;
+    dlg.find('[data-act="locate"]').on("click", function () {
+      const box = dlg.find(".ih-search-preview-box")[0];
+      const marks = dlg[0].querySelectorAll(".ih-search-hl");
+      if (!box || !marks.length) return;
+      _locIdx = (_locIdx + 1) % marks.length;
+      const target = marks[_locIdx];
+      const boxRect = box.getBoundingClientRect();
+      const tRect = target.getBoundingClientRect();
+      box.scrollTop +=
+        tRect.top - boxRect.top - box.clientHeight / 2 + tRect.height / 2;
+      marks.forEach((m) => m.classList.remove("ih-search-hl-active"));
+      target.classList.add("ih-search-hl-active");
+      dlg
+        .find("#ih_search_prev_count")
+        .text(_locIdx + 1 + "/" + marks.length + " 处");
+    });
+    dlg.find('[data-act="close"]').on("click", close);
+  }
 }
 
 function doChatManager() {
@@ -8788,7 +10260,6 @@ const floatingPanelController = {
   _panelEl: null,
   _ballEl: null,
   _isDragging: false,
-  _dragOffset: { x: 0, y: 0 },
   _expanded: false,
   _imageRefreshTimer: null,
   _dialogObserver: null,
@@ -10638,6 +12109,16 @@ function _getThemeSample() {
     const btnCs = rootWin.getComputedStyle(probeBtn);
     result.btnColor = btnCs.color;
     result.btnBg = btnCs.backgroundColor;
+    result.btnBoxShadow = btnCs.boxShadow;
+    result.btnBorderRadius = btnCs.borderRadius;
+    result.btnBorderStyle = btnCs.borderStyle;
+    result.btnBorderWidth = btnCs.borderWidth;
+    result.btnBorderColor = btnCs.borderColor;
+    result.btnBgImage = btnCs.backgroundImage;
+    result.btnBgSize = btnCs.backgroundSize;
+    result.btnBgPosition = btnCs.backgroundPosition;
+    result.btnBgRepeat = btnCs.backgroundRepeat;
+    result.btnTextShadow = btnCs.textShadow;
     probeBtn.remove();
     const probeSelect = rootDoc.createElement("select");
     probeSelect.style.cssText = probeCss;
@@ -10690,6 +12171,36 @@ function syncDialogTheme(contentEl, options) {
       .forEach(function (el) {
         el.style.removeProperty("color");
         el.style.removeProperty("background-color");
+      });
+    contentEl.querySelectorAll(
+      "select, .ih-mgr-select2-display, .ih-mgr-select2-dropdown",
+    );
+    contentEl
+      .querySelectorAll(
+        "input, textarea, select, button, .menu_button, .ih-folder-chip, .input-helper-btn, .button-preview, .ih-hm-status, .ih-beauty-prompt-box, .shortcut-input",
+      )
+      .forEach(function (el) {
+        el.style.removeProperty("color");
+        el.style.removeProperty("background-color");
+      });
+    contentEl
+      .querySelectorAll("button:not(.input-helper-btn), .menu_button")
+      .forEach(function (el) {
+        if (
+          el.classList.contains("button-preview") ||
+          el.classList.contains("ih-folder-chip")
+        )
+          return;
+        el.style.removeProperty("box-shadow");
+        el.style.removeProperty("border-radius");
+        el.style.removeProperty("border-style");
+        el.style.removeProperty("border-width");
+        el.style.removeProperty("border-color");
+        el.style.removeProperty("background-image");
+        el.style.removeProperty("background-size");
+        el.style.removeProperty("background-position");
+        el.style.removeProperty("background-repeat");
+        el.style.removeProperty("text-shadow");
       });
     contentEl
       .querySelectorAll(
@@ -10772,6 +12283,44 @@ function syncDialogTheme(contentEl, options) {
           s.btnBg !== "transparent"
         ) {
           el.style.setProperty("background-color", s.btnBg, "important");
+        }
+        if (el.classList.contains("input-helper-btn")) return;
+        if (s.btnBgImage && s.btnBgImage !== "none") {
+          el.style.setProperty("background-image", s.btnBgImage, "important");
+          if (s.btnBgSize)
+            el.style.setProperty("background-size", s.btnBgSize, "important");
+          if (s.btnBgPosition)
+            el.style.setProperty(
+              "background-position",
+              s.btnBgPosition,
+              "important",
+            );
+          if (s.btnBgRepeat)
+            el.style.setProperty(
+              "background-repeat",
+              s.btnBgRepeat,
+              "important",
+            );
+        }
+        if (s.btnBoxShadow && s.btnBoxShadow !== "none") {
+          el.style.setProperty("box-shadow", s.btnBoxShadow, "important");
+        }
+        if (s.btnBorderRadius && s.btnBorderRadius !== "0px") {
+          el.style.setProperty("border-radius", s.btnBorderRadius, "important");
+        }
+        if (
+          s.btnBorderStyle &&
+          s.btnBorderStyle !== "none" &&
+          s.btnBorderWidth &&
+          s.btnBorderWidth !== "0px"
+        ) {
+          el.style.setProperty("border-style", s.btnBorderStyle, "important");
+          el.style.setProperty("border-width", s.btnBorderWidth, "important");
+          if (s.btnBorderColor)
+            el.style.setProperty("border-color", s.btnBorderColor, "important");
+        }
+        if (s.btnTextShadow && s.btnTextShadow !== "none") {
+          el.style.setProperty("text-shadow", s.btnTextShadow, "important");
         }
       });
     contentEl
@@ -14515,7 +16064,6 @@ jQuery(async () => {
 
   try {
     let _themeChangeTimer = null;
-    let _lastThemeRefreshTime = 0;
     const themeObserver = new MutationObserver((mutations) => {
       const relevant = mutations.some((m) => {
         if (m.type === "attributes" && m.attributeName === "style") {
@@ -14542,7 +16090,6 @@ jQuery(async () => {
       if (!relevant) return;
       clearTimeout(_themeChangeTimer);
       _themeChangeTimer = setTimeout(() => {
-        _lastThemeRefreshTime = Date.now();
         _invalidateThemeSample();
         _invalidateBallCSSCache();
         _cachedToolbarStyles = null;

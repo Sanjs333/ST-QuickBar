@@ -4364,11 +4364,6 @@ function updateToolbarMaxHeight() {
 function _doUpdateToolbarMaxHeight() {
   const toolbar = document.getElementById("input_helper_toolbar");
   if (!toolbar || toolbar.classList.contains("input-helper-hidden")) return;
-  const childCount = toolbar.children.length;
-  const twoRowActive = toolbar.classList.contains("ih-two-row-active");
-  const contentHash = `${childCount}_${twoRowActive}_${toolbar.scrollWidth}`;
-  if (toolbar._ihLastContentHash === contentHash) return;
-  toolbar._ihLastContentHash = contentHash;
   const sendForm = document.getElementById("send_form");
   if (!sendForm) return;
 
@@ -6136,7 +6131,7 @@ function openHelpPanel() {
 <p><b>目标档预览编辑</b>：下方每条消息的铅笔按钮可直接修改该楼层内容，保存后将写回目标聊天档文件。</p>
 <p style="margin:10px 0 4px;font-weight:600;">搜索</p>
 <p>按关键词检索聊天消息，支持当前聊天档、指定聊天档和同一角色的全部聊天档三种范围，并可通过 <q>Aa</q> 按钮切换是否区分大小写。</p>
-<p>搜索结果会按聊天档分组显示命中楼层、发送者、匹配次数和上下文摘要。点击结果可直接打开对应聊天并跳转至命中楼层；眼睛按钮可预览完整消息，并依次定位其中的所有匹配位置。</p>
+<p>搜索结果会按聊天档分组显示命中楼层、发送者、匹配次数和上下文摘要。点击结果右侧的定位按钮可打开对应聊天并跳转至命中楼层；眼睛按钮可预览完整消息，并依次定位其中的所有匹配位置。</p>
 <p>搜索结果右侧的转存按钮可将消息加入转存篮。转存篮支持收集多个聊天档中的消息，再统一复制或移动至指定聊天档。</p>
 <p><b>注意</b>：指定聊天档和全部聊天档搜索目前仅支持单角色聊天，不支持群聊。</p>
 <ul>
@@ -6772,6 +6767,59 @@ function openHideManagerPanel() {
   content.on("click", (e) => e.stopPropagation());
   generateFaIconProtectionCSS();
 
+  let _mgrToolbarResizeObserver = null;
+  let _mgrToolbarResizeRaf = null;
+
+  function _syncMgrToolbarHeight() {
+    const toolbar = content.find(".ih-mgr-toolbar")[0];
+    if (!toolbar) return;
+
+    let maxHeight = 0;
+    const heightTargets = toolbar.querySelectorAll(
+      ".ih-mgr-btn, .ih-mgr-jump-box, .ih-mgr-scroll-seg, .ih-mgr-count, .ih-mgr-token-total",
+    );
+
+    heightTargets.forEach((el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.height > maxHeight) maxHeight = rect.height;
+    });
+
+    if (maxHeight > 0) {
+      const safeHeight = Math.ceil(maxHeight) + 4;
+      toolbar.style.setProperty(
+        "--ih-mgr-toolbar-content-h",
+        safeHeight + "px",
+      );
+    }
+  }
+
+  function _scheduleMgrToolbarHeightSync() {
+    if (_mgrToolbarResizeRaf) {
+      cancelAnimationFrame(_mgrToolbarResizeRaf);
+    }
+
+    _mgrToolbarResizeRaf = requestAnimationFrame(() => {
+      _mgrToolbarResizeRaf = null;
+      _syncMgrToolbarHeight();
+    });
+  }
+
+  if (typeof ResizeObserver !== "undefined") {
+    _mgrToolbarResizeObserver = new ResizeObserver(
+      _scheduleMgrToolbarHeightSync,
+    );
+
+    content
+      .find(
+        ".ih-mgr-toolbar, .ih-mgr-btn, .ih-mgr-jump-box, .ih-mgr-scroll-seg, .ih-mgr-count, .ih-mgr-token-total",
+      )
+      .each(function () {
+        _mgrToolbarResizeObserver.observe(this);
+      });
+  }
+
+  setTimeout(_scheduleMgrToolbarHeightSync, 0);
+
   const vlistEl = content.find("#ih_mgr_vlist")[0];
   const spacerTopEl = content.find(".ih-mgr-vlist-spacer-top")[0];
   const spacerBottomEl = content.find(".ih-mgr-vlist-spacer-bottom")[0];
@@ -7089,6 +7137,17 @@ function openHideManagerPanel() {
 
   const closeDialog = () => {
     if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
+
+    if (_mgrToolbarResizeObserver) {
+      _mgrToolbarResizeObserver.disconnect();
+      _mgrToolbarResizeObserver = null;
+    }
+
+    if (_mgrToolbarResizeRaf) {
+      cancelAnimationFrame(_mgrToolbarResizeRaf);
+      _mgrToolbarResizeRaf = null;
+    }
+
     document.removeEventListener("keydown", escHandler, true);
     overlay.remove();
   };
@@ -8594,6 +8653,7 @@ function openHideManagerPanel() {
       toastr.error("消息数据异常，转存失败", "", { timeOut: 1500 });
       return;
     }
+    let newSrc = null;
     if (isMove) {
       if (!header) {
         header = {
@@ -8603,10 +8663,41 @@ function openHideManagerPanel() {
           chat_metadata: {},
         };
       }
-      const newSrc = [...srcMsgs];
+      newSrc = [...srcMsgs];
       const reversed = [...validSelected].sort((a, b) => b - a);
       for (const f of reversed) newSrc.splice(f, 1);
-      let saveOk = false;
+    }
+    let insertAt =
+      sharedState.transferUpperInsertAt == null
+        ? chat.length
+        : sharedState.transferUpperInsertAt;
+    insertAt = Math.max(0, Math.min(chat.length, insertAt));
+    const jumpToFloor = insertAt;
+    const transferCount = toTransfer.length;
+    const currentChatBackup = JSON.parse(JSON.stringify(chat));
+    chatUndoManager.save();
+    chat.splice(insertAt, 0, ...toTransfer);
+
+    try {
+      await executeSlashCommandsWithOptions("/forcesave");
+    } catch (e) {
+      console.error("快捷工具栏: 保存当前聊天失败", e);
+      chat.length = 0;
+      currentChatBackup.forEach((msg) => chat.push(msg));
+      try {
+        await executeSlashCommandsWithOptions("/forcesave");
+        await executeSlashCommandsWithOptions("/chat-reload");
+      } catch (rollbackError) {
+        console.error("快捷工具栏: 恢复当前聊天失败", rollbackError);
+      }
+      toastr.error("当前聊天保存失败，本次转存已撤销", "", {
+        timeOut: 2000,
+      });
+      return;
+    }
+
+    let sourceDeleteFailed = false;
+    if (isMove) {
       try {
         const resp = await fetch("/api/chats/save", {
           method: "POST",
@@ -8620,34 +8711,33 @@ function openHideManagerPanel() {
             force: true,
           }),
         });
-        saveOk = resp.ok;
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        _ihSetSearchCache(targetFile, newSrc);
       } catch (e) {
+        sourceDeleteFailed = true;
         console.error("快捷工具栏: 从来源档删除失败", e);
       }
-      if (!saveOk) {
-        toastr.error("更新来源聊天档失败，转存已取消", "", { timeOut: 1800 });
-        return;
-      }
     }
-    let insertAt =
-      sharedState.transferUpperInsertAt == null
-        ? chat.length
-        : sharedState.transferUpperInsertAt;
-    insertAt = Math.max(0, Math.min(chat.length, insertAt));
-    const jumpToFloor = insertAt;
-    const transferCount = toTransfer.length;
-    chatUndoManager.save();
-    chat.splice(insertAt, 0, ...toTransfer);
+
     _pushTransferHistory(targetFile);
     closeDialog();
     try {
-      await executeSlashCommandsWithOptions("/forcesave");
       await executeSlashCommandsWithOptions("/chat-reload");
-      toastr.success(
-        `已${isMove ? "移动" : "复制"} ${transferCount} 条消息到当前聊天`,
-        "",
-        { timeOut: 1500 },
-      );
+      if (sourceDeleteFailed) {
+        toastr.warning(
+          `已将 ${transferCount} 条消息保存到当前聊天，但来源聊天档删除失败；消息仍保留在原处，请核对后再手动删除`,
+          "",
+          { timeOut: 3500 },
+        );
+      } else {
+        toastr.success(
+          `已${isMove ? "移动" : "复制"} ${transferCount} 条消息到当前聊天`,
+          "",
+          { timeOut: 1500 },
+        );
+      }
       setTimeout(() => {
         const chatEl = document.getElementById("chat");
         if (!chatEl) return;
@@ -9127,59 +9217,103 @@ function openHideManagerPanel() {
     if (Object.prototype.hasOwnProperty.call(floorsBySource, "")) {
       chatUndoManager.save();
     }
+    const sourceDeleteFailures = [];
+    const currentChatBackup = Object.prototype.hasOwnProperty.call(
+      floorsBySource,
+      "",
+    )
+      ? JSON.parse(JSON.stringify(chat))
+      : null;
     let currentChatChanged = false;
+
     for (const file of Object.keys(floorsBySource)) {
       const floors = [...new Set(floorsBySource[file])].sort((a, b) => b - a);
+
       if (file === "") {
         floors.forEach((f) => {
           if (f >= 0 && f < chat.length) chat.splice(f, 1);
         });
         currentChatChanged = true;
-      } else {
-        const nameNoExt = String(file).replace(/\.jsonl$/i, "");
-        const src = bySource[file];
-        const newMsgs = [...src.messages];
-        floors.forEach((f) => {
-          if (f >= 0 && f < newMsgs.length) newMsgs.splice(f, 1);
+        continue;
+      }
+
+      const nameNoExt = String(file).replace(/\.jsonl$/i, "");
+      const src = bySource[file];
+      const newMsgs = [...src.messages];
+
+      floors.forEach((f) => {
+        if (f >= 0 && f < newMsgs.length) newMsgs.splice(f, 1);
+      });
+
+      const srcHeader = src.header || {
+        user_name: name1 || "User",
+        character_name: info.character.name,
+        create_date: new Date().toISOString(),
+        chat_metadata: {},
+      };
+
+      try {
+        const resp = await fetch("/api/chats/save", {
+          method: "POST",
+          headers: getRequestHeaders(),
+          cache: "no-cache",
+          body: JSON.stringify({
+            ch_name: info.character.name,
+            file_name: nameNoExt,
+            chat: [srcHeader, ...newMsgs],
+            avatar_url: info.avatar,
+            force: true,
+          }),
         });
-        const srcHeader = src.header || {
-          user_name: name1 || "User",
-          character_name: info.character.name,
-          create_date: new Date().toISOString(),
-          chat_metadata: {},
-        };
-        try {
-          await fetch("/api/chats/save", {
-            method: "POST",
-            headers: getRequestHeaders(),
-            cache: "no-cache",
-            body: JSON.stringify({
-              ch_name: info.character.name,
-              file_name: nameNoExt,
-              chat: [srcHeader, ...newMsgs],
-              avatar_url: info.avatar,
-              force: true,
-            }),
-          });
-        } catch (e) {
-          console.error("快捷工具栏: 从来源档删除失败 " + nameNoExt, e);
+
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
         }
+
         _ihSetSearchCache(file, newMsgs);
+      } catch (e) {
+        sourceDeleteFailures.push(nameNoExt);
+        console.error("快捷工具栏: 从来源档删除失败 " + nameNoExt, e);
       }
     }
-    _pushTransferHistory(targetFile);
-    sharedState.searchBasket = [];
+
     if (currentChatChanged) {
       try {
         await executeSlashCommandsWithOptions("/forcesave");
-      } catch (e) {}
+      } catch (e) {
+        console.error("快捷工具栏: 保存当前来源聊天失败", e);
+
+        if (currentChatBackup) {
+          chat.length = 0;
+          currentChatBackup.forEach((msg) => chat.push(msg));
+
+          try {
+            await executeSlashCommandsWithOptions("/forcesave");
+          } catch (rollbackError) {
+            console.error("快捷工具栏: 恢复当前来源聊天失败", rollbackError);
+          }
+        }
+
+        sourceDeleteFailures.push("当前聊天档");
+      }
     }
+
+    _pushTransferHistory(targetFile);
+    sharedState.searchBasket = [];
     closeDialog();
-    toastr.success(
-      `已移动 ${transferCount} 条消息到「${targetNameNoExt}」，正在打开…`,
-      "",
-      { timeOut: 1500 },
-    );
+    if (sourceDeleteFailures.length > 0) {
+      toastr.warning(
+        `目标聊天档已保存 ${transferCount} 条消息，但有 ${sourceDeleteFailures.length} 个来源聊天档删除失败；消息仍保留在原处，请核对后再手动删除，正在打开目标聊天…`,
+        "",
+        { timeOut: 4500 },
+      );
+    } else {
+      toastr.success(
+        `已移动 ${transferCount} 条消息到「${targetNameNoExt}」，正在打开…`,
+        "",
+        { timeOut: 1500 },
+      );
+    }
     try {
       if (typeof openCharacterChat === "function") {
         await openCharacterChat(targetNameNoExt);
@@ -12172,17 +12306,6 @@ function syncDialogTheme(contentEl, options) {
         el.style.removeProperty("color");
         el.style.removeProperty("background-color");
       });
-    contentEl.querySelectorAll(
-      "select, .ih-mgr-select2-display, .ih-mgr-select2-dropdown",
-    );
-    contentEl
-      .querySelectorAll(
-        "input, textarea, select, button, .menu_button, .ih-folder-chip, .input-helper-btn, .button-preview, .ih-hm-status, .ih-beauty-prompt-box, .shortcut-input",
-      )
-      .forEach(function (el) {
-        el.style.removeProperty("color");
-        el.style.removeProperty("background-color");
-      });
     contentEl
       .querySelectorAll("button:not(.input-helper-btn), .menu_button")
       .forEach(function (el) {
@@ -14922,7 +15045,10 @@ function initSortable() {
 async function loadSettings() {
   extension_settings[extensionName] = extension_settings[extensionName] || {};
   if (Object.keys(extension_settings[extensionName]).length === 0) {
-    Object.assign(extension_settings[extensionName], defaultSettings);
+    Object.assign(
+      extension_settings[extensionName],
+      structuredClone(defaultSettings),
+    );
   }
   const s = getSettings();
   if (!s.buttons) s.buttons = {};
@@ -14987,7 +15113,9 @@ async function loadSettings() {
       ".ih-folder-dropdown-portal [data-button-key='includeUserNavMode'], " +
       ".ih-floating-panel [data-button-key='includeUserNavMode']",
   ).toggleClass("input-helper-btn-active", includeUserNavController.active);
-  if (!s.floatingPanel) s.floatingPanel = { ...defaultSettings.floatingPanel };
+  if (!s.floatingPanel) {
+    s.floatingPanel = structuredClone(defaultSettings.floatingPanel);
+  }
   if (s.floatingPanel.enabled === undefined) s.floatingPanel.enabled = false;
   if (s.floatingPanel.orientation === undefined)
     s.floatingPanel.orientation = "vertical";

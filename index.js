@@ -5321,7 +5321,16 @@ function doDeleteLastSwipe() {
     )
       return;
   }
+  let _delSwipeClone;
+  try {
+    _delSwipeClone = JSON.parse(JSON.stringify(chat[chat.length - 1]));
+  } catch (e) {
+    console.error("快捷工具栏: 复制消息数据失败", e);
+    toastr.error("消息数据异常，删除已取消", "", { timeOut: 1800 });
+    return;
+  }
   chatUndoManager.save();
+  chat[chat.length - 1] = _delSwipeClone;
   executeSlashCommandsWithOptions("/delswipe");
   toastr.info("已删除当前备选回复（可通过撤回按钮还原）", "", {
     timeOut: 1000,
@@ -5512,6 +5521,7 @@ function ihApplyUnlockSwipes() {
   if (on) {
     ihInjectUnlockSwipesCSS();
     ihBindUnlockSwipeEvents();
+    ihBindUnlockDeleteEvents();
   }
   ihMarkSwipeableMessages();
 }
@@ -5628,6 +5638,121 @@ async function ihDoHistorySwipe(arrowEl) {
       _ihUnlockSwipeBusy = false;
     }, 150);
   }
+}
+let _ihUnlockDeleteBound = false;
+
+function ihBindUnlockDeleteEvents() {
+  if (_ihUnlockDeleteBound) return;
+  _ihUnlockDeleteBound = true;
+  document.addEventListener(
+    "click",
+    function (e) {
+      if (!getSettings().enabled || !getSettings().unlockSwipes) return;
+      if (!power_user.confirm_message_delete) return;
+      if (typeof SillyTavernScript.deleteMessage !== "function") return;
+      const btn =
+        e.target && e.target.closest
+          ? e.target.closest(".mes_edit_delete")
+          : null;
+      if (!btn) return;
+      const mesEl = btn.closest(".mes");
+      if (!mesEl) return;
+      const mesId = parseInt(mesEl.getAttribute("mesid"));
+      if (isNaN(mesId) || mesId < 0 || mesId >= chat.length) return;
+      if (mesId === chat.length - 1) return;
+      const msg = chat[mesId];
+      if (!msg || msg.is_user) return;
+      if (msg.extra && msg.extra.isSmallSys) return;
+      if (!Array.isArray(msg.swipes) || msg.swipes.length <= 1) return;
+      const swipeId = typeof msg.swipe_id === "number" ? msg.swipe_id : 0;
+      if (swipeId < 0 || swipeId >= msg.swipes.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      ihDeleteHistoryMessageOrSwipe(mesId, swipeId);
+    },
+    true,
+  );
+}
+
+function _ihSyncSwipeCounter(mesId) {
+  const msg = chat[mesId];
+  if (!msg) return;
+  const mesEl = document.querySelector(`#chat .mes[mesid="${mesId}"]`);
+  if (!mesEl) return;
+  const counter = mesEl.querySelector(".swipes-counter");
+  if (!counter) return;
+  const total = Array.isArray(msg.swipes) ? msg.swipes.length : 1;
+  const cur = (typeof msg.swipe_id === "number" ? msg.swipe_id : 0) + 1;
+  counter.textContent = cur + "/" + total;
+}
+
+async function ihDeleteHistoryMessageOrSwipe(mesId, swipeId) {
+  if (_ihUnlockSwipeBusy) return;
+  const msg = chat[mesId];
+  if (!msg || !Array.isArray(msg.swipes)) return;
+  const beforeLen = chat.length;
+  const beforeSwipeCount = msg.swipes.length;
+  let snapshot = null;
+  try {
+    snapshot = chat.slice();
+    snapshot[mesId] = JSON.parse(JSON.stringify(msg));
+  } catch (err) {
+    snapshot = null;
+  }
+  try {
+    if (document.getElementById("curEditTextarea")) {
+      const editingMesEl = document.querySelector(
+        `#chat .mes[mesid="${mesId}"]`,
+      );
+      const cancelBtn = editingMesEl
+        ? editingMesEl.querySelector(".mes_edit_cancel")
+        : null;
+      if (cancelBtn) cancelBtn.click();
+    }
+  } catch (err) {}
+  _ihUnlockSwipeBusy = true;
+  try {
+    await SillyTavernScript.deleteMessage(mesId, swipeId, true);
+  } catch (err) {
+    console.error("快捷工具栏: 删除历史消息备选失败", err);
+    toastr.error("删除失败，详情见浏览器控制台", "", { timeOut: 1800 });
+    _ihUnlockSwipeBusy = false;
+    return;
+  }
+  const after = chat[mesId];
+  const onlySwipeDeleted =
+    chat.length === beforeLen &&
+    after &&
+    Array.isArray(after.swipes) &&
+    after.swipes.length === beforeSwipeCount - 1;
+  if (onlySwipeDeleted) {
+    if (
+      typeof after.swipe_id !== "number" ||
+      after.swipe_id < 0 ||
+      after.swipe_id >= after.swipes.length
+    ) {
+      after.swipe_id = after.swipes.length - 1;
+    }
+    after.mes = String(after.swipes[after.swipe_id] || "");
+    if (snapshot) chatUndoManager._pushSnapshot(snapshot);
+    ihMarkChatTainted();
+    try {
+      const ctx = SillyTavern.getContext();
+      if (typeof ctx.updateMessageBlock === "function") {
+        ctx.updateMessageBlock(mesId, after);
+      }
+    } catch (err) {}
+    _ihSyncSwipeCounter(mesId);
+    await ihSaveCurrentChat();
+    toastr.success(`已删除 #${mesId} 的备选回复（可通过撤回按钮还原）`, "", {
+      timeOut: 1500,
+    });
+  }
+  ihMarkSwipeableMessages();
+  setTimeout(() => {
+    _ihUnlockSwipeBusy = false;
+  }, 150);
 }
 
 function insertCustomSymbol(symbol) {
@@ -6296,124 +6421,12 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "3.2.0";
+const CHANGELOG_VERSION = "3.2.1";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.0</h4>
-<div style="font-size:12px;opacity:0.78;margin:2px 0 10px;line-height:1.75;">
-  本版本为重大更新，重点重构消息管理面板：新增「分支」标签，可视化聊天档血缘关系；搜索、分支与转存打通，形成完整跨档迁移流程；消息编辑改为面板内翻页；隐藏功能直接操作酒馆数据。此外，新增角色专属按钮与历史消息备选切换，并强化保存机制及版本兼容性。
-</div>
-
-<div style="margin:15px 0 5px;font-size:12.5px;font-weight:700;">一、分支管理（全新标签）</div>
-<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>分支树</b>：自动扫描当前角色所有聊天档，基于酒馆检查点/分支的父档记录生成树状血缘视图。展示分支点楼层、消息数量，支持折叠子树，默认仅展开当前链路。</li>
-  <li><b>父档来源标识</b>：以颜色圆点及徽章区分自动（酒馆记录）、手动（用户指定）、推测（内容比对）三种来源。无父档的档分为主线（含子分支）与独立（无分支）。推测来源可手动修正。</li>
-  <li><b>手动管理父档</b>：支持为新建或导入的档指定父档，自动计算分叉楼层并写入记录；也可断开关系。断开操作被永久记录，避免后续自动重关联；可能导致循环引用的候选项自动过滤。</li>
-  <li><b>内容对比</b>：点击对比按钮进入详情页，展示分叉楼层、一致消息数及双方独有内容，并分列共同、仅父档、仅本档三部分。宽屏下可切换左右并排视图。</li>
-  <li><b>智能差异识别</b>：同一条消息的不同备选视为备选差异，不计为分叉；当某档发生消息删除/插入时，比对自动重新对齐并标记错位，防止误判早期分叉。</li>
-  <li><b>裁剪为增量档</b>：详情页底部可裁去与父档重复的开头部分，仅保留分支独有内容并在树中标记。该操作移除前史，AI 不可见，仅适用于留档分支，5 分钟内可撤回。</li>
-  <li><b>浏览档内容</b>：点击眼睛图标可翻页查看任意聊天档全部消息，支持倒序、楼层跳转、加入转存篮，并可直接进入编辑子页面。</li>
-  <li><b>分支备注</b>：可为分支添加备注，保存于聊天档自身记录中，切换或备份不丢失；备注会同步显示在搜索结果和档下拉列表内。</li>
-  <li><b>排序与时间</b>：支持按最后修改、创建时间、消息数、档名排序，可切换升降序及完整/相对时间显示。</li>
-  <li><b>重命名与删除</b>：可在树内直接重命名，自动同步子分支中的父档名及相关链接。删除前显示消息数、是否当前聊天及对子分支影响，删除后 5 分钟内可撤回。</li>
-  <li><b>本地缓存</b>：扫描结果按角色缓存于浏览器，有效期 3 天，最多保留 5 个角色。切换标签自动加载，可强制刷新；指定父档、编辑备注、重命名、删除、裁剪、转存等操作即时清除缓存。</li>
-  <li><b>图例说明</b>：可通过说明按钮展开完整图例，查看各来源徽章、状态徽章与操作按钮含义。</li>
-  <li><b>注意</b>：分支分析仅支持单角色聊天，不支持群聊。</li>
-</ul>
-
-<div style="margin:15px 0 5px;font-size:12.5px;font-weight:700;">二、搜索增强</div>
-<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>自动合并跨档重复</b>：内容完全相同的消息只显示一条，标注「N 档共有」，可展开查看各来源档及楼层并跳转。提供开关（默认开启）。同一档内重复或被修改的消息不会合并。</li>
-  <li><b>搜索备选回复</b>：当前备选未命中时自动检索该楼其他备选，命中后标注「备选 N」，摘要与预览显示实际命中内容。可通过开关关闭。</li>
-  <li><b>分支视图</b>：搜索结果可按血缘关系缩进显示，未命中但处于血缘链中间的档以灰色删除线占位；也可切换为平铺视图。需先在分支标签完成扫描。</li>
-  <li><b>结果排序与视图切换</b>：支持按最后修改、创建时间、消息数、档名排序，升降序及时间显示方式切换，同时可切换分支/平铺视图。</li>
-  <li><b>消息预览内嵌</b>：查看完整消息改为面板内子页面，支持返回列表、切换备选、依次定位匹配及一键进入编辑。</li>
-  <li><b>分组操作</b>：每个档分组右侧固定显示对比、打开、转存；更多按钮包含限定搜索、编辑备注、在分支树中定位、重命名和删除。档名过长时可在名称区域横向滚动。</li>
-  <li><b>图例说明</b>：可查看搜索标签内所有按钮与徽章的含义。</li>
-  <li><b>修复转存篮定位</b>：精确匹配失败时改为按内容查找，并正确跳过已被合并的消息条目。</li>
-</ul>
-
-<div style="margin:15px 0 5px;font-size:12.5px;font-weight:700;">三、转存与转存篮</div>
-<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>内容去重</b>：加入转存篮时自动检测重复，相同内容合并为一条并记录多个来源；执行移动时仅从最初加入的档删除，其余副本保留。</li>
-  <li><b>清单展示</b>：转存标签下按来源档分组显示楼层、发送者及内容摘要，可单条移出，也可展开查看某条的全部重复来源。</li>
-  <li><b>楼层断层检测与补齐</b>：篮中同一档内楼层不连续时，断口处标出跳过楼层并提供补齐按钮；移动前若仍有断层将弹出确认，移动时提醒跳空消息将留存在原档。</li>
-  <li><b>转存顺序优化</b>：转存前按聊天档及楼层重新排序，确保目标档消息顺序与原文一致。</li>
-  <li><b>搬空后提示</b>：将某档消息全部移动后，弹窗询问是否删除空档，并提示对子分支的影响。复制操作不触发该提示。</li>
-  <li><b>残留副本检测</b>：移动消息后自动检测内容重复或包含关系的档，提示删除并可撤回（5 分钟内）。</li>
-  <li><b>目标档编辑</b>：目标档预览中消息按钮改为进入编辑子页面，保存后直接写入目标聊天档文件。</li>
-</ul>
-
-<div style="margin:15px 0 5px;font-size:12.5px;font-weight:700;">四、消息编辑改为子页面</div>
-<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>内嵌编辑</b>：编辑楼层改为面板内翻页，集成预览/编辑切换、上一条/下一条导航（搜索结果中在命中项间跳转）及转存篮操作。</li>
-  <li><b>备选回复管理</b>：若存在多个备选，可切换查看并分别编辑，当前显示项带有标记。</li>
-  <li><b>追加备选</b>：点击加号按钮可为当前楼层追加空白备选，并自动切换至编辑；聊天区箭头需下次切换或刷新后同步新数量。</li>
-  <li><b>合并为备选</b>：可将当前 AI 消息整条追加为另一同发送者消息的备选，并删除原楼层、前移楼层号，操作后 5 分钟内可撤回。</li>
-  <li><b>未保存提醒</b>：内容改动未保存时显示提示，返回操作会询问是否丢弃。<span style="opacity:0.75;">注意：直接关闭面板无法拦截未保存更改。</span></li>
-  <li><b>统一入口</b>：搜索结果、隐藏/删除/移动/插入列表、转存目标档预览、分支对比与浏览页均可直接进入编辑子页面。</li>
-</ul>
-
-<div style="margin:15px 0 5px;font-size:12.5px;font-weight:700;">五、隐藏功能重写</div>
-<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>移除斜杠命令依赖</b>：隐藏/显示改为直接读写消息数据并保存，不再逐条调用 /hide 与 /unhide，批量操作速度大幅提升。</li>
-  <li><b>保护系统消息</b>：/comment 等酒馆内置系统消息自动跳过并显示锁图标，操作后提示跳过数量。</li>
-  <li><b>精确反馈</b>：结果区分实际变更数、已为目标状态数及跳过的系统消息数；状态栏附注系统消息数量。</li>
-  <li><b>同步刷新</b>：更改隐藏状态后自动刷新消息旁的备选箭头，保持显示一致。</li>
-  <li><b>修复误判</b>：通过插入标签添加的旁白/系统消息不再被错误标记为隐藏状态。</li>
-</ul>
-
-<div style="margin:15px 0 5px;font-size:12.5px;font-weight:700;">六、面板界面与操作</div>
-<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>标签分组</b>：原七个标签拆为「本档整理」（隐藏、删除、移动、插入）与「跨档搬迁」（搜索、分支、转存），一键切换并自动展开组内首标签，移动端无需横向滑动。</li>
-  <li><b>全屏模式</b>：标题栏新增全屏按钮，面板铺满视口；移动端输入法弹出时自动收缩可视区域，避免遮挡底部按钮。</li>
-  <li><b>可折叠说明</b>：各标签顶部说明文字默认收起，由标题栏说明按钮统一控制；收起后搜索结果与分支树高度自动增加。实时状态提示不受影响。</li>
-  <li><b>悬浮球模式</b>：点击折叠按钮可将面板收起为可拖拽悬浮球，位置记忆；点击悬浮球恢复展开。</li>
-  <li><b>固定标题栏</b>：内容滚动时，说明、全屏、折叠、关闭按钮始终可见。</li>
-  <li><b>移除遮罩层</b>：面板不再覆盖半透明遮罩，折叠后可直接操作聊天区。</li>
-  <li><b>消息查重</b>：工具栏新增查重按钮，扫描内容完全相同的消息并自动勾选除第一条外的重复项。</li>
-  <li><b>单实例与状态保持</b>：重复点击消息管理按钮将展开已折叠面板；手动切换角色时面板关闭并提示，由面板内跳转触发的切换则自动折叠并保留勾选及搜索状态。</li>
-  <li><b>摘要长度增加</b>：放宽消息摘要截断长度，宽屏下可展示更多内容。</li>
-  <li><b>移动端工具栏</b>：窄屏下工具栏自动换行为两行，选择类与导航类按钮分开排列。</li>
-</ul>
-
-<div style="margin:15px 0 5px;font-size:12.5px;font-weight:700;">七、角色专属按钮（全新功能）</div>
-<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>按钮绑定</b>：任意按钮可绑定至指定角色，绑定后从通用区域移出，仅在该角色聊天中显示。</li>
-  <li><b>专属入口</b>：新增「角色专属」按钮，样式与分组按钮一致。当前角色有绑定时才创建，无绑定时不占位，整条工具栏可在无绑定时自动收起。</li>
-  <li><b>按钮管理专属区</b>：可折叠区域显示当前角色名与绑定数量，列出专属按钮，支持拖拽排序及一键解绑。该区域可与其它按钮一起调整顺序。</li>
-  <li><b>入口自定义</b>：可设置专属入口按钮的图标/文字（支持 emoji）、展开方向及点击外部自动关闭行为。</li>
-  <li><b>绑定入口集成</b>：自定义内容弹窗中可直接勾选绑定角色；编辑已绑定按钮时显示当前归属，直接保存不会改变归属。</li>
-  <li><b>悬浮面板支持</b>：专属入口按钮可添加至悬浮面板，无绑定内容时自动隐藏。</li>
-  <li><b>快捷键隔离</b>：已绑定按钮的快捷键仅在其所属角色聊天中生效。</li>
-  <li><b>角色切换刷新</b>：切换角色或聊天档时工具栏与面板自动更新，已展开的专属面板会先行收起，防止残留。</li>
-  <li><b>注意</b>：绑定以角色头像文件名为键，修改显示名不影响绑定，但重新导入角色卡导致文件名变化时需重新绑定。同一按钮同一时间只能归属一处（通用/分组/悬浮面板/角色专属），解绑后返回通用区。群聊不支持此功能。</li>
-</ul>
-
-<div style="margin:15px 0 5px;font-size:12.5px;font-weight:700;">八、新增设置项</div>
-<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>解锁历史消息切换备选</b>：开启后，非最后一条的 AI 消息若有多备选，将显示切换箭头与计数（平时半透明，悬停清晰），点击即可切换。依赖较新酒馆接口，旧版本点击会提示不支持。生成中、编辑中及系统消息不显示箭头。</li>
-  <li><b>点击外部关闭面板</b>：修复悬浮面板展开后点击外部无法收起的问题，并新增开关，关闭后仅可通过悬浮球收起。</li>
-</ul>
-
-<div style="margin:15px 0 5px;font-size:12.5px;font-weight:700;">九、稳定性与兼容性</div>
-<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>原生保存接口</b>：所有聊天内容变更操作（删除、移动、插入、编辑、隐藏、撤回等）改为调用酒馆原生保存接口，替代 /forcesave，减少保存失败与超时。</li>
-  <li><b>命令接口兼容</b>：自动适配酒馆不同版本中斜杠命令执行接口的名称变化，避免插件加载失败。</li>
-  <li><b>弹窗统一</b>：重命名、删除确认、指定父档等操作改用酒馆风格弹窗，不再使用浏览器原生对话框。</li>
-  <li><b>代码编辑器滚动修复</b>：跳转顶部/底部、翻页等操作现在正确作用于内嵌 CodeMirror 编辑器，并二次校正底部位置。</li>
-  <li><b>生成异常提示</b>：重新生成与生成备选回复失败时会显示明确提示。</li>
-  <li><b>主题适配改进</b>：面板内纯图标按钮去除主题按钮底色与阴影；可识别直接修改样式标签的美化方案，切换后及时同步配色。</li>
-</ul>
-
-<div style="margin:15px 0 5px;font-size:12.5px;font-weight:700;">十、其他修复</div>
-<ul style="margin:4px 0;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li>修复自定义悬浮球图片地址含 & 等特殊字符时被二次转义导致加载失败的问题。</li>
-  <li>修复开启双栏模式后，重新打开设置面板时「栏位顺序」下拉框不显示已保存选项的问题。</li>
-  <li>快速隐藏按钮现在对酒馆系统消息或已隐藏消息给出明确提示，不再静默跳过。</li>
-  <li>搜索结果摘要改为根据实际内容自适应高度，不足一行时不再固定占用两行空间。</li>
-  <li>移除搜索结果、分支树、图例面板与预览区的外层边框，改用条目圆角与悬停高亮区分层次。</li>
-  <li>清理已废弃的样式与遗留代码。</li>
-  <li><b>自动清理失效按钮残留</b>：启动时自动核对并清除按钮配置中已不存在的条目（如旧功能遗留的空白行），刷新页面后永久消失，后续功能移除也会自动处理。</li>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.1</h4>
+<ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
+  <li><b>历史消息删除备选</b>：「解锁历史消息切换备选」功能新增删除历史备选消息，与最后一条消息行为一致。若该楼存在多个备选，点击编辑状态下的删除按钮将弹出选择框，可仅删除当前备选或删除整条消息；5 分钟内可通过「撤回删除」还原。</li>
+  <li><b>消息管理面板删除备选</b>：消息编辑子页面新增删除备选按钮。该楼存在多个备选时，可删除当前查看的备选；5 分钟内可通过「撤回删除」还原。</li>
 </ul>
 `;
 
@@ -6608,7 +6621,8 @@ function openHelpPanel() {
 
 <p class="ih-help-sub"><i class="fa-solid fa-left-right"></i> 解锁历史消息切换备选</p>
 <p>酒馆默认只允许在最后一条消息上左右切换备选回复。在设置中开启此选项后，聊天中<b>任意一条</b>存在多个备选的 AI 消息都会显示切换箭头与计数（平时半透明，鼠标悬停后变清晰），点击即可切换该楼的备选。</p>
-<p><b>注意</b>：此功能依赖较新版本的酒馆本体接口，版本过旧时点击箭头会提示不支持，请更新酒馆。生成中、有消息正在编辑、以及酒馆自带的系统小消息不会显示箭头。</p>
+<p><b>删除备选</b>：开启此选项后，历史楼层的删除按钮也会与最后一条消息保持一致。点击编辑状态下的删除按钮时，若该楼存在多个备选，将弹出选择框，可选择仅删除当前备选或删除整条消息。仅删除备选时会自动切换至相邻备选，并同步更新备选计数，5 分钟内可通过<q>「撤回删除」</q>还原。</p>
+<p><b>注意</b>：此功能依赖较新版本的酒馆本体接口，版本过旧时点击箭头会提示不支持，请更新酒馆。生成中、有消息正在编辑、以及酒馆自带的系统小消息不会显示箭头。若酒馆设置中关闭了<q>「删除消息前确认」</q>，删除按钮将保持酒馆默认行为，直接删除整条消息。</p>
 
 <p class="ih-help-sub"><i class="fa-solid fa-eye-low-vision"></i> 快速隐藏</p>
 <p>一键快速隐藏最近的消息。第一次点击隐藏最后一条消息，继续点击依次向前隐藏倒数第二条、第三条……便于快速清理最近的消息上下文。</p>
@@ -11812,6 +11826,259 @@ function openHideManagerPanel() {
     if (sharedState.branchDetailName) renderBranchDetail();
     toastr.success(`已保存 #${ev.floor}`, "", { timeOut: 1000 });
   }
+  function _meApplySwipeDelete(msg, delSet) {
+    ihEnsureSwipeArrays(msg);
+    const oldLive = typeof msg.swipe_id === "number" ? msg.swipe_id : 0;
+    const keep = [];
+    const keepInfo = [];
+    for (let i = 0; i < msg.swipes.length; i++) {
+      if (delSet.has(i)) continue;
+      keep.push(msg.swipes[i]);
+      keepInfo.push(msg.swipe_info[i]);
+    }
+    if (keep.length === 0) return -1;
+    let shift = 0;
+    delSet.forEach(function (d) {
+      if (d < oldLive) shift++;
+    });
+    let newLive = oldLive - shift;
+    if (newLive > keep.length - 1) newLive = keep.length - 1;
+    if (newLive < 0) newLive = 0;
+    msg.swipes = keep;
+    msg.swipe_info = keepInfo;
+    msg.swipe_id = newLive;
+    msg.mes = String(keep[newLive] || "");
+    const inf = keepInfo[newLive];
+    if (inf && inf.extra && typeof inf.extra === "object") {
+      let nextExtra;
+      try {
+        nextExtra = JSON.parse(JSON.stringify(inf.extra));
+      } catch (e) {
+        nextExtra = {};
+      }
+      const oldExtra =
+        msg.extra && typeof msg.extra === "object" ? msg.extra : {};
+      if (oldExtra.type !== undefined) nextExtra.type = oldExtra.type;
+      if (oldExtra.isSmallSys !== undefined)
+        nextExtra.isSmallSys = oldExtra.isSmallSys;
+      msg.extra = nextExtra;
+    }
+    return newLive;
+  }
+
+  async function _meDeleteSwipes() {
+    const ev = sharedState.editView;
+    if (!ev) return;
+    const msgs = _meGetMsgs(ev.file);
+    const m = msgs && msgs[ev.floor];
+    if (!m) {
+      toastr.error("这条消息已不存在，请返回后重新进入", "", { timeOut: 1800 });
+      return;
+    }
+    if (m.is_user) {
+      toastr.warning("用户消息没有备选回复", "", { timeOut: 1500 });
+      return;
+    }
+    if (!Array.isArray(m.swipes) || m.swipes.length <= 1) {
+      toastr.warning("这一楼只有一条内容，没有可删除的备选", "", {
+        timeOut: 1800,
+      });
+      return;
+    }
+    if (ev.dirty) {
+      const okLeave = await _meConfirmLeave();
+      if (!okLeave) return;
+      ev.draft = null;
+      ev.dirty = false;
+    }
+    const totalN = m.swipes.length;
+    let curIdx =
+      typeof ev.swipeIdx === "number" && ev.swipeIdx >= 0
+        ? ev.swipeIdx
+        : typeof m.swipe_id === "number"
+          ? m.swipe_id
+          : 0;
+    if (curIdx < 0 || curIdx >= totalN) curIdx = 0;
+    const delSet = new Set();
+    delSet.add(curIdx);
+    if (getSettings().confirmDangerousActions) {
+      const lines = [
+        `将删除 <b>#${ev.floor}</b> 的第 <b>${curIdx + 1}</b> 条备选（本楼共 <b>${totalN}</b> 条）。`,
+        `<span class="ih-cf-dim">删除后会自动切换到相邻的备选，这一楼本身不会被删除。</span>`,
+      ];
+      lines.push(
+        ev.file
+          ? `<span class="ih-cf-warn">这条消息属于聊天档「${ihEscapeHtml(_meLabel(ev.file))}」，删除会直接写入该文件，无法撤回。</span>`
+          : `<span class="ih-cf-dim">操作后 5 分钟内可通过「撤回删除」还原。</span>`,
+      );
+      const ok = await ihConfirmDialog({
+        title: "删除当前备选",
+        icon: "fa-trash",
+        lines: lines,
+        okText: "删除",
+        okIcon: "fa-trash",
+        cancelText: "取消",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    const keepLen = totalN - delSet.size;
+    let newViewIdx = curIdx;
+    let viewShift = 0;
+    delSet.forEach(function (d) {
+      if (d < curIdx) viewShift++;
+    });
+    newViewIdx = curIdx - viewShift;
+    if (newViewIdx > keepLen - 1) newViewIdx = keepLen - 1;
+    if (newViewIdx < 0) newViewIdx = 0;
+    const delCount = delSet.size;
+
+    if (!ev.file) {
+      chatUndoManager.save();
+      let clone;
+      try {
+        clone = JSON.parse(JSON.stringify(m));
+      } catch (e) {
+        toastr.error("消息数据异常，删除已取消", "", { timeOut: 1800 });
+        return;
+      }
+      _meApplySwipeDelete(clone, delSet);
+      chat[ev.floor] = clone;
+      ihMarkChatTainted();
+      try {
+        await eventSource.emit(event_types.MESSAGE_EDITED, ev.floor);
+      } catch (e) {
+        console.warn("快捷工具栏: MESSAGE_EDITED 事件派发失败", e);
+      }
+      try {
+        const ctx = SillyTavern.getContext();
+        if (typeof ctx.updateMessageBlock === "function") {
+          ctx.updateMessageBlock(ev.floor, clone);
+        }
+      } catch (e) {
+        console.warn("快捷工具栏: 更新消息显示失败", e);
+      }
+      const okSave = await ihSaveCurrentChat();
+      if (!okSave) {
+        toastr.error("保存失败，请点撤回按钮还原", "", { timeOut: 2500 });
+        return;
+      }
+      try {
+        await eventSource.emit(event_types.MESSAGE_UPDATED, ev.floor);
+      } catch (e) {
+        console.warn("快捷工具栏: MESSAGE_UPDATED 事件派发失败", e);
+      }
+    } else {
+      const info = _getTransferChar();
+      if (!info || info.group) {
+        toastr.error("无法保存到该聊天档", "", { timeOut: 1800 });
+        return;
+      }
+      const nameNoExt = String(ev.file).replace(/\.jsonl$/i, "");
+      let fresh = null;
+      try {
+        fresh = await _fetchTargetChat(nameNoExt);
+      } catch (e) {
+        console.error("快捷工具栏: 删除备选前读取聊天档失败", e);
+        toastr.error("读取聊天档失败，本次删除已取消", "", { timeOut: 2200 });
+        return;
+      }
+      const freshMsgs =
+        fresh && Array.isArray(fresh.messages) ? fresh.messages : null;
+      if (
+        !freshMsgs ||
+        freshMsgs.length !== msgs.length ||
+        !freshMsgs[ev.floor]
+      ) {
+        _ihDeleteSearchCache(ev.file);
+        toastr.error(
+          "这个聊天档在别处被改过了，为免覆盖掉那些改动，本次删除已取消。请返回后重新打开这个档再操作。",
+          "",
+          { timeOut: 5000 },
+        );
+        return;
+      }
+      const fm = freshMsgs[ev.floor];
+      if (!Array.isArray(fm.swipes) || fm.swipes.length !== totalN) {
+        _ihDeleteSearchCache(ev.file);
+        toastr.error(
+          "这一楼的备选数量已发生变化，本次删除已取消，请返回后重新打开这个档",
+          "",
+          { timeOut: 4000 },
+        );
+        return;
+      }
+      _meApplySwipeDelete(fm, delSet);
+      let header = fresh.header;
+      if (!header) {
+        header = {
+          user_name: name1 || "User",
+          character_name: info.character.name,
+          create_date: new Date().toISOString(),
+          chat_metadata: {},
+        };
+      }
+      let ok = false;
+      try {
+        const resp = await fetch("/api/chats/save", {
+          method: "POST",
+          headers: getRequestHeaders(),
+          cache: "no-cache",
+          body: JSON.stringify({
+            ch_name: info.character.name,
+            file_name: nameNoExt,
+            chat: [header, ...freshMsgs],
+            avatar_url: info.avatar,
+            force: true,
+          }),
+        });
+        ok = resp.ok;
+      } catch (e) {
+        console.error("快捷工具栏: 写回聊天档失败", e);
+      }
+      if (!ok) {
+        toastr.error("删除失败，该聊天档未被修改", "", { timeOut: 1800 });
+        return;
+      }
+      _ihSetSearchCache(ev.file, freshMsgs);
+      if (
+        sharedState.transferTargetChat === msgs &&
+        _getTransferTargetValue() === ev.file
+      ) {
+        sharedState.transferTargetChat = freshMsgs;
+        sharedState.transferTargetHeader = header;
+      }
+      if (sharedState.branchPreviewMsgs === msgs) {
+        sharedState.branchPreviewMsgs = freshMsgs;
+      }
+    }
+    _ihInvalidateBranchCache();
+    const nowMsgs = _meGetMsgs(ev.file);
+    const nowMsg = nowMsgs && nowMsgs[ev.floor];
+    const restN =
+      nowMsg && Array.isArray(nowMsg.swipes) ? nowMsg.swipes.length : 1;
+    ev.swipeIdx = restN > 1 ? newViewIdx : -1;
+    ev.draft = null;
+    ev.dirty = false;
+    ev.mode = "preview";
+    ev.hlIndex = -1;
+    sharedState.tokenCache.delete(ev.floor);
+    _meSyncView();
+    refreshList();
+    renderTransferTarget();
+    if (sharedState.activeTab === "search") renderSearchResults();
+    if (sharedState.branchPreviewName) _bpRenderRows();
+    if (sharedState.branchDetailName) renderBranchDetail();
+    try {
+      ihMarkSwipeableMessages();
+    } catch (e) {}
+    toastr.success(
+      `已删除 #${ev.floor} 的 ${delCount} 条备选，本楼剩余 ${restN} 条` +
+        (ev.file ? "" : "；聊天区的备选计数需下次切换或刷新后同步"),
+      "",
+      { timeOut: 2500 },
+    );
+  }
 
   function _meSyncView() {
     const host = content.find("#ih_mgr_edit_view")[0];
@@ -11923,6 +12190,10 @@ function openHideManagerPanel() {
         "/" +
         _mePosCount +
         "</span></button>";
+    }
+    if (!m.is_user && _meSwipeArr.length > 1) {
+      html +=
+        '<button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-warn" id="ih_me_swipe_del" title="删除当前查看的这条备选，删除后自动切到相邻备选"><i class="fa-solid fa-trash"></i> 删除备选</button>';
     }
     if (!ev.file && !m.is_user && chat.length > 1) {
       html +=
@@ -16488,7 +16759,7 @@ function openHideManagerPanel() {
       ev.dirty = false;
     }
     const msgs = _meGetMsgs(ev.file);
-    const m = msgs && msgs[ev.floor];
+    let m = msgs && msgs[ev.floor];
     if (!m) {
       toastr.error("这条消息已不存在，请返回后重新进入", "", { timeOut: 1800 });
       return;
@@ -16497,7 +16768,18 @@ function openHideManagerPanel() {
       toastr.warning("用户消息不支持备选回复", "", { timeOut: 1500 });
       return;
     }
-    if (!ev.file) chatUndoManager.save();
+    if (!ev.file) {
+      chatUndoManager.save();
+      let _addClone;
+      try {
+        _addClone = JSON.parse(JSON.stringify(m));
+      } catch (e) {
+        toastr.error("消息数据异常，追加备选已取消", "", { timeOut: 1800 });
+        return;
+      }
+      chat[ev.floor] = _addClone;
+      m = _addClone;
+    }
     ihEnsureSwipeArrays(m);
     const _curIdx = typeof m.swipe_id === "number" ? m.swipe_id : 0;
     if (m.swipe_info[_curIdx]) {
@@ -16536,6 +16818,9 @@ function openHideManagerPanel() {
       { timeOut: 2500 },
     );
   });
+  content.on("click", "#ih_me_swipe_del", function () {
+    _meDeleteSwipes();
+  });
   content.on("click", "#ih_me_merge_swipe", async function () {
     const ev = sharedState.editView;
     if (!ev || ev.file) return;
@@ -16557,7 +16842,7 @@ function openHideManagerPanel() {
     }
     const dstFloor = await ihPickSwipeMergeTarget(srcFloor);
     if (dstFloor === null || dstFloor === undefined) return;
-    const dst = chat[dstFloor];
+    let dst = chat[dstFloor];
     if (!dst) {
       toastr.error("目标楼层已不存在，操作已取消", "", { timeOut: 1800 });
       return;
@@ -16583,7 +16868,17 @@ function openHideManagerPanel() {
     const hadBasket = sharedState.searchBasket.some(function (b) {
       return !b.file;
     });
+    let _dstClone;
+    try {
+      _dstClone = JSON.parse(JSON.stringify(dst));
+    } catch (e) {
+      console.error("快捷工具栏: 复制消息数据失败", e);
+      toastr.error("消息数据异常，并为备选已取消", "", { timeOut: 1800 });
+      return;
+    }
     chatUndoManager.save();
+    chat[dstFloor] = _dstClone;
+    dst = _dstClone;
     for (let i = 0; i < src.swipes.length; i++) {
       dst.swipes.push(String(src.swipes[i] || ""));
       let info = src.swipe_info[i];

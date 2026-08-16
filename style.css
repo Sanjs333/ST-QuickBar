@@ -8452,3 +8452,98 @@ body.ih-cp-selecting input::-moz-selection {
     padding: 2px 4px;
   }
 }
+
+.ih-me-swipes.ih-me-sel-mode {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 8%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 32%,
+    transparent
+  );
+}
+.ih-me-swipe.ih-me-swipe-sel {
+  opacity: 1;
+  font-weight: 600;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 26%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 55%,
+    transparent
+  );
+  color: var(--SmartThemeQuoteColor, cornflowerblue);
+}
+.ih-me-swipe.ih-me-sel-toggle {
+  margin-left: 4px;
+}
+.ih-me-swipe.ih-me-sel-toggle.ih-me-swipe-on {
+  opacity: 1;
+}
+.ih-me-sel-bar {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 7%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 28%,
+      transparent
+    );
+}
+.ih-me-sel-bar.ih-me-sel-bar-all {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 10%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 42%,
+    transparent
+  );
+}
+.ih-me-sel-count {
+  margin-right: auto;
+  font-size: 11px;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.ih-me-sel-bar .ih-mgr-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ih-me-sel-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--SmartThemeEmColor, orange);
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeEmColor, orange) 10%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--SmartThemeEmColor, orange) 34%, transparent);
+}
+.ih-me-sel-warn > i {
+  flex-shrink: 0;
+  margin-top: 2px;
+}

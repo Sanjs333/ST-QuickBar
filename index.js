@@ -4007,6 +4007,31 @@ const chatUndoManager = {
     this._pushSnapshot(snapshot);
   },
 
+  // 只把目标楼层深拷贝进快照，chat[floor] 保持同一个对象引用，改动原地进行。
+  // 别改回「深拷贝塞回 chat[floor]」的写法：宿主可能按消息对象身份记账（如
+  // TauriTavern ChatSurface 用 WeakMap 存虚拟化 structure key），换对象会被判成
+  // 结构变更并熔断。返回 false 表示这一楼数据异常，调用方应放弃本次操作。
+  saveWithFloor(floor) {
+    let snapshot;
+    try {
+      snapshot = chat.slice();
+      if (floor >= 0 && floor < snapshot.length) {
+        snapshot[floor] = JSON.parse(JSON.stringify(snapshot[floor]));
+      }
+    } catch (e) {
+      console.warn("快捷工具栏: 保存聊天快照失败", e);
+      return false;
+    }
+    this._justSaved = true;
+    if (this._justSavedTimer) clearTimeout(this._justSavedTimer);
+    const selfRef = this;
+    this._justSavedTimer = setTimeout(function () {
+      selfRef._justSaved = false;
+    }, 500);
+    this._pushSnapshot(snapshot);
+    return true;
+  },
+
   saveFromExternal() {
     if (this._justSaved) {
       this._justSaved = false;
@@ -5321,16 +5346,10 @@ function doDeleteLastSwipe() {
     )
       return;
   }
-  let _delSwipeClone;
-  try {
-    _delSwipeClone = JSON.parse(JSON.stringify(chat[chat.length - 1]));
-  } catch (e) {
-    console.error("快捷工具栏: 复制消息数据失败", e);
+  if (!chatUndoManager.saveWithFloor(chat.length - 1)) {
     toastr.error("消息数据异常，删除已取消", "", { timeOut: 1800 });
     return;
   }
-  chatUndoManager.save();
-  chat[chat.length - 1] = _delSwipeClone;
   executeSlashCommandsWithOptions("/delswipe");
   toastr.info("已删除当前备选回复（可通过撤回按钮还原）", "", {
     timeOut: 1000,
@@ -5474,6 +5493,11 @@ body.ih-unlock-swipes #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[
 body.ih-unlock-swipes #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipe_right:hover,
 body.ih-unlock-swipes #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipes-counter:hover {
   opacity: 0.9 !important; /* 鼠标悬停时的透明度 */
+}
+body.ih-unlock-swipes #chat:has(#curEditTextarea) .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipe_left,
+body.ih-unlock-swipes #chat:has(#curEditTextarea) .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipe_right,
+body.ih-unlock-swipes #chat:has(#curEditTextarea) .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipes-counter {
+  display: none !important; /* 有消息正在编辑时，隐藏历史楼层的备选箭头与计数 */
 }
 `;
   document.head.appendChild(style);
@@ -6421,12 +6445,16 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "3.2.1";
+const CHANGELOG_VERSION = "3.2.2";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.1</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.2</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>历史消息删除备选</b>：「解锁历史消息切换备选」功能新增删除历史备选消息，与最后一条消息行为一致。若该楼存在多个备选，点击编辑状态下的删除按钮将弹出选择框，可仅删除当前备选或删除整条消息；5 分钟内可通过「撤回删除」还原。</li>
-  <li><b>消息管理面板删除备选</b>：消息编辑子页面新增删除备选按钮。该楼存在多个备选时，可删除当前查看的备选；5 分钟内可通过「撤回删除」还原。</li>
+  <li><b>备选回复批量删除</b>：消息编辑子页面新增多选模式。点击备选栏右侧的多选按钮进入后，可勾选同一楼层的多条备选并一次性删除。多选状态下点击备选会同时完成勾选与预览，可在确认内容后再决定是否删除。</li>
+  <li><b>全选备选时删除整楼</b>：多选状态下勾选全部备选时，操作栏转为警示色并提示该楼层将被整条删除，执行前需二次确认。删除后其后楼层号整体前移，转存篮中来自受影响聊天档的消息将自动移出。</li>
+  <li><b>搜索预览快捷入口</b>：搜索结果预览页新增「多选删除备选」按钮，可携带当前查看的备选直接进入消息编辑子页面的多选模式。</li>
+  <li><b>备选计数即时刷新</b>：在消息管理面板中删除或追加当前聊天档的备选后，聊天区的备选计数与切换箭头立即同步，无需切换或刷新聊天。</li>
+  <li><b>编辑状态隐藏备选箭头</b>：开启「解锁历史消息切换备选」后，若有任意消息处于编辑状态，历史楼层的备选箭头与计数将不再显示，避免编辑过程中误触切换。</li>
+  <li><b>兼容聊天 DOM 虚拟化</b>：修复在 TauriTavern 等开启「聊天 DOM 虚拟化」的环境中，执行删除当前备选、批量删除备选、追加备选、并为备选等操作后，虚拟化因判定楼层结构变更而停止的问题。这些操作改为原地修改消息数据、不再替换消息对象，撤回功能与原有行为保持一致。</li>
 </ul>
 `;
 
@@ -6705,7 +6733,10 @@ function openHelpPanel() {
 
 <p class="ih-help-sub">消息编辑子页面</p>
 <p>列表中每条消息的眼睛按钮都会在面板内原地翻页打开编辑子页面，不再弹出遮罩窗口。子页面集成预览与编辑切换、上一条/下一条跳转、加入转存篮；若该楼有多个备选回复，可切换查看并分别编辑，当前显示的那条带勾选标记。</p>
-<p><b>追加备选</b>：备选行最右侧的加号按钮会给这一楼追加一条空白备选，追加后自动切到它并进入编辑。<span style="opacity:0.75;">聊天区的备选箭头需要下次切换或刷新后才会同步新数量。</span></p>
+<p><b>追加备选</b>：备选行最右侧的加号按钮会给这一楼追加一条空白备选，追加后自动切到它并进入编辑。</p>
+<p><b>删除备选</b>：该楼存在多个备选时，底部会出现<q>「删除备选」</q>按钮，可删除当前查看的这条，删除后自动切换至相邻备选。若该消息属于当前聊天档，5 分钟内可通过<q>「撤回删除」</q>还原。</p>
+<p><b>多选删除备选</b>：点击备选行右侧的多选按钮进入多选模式。此模式下点击某条备选会同时完成勾选与预览，可在确认内容后再决定是否删除。工具条提供全选、退出多选与删除，按钮上会实时显示已选条数。搜索结果预览页的<q>「多选删除备选」</q>按钮可携带当前查看的备选直接进入该模式。</p>
+<p><b>勾选全部备选时</b>：操作栏转为警示色，按钮文案变为<q>「删除整楼 #N」</q>并提示该楼层将被整条删除，执行前需二次确认。删除后其后所有楼层号整体前移；若该消息属于其他聊天档，删除会直接写入该文件且无法撤回，转存篮中来自该档的消息会自动移出。</p>
 <p><b>并为备选</b>：编辑当前聊天档的 AI 消息时，底部会出现<q>「并为备选」</q>按钮。点击后选择另一楼（只列出同一发送者的 AI 消息），本楼的全部内容会追加成那一楼的备选，随后本楼被删除、其后所有楼层号整体前移。适合把重复生成的两楼合并成一楼的多个备选，操作后 5 分钟内可用<q>「撤回删除」</q>还原。</p>
 <p>内容改过但没保存时会显示<q>「未保存」</q>标记，点<q>「返回」</q>会先询问是否丢弃。<b>注意</b>：直接关闭整个面板不会拦截未保存的改动。</p>
 
@@ -11575,15 +11606,20 @@ function openHideManagerPanel() {
     ) {
       swipeIdx = o.swipeIdx;
     }
+    const _meSelMode = o.selMode === true && swipeIdx >= 0;
+    const _meSelSet = new Set();
+    if (_meSelMode) _meSelSet.add(swipeIdx);
     sharedState.editView = {
       file: file || "",
       floor: floor,
       swipeIdx: swipeIdx,
-      mode: o.mode === "edit" ? "edit" : "preview",
+      mode: _meSelMode ? "preview" : o.mode === "edit" ? "edit" : "preview",
       dirty: false,
       draft: null,
       hlIndex: -1,
       siblings: Array.isArray(siblings) ? siblings : null,
+      selMode: _meSelMode,
+      selSet: _meSelSet,
     };
     _meSyncView();
   }
@@ -11866,6 +11902,180 @@ function openHideManagerPanel() {
     return newLive;
   }
 
+  async function _meDeleteWholeFloor() {
+    const ev = sharedState.editView;
+    if (!ev) return;
+    const file = ev.file;
+    const floor = ev.floor;
+    const msgs = _meGetMsgs(file);
+    const m = msgs && msgs[floor];
+    if (!m) {
+      toastr.error("这条消息已不存在，请返回后重新进入", "", { timeOut: 1800 });
+      return;
+    }
+    const swipeN =
+      Array.isArray(m.swipes) && m.swipes.length ? m.swipes.length : 1;
+    const lines = [
+      `已勾选 <b>#${floor}</b> 的全部 <b>${swipeN}</b> 条备选，这一楼会被<b>整条删除</b>。`,
+    ];
+    if (file) {
+      lines.push(
+        `<span class="ih-cf-warn">这条消息属于聊天档「${ihEscapeHtml(_meLabel(file))}」，删除会直接写入该文件，无法撤回。</span>`,
+      );
+      lines.push(
+        `<span class="ih-cf-dim">删除后这一楼之后的所有楼层号会整体前移一位，转存篮中来自该档的消息会被移出。</span>`,
+      );
+    } else {
+      lines.push(
+        `<span class="ih-cf-warn">删除后这一楼之后的所有楼层号会整体前移一位。</span>`,
+      );
+      lines.push(
+        `<span class="ih-cf-dim">操作后 5 分钟内可通过「撤回删除」还原。</span>`,
+      );
+    }
+    const okAsk = await ihConfirmDialog({
+      title: "删除整条消息",
+      icon: "fa-trash-can",
+      lines: lines,
+      okText: "删除整楼",
+      okIcon: "fa-trash-can",
+      cancelText: "取消",
+      danger: true,
+    });
+    if (!okAsk) return;
+    if (!file) {
+      const hadBasket = sharedState.searchBasket.some(function (b) {
+        return !b.file;
+      });
+      chatUndoManager.save();
+      chat.splice(floor, 1);
+      ihMarkChatTainted();
+      _meClose();
+      const okSave = await ihSaveCurrentChat();
+      if (!okSave) {
+        toastr.error("保存失败，请点撤回按钮还原", "", { timeOut: 2500 });
+        return;
+      }
+      _ihInvalidateBranchCache();
+      _mgrFoldForJump();
+      try {
+        await executeSlashCommandsWithOptions("/chat-reload");
+      } catch (e) {
+        console.error("快捷工具栏: 删除整楼后重载失败", e);
+      }
+      setTimeout(function () {
+        _mgrRefreshAfterDataChange();
+        if (hadBasket) {
+          _mgrPruneBasketByFile("");
+          _updateBasketBanner();
+          toastr.info("楼层号已变动，转存篮中来自当前聊天档的消息已移出", "", {
+            timeOut: 2500,
+          });
+        }
+      }, 700);
+      try {
+        ihMarkSwipeableMessages();
+      } catch (e) {}
+      toastr.success(
+        `已删除 #${floor} 整条消息（含 ${swipeN} 条备选，可通过撤回按钮还原）`,
+        "",
+        { timeOut: 3000 },
+      );
+      return;
+    }
+    const info = _getTransferChar();
+    if (!info || info.group) {
+      toastr.error("无法保存到该聊天档", "", { timeOut: 1800 });
+      return;
+    }
+    const nameNoExt = String(file).replace(/\.jsonl$/i, "");
+    let fresh = null;
+    try {
+      fresh = await _fetchTargetChat(nameNoExt);
+    } catch (e) {
+      console.error("快捷工具栏: 删除整楼前读取聊天档失败", e);
+      toastr.error("读取聊天档失败，本次删除已取消", "", { timeOut: 2200 });
+      return;
+    }
+    const freshMsgs =
+      fresh && Array.isArray(fresh.messages) ? fresh.messages : null;
+    if (!freshMsgs || freshMsgs.length !== msgs.length || !freshMsgs[floor]) {
+      _ihDeleteSearchCache(file);
+      toastr.error(
+        "这个聊天档在别处被改过了，为免覆盖掉那些改动，本次删除已取消。请返回后重新打开这个档再操作。",
+        "",
+        { timeOut: 5000 },
+      );
+      return;
+    }
+    freshMsgs.splice(floor, 1);
+    let header = fresh.header;
+    if (!header) {
+      header = {
+        user_name: name1 || "User",
+        character_name: info.character.name,
+        create_date: new Date().toISOString(),
+        chat_metadata: {},
+      };
+    }
+    let okWrite = false;
+    try {
+      const resp = await fetch("/api/chats/save", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        cache: "no-cache",
+        body: JSON.stringify({
+          ch_name: info.character.name,
+          file_name: nameNoExt,
+          chat: [header, ...freshMsgs],
+          avatar_url: info.avatar,
+          force: true,
+        }),
+      });
+      okWrite = resp.ok;
+    } catch (e) {
+      console.error("快捷工具栏: 写回聊天档失败", e);
+    }
+    if (!okWrite) {
+      toastr.error("删除失败，该聊天档未被修改", "", { timeOut: 1800 });
+      return;
+    }
+    _ihSetSearchCache(file, freshMsgs);
+    if (
+      sharedState.transferTargetChat === msgs &&
+      _getTransferTargetValue() === file
+    ) {
+      sharedState.transferTargetChat = freshMsgs;
+      sharedState.transferTargetHeader = header;
+    }
+    if (sharedState.branchPreviewMsgs === msgs) {
+      sharedState.branchPreviewMsgs = freshMsgs;
+    }
+    _ihInvalidateBranchCache();
+    const hadFileBasket = sharedState.searchBasket.some(function (b) {
+      return b.file === file;
+    });
+    if (hadFileBasket) _mgrPruneBasketByFile(file);
+    let nextFloor = null;
+    if (freshMsgs.length > 0) nextFloor = floor > 0 ? floor - 1 : 0;
+    if (nextFloor === null) _meClose();
+    else _meOpen(file, nextFloor, null);
+    _updateBasketBanner();
+    renderTransferTarget();
+    if (sharedState.branchPreviewName) _bpRenderRows();
+    if (sharedState.branchDetailName) renderBranchDetail();
+    toastr.success(
+      `已删除「${nameNoExt}」的 #${floor} 整条消息（含 ${swipeN} 条备选），其后楼层号已前移`,
+      "",
+      { timeOut: 3000 },
+    );
+    if (hadFileBasket) {
+      toastr.info("楼层号已变动，转存篮中来自该聊天档的消息已移出", "", {
+        timeOut: 2500,
+      });
+    }
+    await _mgrRefreshSearchOnly();
+  }
   async function _meDeleteSwipes() {
     const ev = sharedState.editView;
     if (!ev) return;
@@ -11900,10 +12110,27 @@ function openHideManagerPanel() {
           : 0;
     if (curIdx < 0 || curIdx >= totalN) curIdx = 0;
     const delSet = new Set();
-    delSet.add(curIdx);
+    if (ev.selMode && ev.selSet && ev.selSet.size > 0) {
+      ev.selSet.forEach(function (i) {
+        if (i >= 0 && i < totalN) delSet.add(i);
+      });
+    }
+    if (delSet.size === 0) delSet.add(curIdx);
+    if (delSet.size >= totalN) {
+      await _meDeleteWholeFloor();
+      return;
+    }
+    const _delLabel = Array.from(delSet)
+      .sort(function (a, b) {
+        return a - b;
+      })
+      .map(function (i) {
+        return i + 1;
+      })
+      .join("、");
     if (getSettings().confirmDangerousActions) {
       const lines = [
-        `将删除 <b>#${ev.floor}</b> 的第 <b>${curIdx + 1}</b> 条备选（本楼共 <b>${totalN}</b> 条）。`,
+        `将删除 <b>#${ev.floor}</b> 的第 <b>${_delLabel}</b> 条备选，共 <b>${delSet.size}</b> 条（本楼原有 <b>${totalN}</b> 条）。`,
         `<span class="ih-cf-dim">删除后会自动切换到相邻的备选，这一楼本身不会被删除。</span>`,
       ];
       lines.push(
@@ -11912,7 +12139,7 @@ function openHideManagerPanel() {
           : `<span class="ih-cf-dim">操作后 5 分钟内可通过「撤回删除」还原。</span>`,
       );
       const ok = await ihConfirmDialog({
-        title: "删除当前备选",
+        title: delSet.size > 1 ? "删除选中的备选" : "删除当前备选",
         icon: "fa-trash",
         lines: lines,
         okText: "删除",
@@ -11934,16 +12161,11 @@ function openHideManagerPanel() {
     const delCount = delSet.size;
 
     if (!ev.file) {
-      chatUndoManager.save();
-      let clone;
-      try {
-        clone = JSON.parse(JSON.stringify(m));
-      } catch (e) {
+      if (!chatUndoManager.saveWithFloor(ev.floor)) {
         toastr.error("消息数据异常，删除已取消", "", { timeOut: 1800 });
         return;
       }
-      _meApplySwipeDelete(clone, delSet);
-      chat[ev.floor] = clone;
+      _meApplySwipeDelete(m, delSet);
       ihMarkChatTainted();
       try {
         await eventSource.emit(event_types.MESSAGE_EDITED, ev.floor);
@@ -11953,7 +12175,7 @@ function openHideManagerPanel() {
       try {
         const ctx = SillyTavern.getContext();
         if (typeof ctx.updateMessageBlock === "function") {
-          ctx.updateMessageBlock(ev.floor, clone);
+          ctx.updateMessageBlock(ev.floor, m);
         }
       } catch (e) {
         console.warn("快捷工具栏: 更新消息显示失败", e);
@@ -11967,6 +12189,14 @@ function openHideManagerPanel() {
         await eventSource.emit(event_types.MESSAGE_UPDATED, ev.floor);
       } catch (e) {
         console.warn("快捷工具栏: MESSAGE_UPDATED 事件派发失败", e);
+      }
+      _ihSyncSwipeCounter(ev.floor);
+      try {
+        if (typeof SillyTavernScript.refreshSwipeButtons === "function") {
+          SillyTavernScript.refreshSwipeButtons();
+        }
+      } catch (e) {
+        console.warn("快捷工具栏: 刷新备选箭头失败", e);
       }
     } else {
       const info = _getTransferChar();
@@ -12062,6 +12292,8 @@ function openHideManagerPanel() {
     ev.dirty = false;
     ev.mode = "preview";
     ev.hlIndex = -1;
+    ev.selMode = false;
+    ev.selSet = new Set();
     sharedState.tokenCache.delete(ev.floor);
     _meSyncView();
     refreshList();
@@ -12073,8 +12305,7 @@ function openHideManagerPanel() {
       ihMarkSwipeableMessages();
     } catch (e) {}
     toastr.success(
-      `已删除 #${ev.floor} 的 ${delCount} 条备选，本楼剩余 ${restN} 条` +
-        (ev.file ? "" : "；聊天区的备选计数需下次切换或刷新后同步"),
+      `已删除 #${ev.floor} 的 ${delCount} 条备选，本楼剩余 ${restN} 条`,
       "",
       { timeOut: 2500 },
     );
@@ -12130,28 +12361,64 @@ function openHideManagerPanel() {
     html += "</div>";
     const _meSwipeArr =
       Array.isArray(m.swipes) && m.swipes.length ? m.swipes : [m.mes || ""];
+    if (!ev.selSet) ev.selSet = new Set();
+    const _meMulti = !m.is_user && _meSwipeArr.length > 1;
+    if (!_meMulti && ev.selMode) {
+      ev.selMode = false;
+      ev.selSet.clear();
+    }
+    if (ev.selMode) {
+      Array.from(ev.selSet).forEach(function (i) {
+        if (i >= _meSwipeArr.length) ev.selSet.delete(i);
+      });
+    }
     if (!m.is_user) {
-      html += '<div class="ih-me-swipes">';
+      html +=
+        '<div class="ih-me-swipes' +
+        (ev.selMode ? " ih-me-sel-mode" : "") +
+        '">';
       html += '<span class="ih-me-swipes-label">备选</span>';
       html += '<div class="ih-me-swipes-scroll">';
       _meSwipeArr.forEach(function (_, i) {
         const isCur = _meSwipeArr.length > 1 ? i === ev.swipeIdx : true;
         const isLive = i === (typeof m.swipe_id === "number" ? m.swipe_id : 0);
+        const isSel = ev.selMode && ev.selSet.has(i);
+        let tip;
+        if (ev.selMode) {
+          tip = isSel ? "已勾选，点一下取消" : "点一下勾选，同时在下方预览这条";
+        } else {
+          tip = isLive ? "当前显示的备选" : "备选 " + (i + 1);
+        }
         html +=
           '<button class="ih-me-swipe' +
           (isCur ? " ih-me-swipe-on" : "") +
+          (isSel ? " ih-me-swipe-sel" : "") +
           '" data-swipe="' +
           i +
           '" title="' +
-          (isLive ? "当前显示的备选" : "备选 " + (i + 1)) +
+          tip +
           '">' +
+          (isSel ? '<i class="fa-solid fa-check"></i>' : "") +
           (i + 1) +
-          (isLive ? '<i class="fa-solid fa-circle-check"></i>' : "") +
+          (isLive && !ev.selMode
+            ? '<i class="fa-solid fa-circle-check"></i>'
+            : "") +
           "</button>";
       });
-      html +=
-        '<button class="ih-me-swipe" id="ih_me_swipe_add" title="给这一楼追加一条空白备选，追加后自动切到它并进入编辑"><i class="fa-solid fa-plus"></i></button>';
-      html += "</div></div>";
+      if (!ev.selMode) {
+        html +=
+          '<button class="ih-me-swipe" id="ih_me_swipe_add" title="给这一楼追加一条空白备选，追加后自动切到它并进入编辑"><i class="fa-solid fa-plus"></i></button>';
+      }
+      html += "</div>";
+      if (_meMulti) {
+        html +=
+          '<button class="ih-me-swipe ih-me-sel-toggle' +
+          (ev.selMode ? " ih-me-swipe-on" : "") +
+          '" id="ih_me_sel_toggle" title="' +
+          (ev.selMode ? "退出多选" : "多选备选，可一次删掉多条") +
+          '"><i class="fa-solid fa-list-check"></i></button>';
+      }
+      html += "</div>";
     }
     let _mePosCount = 0;
     if (ev.mode === "edit") {
@@ -12176,6 +12443,45 @@ function openHideManagerPanel() {
         '<div class="ih-me-preview"><div class="ih-me-preview-text">' +
         _meBody +
         "</div></div>";
+    }
+    if (ev.selMode) {
+      const _selN = ev.selSet.size;
+      const _selAll = _selN > 0 && _selN === _meSwipeArr.length;
+      html +=
+        '<div class="ih-me-actions ih-me-sel-bar' +
+        (_selAll ? " ih-me-sel-bar-all" : "") +
+        '">';
+      html +=
+        '<span class="ih-me-sel-count">已选 ' +
+        _selN +
+        " / " +
+        _meSwipeArr.length +
+        " 条</span>";
+      html +=
+        '<button class="ih-mgr-btn ih-mgr-btn-mini" id="ih_me_sel_all"><i class="fa-solid fa-check-double"></i> ' +
+        (_selAll ? "取消全选" : "全选") +
+        "</button>";
+      html +=
+        '<button class="ih-mgr-btn ih-mgr-btn-mini" id="ih_me_sel_exit"><i class="fa-solid fa-xmark"></i> 退出多选</button>';
+      html +=
+        '<button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-warn" id="ih_me_swipe_del"' +
+        (_selN === 0 ? " disabled" : "") +
+        '><i class="fa-solid fa-' +
+        (_selAll ? "trash-can" : "trash") +
+        '"></i> ' +
+        (_selAll ? "删除整楼 #" + ev.floor : "删除选中 " + _selN + " 条") +
+        "</button>";
+      html += "</div>";
+      if (_selAll) {
+        html +=
+          '<div class="ih-me-sel-warn"><i class="fa-solid fa-triangle-exclamation"></i><span>已勾选全部备选，删除后这一楼会被<b>整条移除</b>' +
+          (ev.file ? "" : "，其后所有楼层号会整体前移一位") +
+          "</span></div>";
+      }
+      host.innerHTML = html;
+      syncDialogTheme(host);
+      generateFaIconProtectionCSS();
+      return;
     }
     html += '<div class="ih-me-actions">';
     if (ev.dirty) {
@@ -13205,7 +13511,7 @@ function openHideManagerPanel() {
       html += `</div></div>`;
     }
     html += `<div class="ih-search-preview-box"><div class="ih-search-preview-text">${text ? _searchBuildFullHtml(text, positions, mt.kwLen) : '<span class="ih-me-empty">（空消息）</span>'}</div></div>`;
-    html += `<div class="ih-search-preview-actions"><button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_sp_locate"${positions.length === 0 ? " disabled" : ""}><i class="fa-solid fa-crosshairs"></i> 定位高亮</button><button class="ih-mgr-btn" id="ih_sp_to_edit"><i class="fa-solid fa-pen"></i> 编辑此消息</button></div>`;
+    html += `<div class="ih-search-preview-actions"><button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_sp_locate"${positions.length === 0 ? " disabled" : ""}><i class="fa-solid fa-crosshairs"></i> 定位高亮</button>${swipes ? `<button class="ih-mgr-btn ih-mgr-btn-warn" id="ih_sp_del_swipe"><i class="fa-solid fa-list-check"></i> 多选删除备选</button>` : ""}<button class="ih-mgr-btn" id="ih_sp_to_edit"><i class="fa-solid fa-pen"></i> 编辑此消息</button></div>`;
     host.innerHTML = html;
     generateFaIconProtectionCSS();
   }
@@ -15071,6 +15377,22 @@ function openHideManagerPanel() {
     _searchSyncView();
   });
 
+  content.on("click", "#ih_sp_del_swipe", function () {
+    const p = sharedState.searchPreview;
+    if (!p) return;
+    const group = sharedState.searchResults.find(
+      (g) => (g.fileName || "__current__") === p.gid,
+    );
+    const sib = group
+      ? group.matches.filter((m) => !m.mergedInto).map((m) => m.floor)
+      : null;
+    const file = group && group.fileName ? group.fileName : "";
+    const floor = p.floor;
+    const swipeIdx = typeof p.swipeIdx === "number" ? p.swipeIdx : -1;
+    sharedState.searchPreview = null;
+    _searchSyncView();
+    _meOpen(file, floor, sib, { swipeIdx: swipeIdx, selMode: true });
+  });
   content.on("click", "#ih_sp_to_edit", function () {
     const p = sharedState.searchPreview;
     if (!p) return;
@@ -16741,7 +17063,17 @@ function openHideManagerPanel() {
     const i = parseInt($(this).attr("data-swipe"));
     if (isNaN(i)) return;
     const ev = sharedState.editView;
-    if (!ev || i === ev.swipeIdx) return;
+    if (!ev) return;
+    if (ev.selMode) {
+      if (ev.selSet.has(i)) ev.selSet.delete(i);
+      else ev.selSet.add(i);
+      ev.swipeIdx = i;
+      ev.draft = null;
+      ev.dirty = false;
+      _meSyncView();
+      return;
+    }
+    if (i === ev.swipeIdx) return;
     const ok = await _meConfirmLeave();
     if (!ok) return;
     ev.swipeIdx = i;
@@ -16769,16 +17101,10 @@ function openHideManagerPanel() {
       return;
     }
     if (!ev.file) {
-      chatUndoManager.save();
-      let _addClone;
-      try {
-        _addClone = JSON.parse(JSON.stringify(m));
-      } catch (e) {
+      if (!chatUndoManager.saveWithFloor(ev.floor)) {
         toastr.error("消息数据异常，追加备选已取消", "", { timeOut: 1800 });
         return;
       }
-      chat[ev.floor] = _addClone;
-      m = _addClone;
     }
     ihEnsureSwipeArrays(m);
     const _curIdx = typeof m.swipe_id === "number" ? m.swipe_id : 0;
@@ -16809,14 +17135,67 @@ function openHideManagerPanel() {
       _ev2.mode = "edit";
       _meSyncView();
     }
+    if (!ev.file) {
+      _ihSyncSwipeCounter(ev.floor);
+      try {
+        if (typeof SillyTavernScript.refreshSwipeButtons === "function") {
+          SillyTavernScript.refreshSwipeButtons();
+        }
+      } catch (e) {
+        console.warn("快捷工具栏: 刷新备选箭头失败", e);
+      }
+    }
     try {
       ihMarkSwipeableMessages();
     } catch (e) {}
-    toastr.info(
-      `已追加空白备选（第 ${_addedIdx} 条），聊天区的备选箭头要等下次切换或刷新才同步`,
-      "",
-      { timeOut: 2500 },
-    );
+    toastr.info(`已追加空白备选（第 ${_addedIdx} 条）`, "", { timeOut: 1500 });
+  });
+  content.on("click", "#ih_me_sel_toggle", async function () {
+    const ev = sharedState.editView;
+    if (!ev) return;
+    if (!ev.selSet) ev.selSet = new Set();
+    if (!ev.selMode) {
+      if (ev.dirty) {
+        const okLeave = await _meConfirmLeave();
+        if (!okLeave) return;
+        ev.draft = null;
+        ev.dirty = false;
+      }
+      ev.selMode = true;
+      ev.mode = "preview";
+      ev.selSet = new Set();
+      if (typeof ev.swipeIdx === "number" && ev.swipeIdx >= 0) {
+        ev.selSet.add(ev.swipeIdx);
+      }
+    } else {
+      ev.selMode = false;
+      ev.selSet.clear();
+    }
+    _meSyncView();
+  });
+
+  content.on("click", "#ih_me_sel_all", function () {
+    const ev = sharedState.editView;
+    if (!ev || !ev.selMode) return;
+    const msgs = _meGetMsgs(ev.file);
+    const m = msgs && msgs[ev.floor];
+    if (!m) return;
+    const n = Array.isArray(m.swipes) && m.swipes.length ? m.swipes.length : 1;
+    if (ev.selSet.size === n) {
+      ev.selSet.clear();
+    } else {
+      ev.selSet = new Set();
+      for (let i = 0; i < n; i++) ev.selSet.add(i);
+    }
+    _meSyncView();
+  });
+
+  content.on("click", "#ih_me_sel_exit", function () {
+    const ev = sharedState.editView;
+    if (!ev) return;
+    ev.selMode = false;
+    ev.selSet.clear();
+    _meSyncView();
   });
   content.on("click", "#ih_me_swipe_del", function () {
     _meDeleteSwipes();
@@ -16868,17 +17247,10 @@ function openHideManagerPanel() {
     const hadBasket = sharedState.searchBasket.some(function (b) {
       return !b.file;
     });
-    let _dstClone;
-    try {
-      _dstClone = JSON.parse(JSON.stringify(dst));
-    } catch (e) {
-      console.error("快捷工具栏: 复制消息数据失败", e);
+    if (!chatUndoManager.saveWithFloor(dstFloor)) {
       toastr.error("消息数据异常，并为备选已取消", "", { timeOut: 1800 });
       return;
     }
-    chatUndoManager.save();
-    chat[dstFloor] = _dstClone;
-    dst = _dstClone;
     for (let i = 0; i < src.swipes.length; i++) {
       dst.swipes.push(String(src.swipes[i] || ""));
       let info = src.swipe_info[i];

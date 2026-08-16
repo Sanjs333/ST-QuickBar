@@ -1,6 +1,6 @@
 # SillyTavern 快捷工具栏
 
-*一个功能丰富的 SillyTavern 输入辅助插件，提供快捷输入、导航跳转、消息管理、工具栏定制等实用功能。*
+_一个功能丰富的 SillyTavern 输入辅助插件，提供快捷输入、导航跳转、消息管理、工具栏定制等实用功能。_
 
 ## 功能一览
 
@@ -93,3 +93,9 @@
 
 - **原始项目**: [st-input-helper](https://github.com/Mooooooon/st-input-helper)
 - **原作者**: [Mooooooon](https://github.com/Mooooooon)
+
+### 许可
+
+本项目采用 [AGPL-3.0](LICENSE) 许可证，与 SillyTavern 本体（同为 AGPL-3.0）保持一致。
+
+> 该许可适用于本项目自身的代码。原始项目 [st-input-helper](https://github.com/Mooooooon/st-input-helper) ，其原作者保留相应权利。

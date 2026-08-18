@@ -1599,13 +1599,13 @@ textarea.ih-replace-input::-webkit-scrollbar {
     );
   box-shadow: 0 3px 12px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.35));
   color: var(--SmartThemeBodyColor);
-  opacity: 0.85;
+  opacity: var(--ih-ball-opacity, 0.85);
   transition:
     box-shadow 0.2s,
     transform 0.15s;
 }
 .ih-floating-ball:hover {
-  opacity: 1;
+  opacity: calc(var(--ih-ball-opacity, 0.85) + 0.15);
   box-shadow: 0 4px 16px
     color-mix(
       in srgb,
@@ -1629,11 +1629,11 @@ textarea.ih-replace-input::-webkit-scrollbar {
       var(--SmartThemeBorderColor)
     ) !important;
   box-shadow: 0 3px 12px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.35)) !important;
-  opacity: 0.85 !important;
+  opacity: var(--ih-ball-opacity, 0.85) !important;
   color: var(--SmartThemeBodyColor) !important;
 }
 .ih-floating-ball.ih-ball-custom:hover {
-  opacity: 1 !important;
+  opacity: calc(var(--ih-ball-opacity, 0.85) + 0.15) !important;
   box-shadow: 0 4px 16px
     color-mix(
       in srgb,
@@ -1648,7 +1648,7 @@ textarea.ih-replace-input::-webkit-scrollbar {
   border-color: transparent !important;
   box-shadow: none !important;
   outline: none !important;
-  opacity: 1 !important;
+  opacity: var(--ih-ball-opacity, 1) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
@@ -1658,7 +1658,7 @@ textarea.ih-replace-input::-webkit-scrollbar {
   box-shadow: none !important;
   border: 0 !important;
   border-color: transparent !important;
-  opacity: 1 !important;
+  opacity: calc(var(--ih-ball-opacity, 1) + 0.15) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
@@ -1668,6 +1668,17 @@ textarea.ih-replace-input::-webkit-scrollbar {
   box-shadow: none !important;
   border: 0 !important;
   border-color: transparent !important;
+}
+/* 自动隐藏的兜底：以前是用 jQuery .css() 写三条内联样式（visibility/opacity/
+   pointer-events）来隐藏悬浮球，但内联样式压不住用户美化 CSS 里的
+   `opacity: … !important`。一旦 opacity 被顶回来、pointer-events:none 却还在，
+   球就变成"看得见但完全点不动"。改成 class + !important，保证"隐藏"和
+   "不可点"这两个状态在物理上不可能被拆开。JS 侧仍保留内联写入以驱动淡入淡出动画。 */
+.ih-floating-ball.ih-ball-autohidden,
+.ih-floating-panel.ih-ball-autohidden {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 .input-helper-settings input[type="range"] {
   touch-action: pan-y;
@@ -1694,6 +1705,20 @@ textarea.ih-replace-input::-webkit-scrollbar {
   user-select: none;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+/* 收起状态的兜底。悬浮面板 z-index 10005 永远压在悬浮球（10003）上面，而且
+   _createPanel 里给它绑了 click/mousedown/pointerdown/touchstart 的
+   stopPropagation —— 也就是说面板只要还"在场"，底下的球就完全收不到指针事件。
+   而平时收起面板靠的是 .hide()/.fadeOut() 写的**非 important** 内联
+   display:none，用户美化 CSS 里任何一条 `display: … !important` 落到
+   .ih-floating-panel 上就能把它顶掉（美化指南第 1 条警告过这件事），
+   于是面板以静态位置摊在屏幕上、隐形地吃掉那一片的所有点击，
+   悬浮球就成了"看得见、拖不动、点不开"，只有把球挪走才能恢复。
+   这条规则用 !important 兜底：没有 .ih-fp-open 的面板一定既不可见也不吃事件。
+   展开时由 JS 加 .ih-fp-open 解除；固定面板模式下 JS 会一直挂着这个 class。 */
+.ih-floating-panel:not(.ih-fp-open) {
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 .ih-fp-vertical {
   flex-direction: column;

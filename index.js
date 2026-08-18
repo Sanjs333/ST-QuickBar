@@ -407,6 +407,7 @@ const defaultSettings = {
     ballImageExpanded: "",
     ballShape: "circle",
     transparentBall: false,
+    ballOpacity: null,
     buttonSize: 12,
     panelWidth: 0,
     panelMaxHeight: 0,
@@ -1631,9 +1632,26 @@ const autoScrollController = {
   },
 };
 
+// 本功能是「非流式生成结束后跳到 AI 消息顶部」，判断依据原先只有
+// STREAM_TOKEN_RECEIVED 到没到（_isRealStream）。但酒馆全仓库只在 StreamingProcessor
+// 的 token 循环里 emit 这个事件，一旦流式在首个 token 之前就被打断（宿主虚拟化熔断、
+// 连接错误、立刻点停止等），事件一次都不会来，这里就会把真流式误判成非流式，
+// 于是主动把视图拽回消息顶部 —— 用户看到的就是「闪一下自动回到消息开头、之后不再自动滚动」。
+// 所以改成以酒馆自己的 isStreamingEnabled() 为准：只要本次生成走的是流式通道，
+// 无论有没有收到过 token，都不属于本功能的适用场景。
+function ihIsStreamingEnabled() {
+  try {
+    if (typeof SillyTavernScript.isStreamingEnabled === "function") {
+      return !!SillyTavernScript.isStreamingEnabled();
+    }
+  } catch (e) {}
+  return false;
+}
+
 const streamScrollController = {
   _shouldScroll: false,
   _isRealStream: false,
+  _streamModeAtStart: false,
   _ready: false,
   _armTimer: null,
   _chatLengthAtStart: 0,
@@ -1648,6 +1666,7 @@ const streamScrollController = {
     }
     this._shouldScroll = true;
     this._isRealStream = false;
+    this._streamModeAtStart = ihIsStreamingEnabled();
     this._chatLengthAtStart = chat.length;
     this._lastMesLengthAtStart =
       chat.length > 0 ? (chat[chat.length - 1].mes || "").length : 0;
@@ -1666,7 +1685,7 @@ const streamScrollController = {
       this.reset();
       return;
     }
-    if (this._isRealStream) {
+    if (this._isRealStream || this._streamModeAtStart) {
       this.reset();
       return;
     }
@@ -1699,24 +1718,19 @@ const streamScrollController = {
   reset() {
     this._shouldScroll = false;
     this._isRealStream = false;
+    this._streamModeAtStart = false;
     this._chatLengthAtStart = 0;
     this._lastMesLengthAtStart = 0;
   },
 
   onGenerationStopped() {
-    this._shouldScroll = false;
-    this._isRealStream = false;
-    this._chatLengthAtStart = 0;
-    this._lastMesLengthAtStart = 0;
+    this.reset();
   },
 
   arm() {
     clearTimeout(this._armTimer);
     this._ready = false;
-    this._shouldScroll = false;
-    this._isRealStream = false;
-    this._chatLengthAtStart = 0;
-    this._lastMesLengthAtStart = 0;
+    this.reset();
     this._armTimer = setTimeout(() => {
       this._ready = true;
     }, 3000);
@@ -4727,6 +4741,12 @@ function _computeBallCSSFlags() {
   return result;
 }
 
+function ihGetBallOpacity() {
+  const fp = getSettings().floatingPanel;
+  const v = fp.ballOpacity;
+  if (typeof v === "number" && v >= 20 && v <= 100) return v / 100;
+  return fp.transparentBall && fp.ballImage ? 1 : 0.85;
+}
 let _cachedMessageInput = null;
 function getMessageInput() {
   if (
@@ -5484,7 +5504,12 @@ body.ih-unlock-swipes:not(.hideAllSwipeButtons):not([data-generating="true"]):no
 body.ih-unlock-swipes:not(.hideAllSwipeButtons):not([data-generating="true"]):not([data-swiping="true"]) #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipe_right,
 body.ih-unlock-swipes:not(.hideAllSwipeButtons):not([data-generating="true"]):not([data-swiping="true"]) #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipes-counter {
   opacity: 0.3 !important; /* 平时箭头/计数的透明度，0~1，想更显眼就调大 */
-  visibility: visible !important;
+  /* 用 inherit 而不是 visible：酒馆隐藏 swipe 用的是 visibility:hidden（没带
+     !important、选择器权重也低于本条），inherit 已经足够盖掉它。而 visibility 是
+     可以被后代反向覆盖的，写死 visible 会连祖先级的整体隐藏一起穿透 —— 例如
+     TauriTavern 在虚拟化 bootstrap 阶段用 #chat[data-tt-chat-bootstrap] > .mes
+     { visibility: hidden } 遮住整个聊天区，写 visible 就会在空白聊天区上闪出一排箭头。 */
+  visibility: inherit !important;
   pointer-events: auto !important;
   display: flex !important;
   interactivity: auto !important;
@@ -5512,6 +5537,40 @@ function ihMarkSwipeableMessages() {
   _ihSwipeMarkTimer = setTimeout(_ihDoMarkSwipeableMessages, 120);
 }
 
+// 生成中 / 切换备选中，酒馆会给 body 挂 data-generating 或 data-swiping，
+// 同时 refreshSwipeButtons() 会加上 hideAllSwipeButtons —— 上面的显示规则把这三个
+// 条件全部排除掉了，所以这期间给 .mes 打 ih-has-swipes 是 100% 看不见的空写入。
+// 在开了「聊天 DOM 虚拟化」的宿主（TauriTavern 等）里，楼层节点会随滚动不断新建回收，
+// 空写入就变成了流式期间源源不断往 #chat 里塞属性变更，白白干扰宿主对楼层的记账。
+// 因此生成期间一律跳过；GENERATION_ENDED 上已经绑了全量刷新，结束后会自动补齐。
+function _ihSwipeMarkPaused() {
+  const ds = document.body.dataset;
+  return ds.generating === "true" || ds.swiping === "true";
+}
+
+let _ihSwipeMarkQueue = null;
+let _ihSwipeMarkRaf = 0;
+
+// 不在 MutationObserver 回调里同步回写 DOM：宿主的虚拟化通常也挂着自己的
+// MutationObserver，在它的回调微任务里改属性容易和它正在进行的提交流程互相打断。
+// 统一攒到下一帧处理，顺便把一批插入合并成一次遍历。
+function _ihQueueMarkSwipeable(el) {
+  if (!_ihSwipeMarkQueue) _ihSwipeMarkQueue = [];
+  _ihSwipeMarkQueue.push(el);
+  if (_ihSwipeMarkRaf) return;
+  _ihSwipeMarkRaf = requestAnimationFrame(function () {
+    _ihSwipeMarkRaf = 0;
+    const nodes = _ihSwipeMarkQueue;
+    _ihSwipeMarkQueue = null;
+    if (!nodes) return;
+    if (!getSettings().enabled || !getSettings().unlockSwipes) return;
+    if (_ihSwipeMarkPaused()) return;
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].isConnected) _ihMarkOneSwipeable(nodes[i]);
+    }
+  });
+}
+
 function _ihMarkOneSwipeable(el) {
   if (!el || !el.getAttribute) return;
   const id = parseInt(el.getAttribute("mesid"));
@@ -5529,6 +5588,7 @@ function _ihMarkOneSwipeable(el) {
 function _ihDoMarkSwipeableMessages() {
   const chatEl = document.getElementById("chat");
   if (!chatEl) return;
+  if (_ihSwipeMarkPaused()) return;
   const on = !!(getSettings().enabled && getSettings().unlockSwipes);
   if (!on) {
     chatEl.querySelectorAll(".mes.ih-has-swipes").forEach(function (el) {
@@ -5590,7 +5650,7 @@ function ihBindUnlockSwipeEvents() {
               n.classList &&
               n.classList.contains("mes")
             ) {
-              _ihMarkOneSwipeable(n);
+              _ihQueueMarkSwipeable(n);
             }
           }
         }
@@ -6180,6 +6240,7 @@ function openBeautyPromptPanel() {
 
 ### 悬浮面板（可选）
 - 面板容器（只写视觉属性）：.ih-floating-panel
+- 展开状态：.ih-floating-panel.ih-fp-open
 - 面板按钮默认：.ih-floating-panel .input-helper-btn
 - 面板按钮悬停：.ih-floating-panel .input-helper-btn:hover
 - 面板按钮按下：.ih-floating-panel .input-helper-btn:active
@@ -6269,11 +6330,14 @@ function openBeautyPromptPanel() {
    如果你要给 \`.ih-floating-ball\` 写样式：
    - ✅ 允许：background、background-color、background-image、background-size、
      background-position、background-repeat、border、border-color、
-     box-shadow、opacity、backdrop-filter、filter、color、outline、transition
+     box-shadow、backdrop-filter、filter、color、outline、transition
+   - ⚠️ 谨慎：opacity（插件的透明度滑块通过 inline CSS 变量 \`--ih-ball-opacity\` 生效，
+     若在此处设置 \`opacity: X !important\`，插件设置中的透明度滑块将失效，详见下方「关于透明度」）
    - ❌ 禁止：position、z-index、width、height、top、left、right、
-     bottom、transform、border-radius
+     bottom、transform、border-radius、visibility、pointer-events
    悬浮球的 width/height 由大小滑块设置，border-radius 由形状选项控制，
    position/top/left 由拖拽位置决定。
+   \`visibility\` / \`pointer-events\` 由「自动隐藏」控制，设置后会导致悬浮球可见但无法点击。
 
    如果用户需要用 CSS 实现纯图片球，需要注意：
    - 不要在插件设置里填图片URL（否则 <img> 会和 background-image 重复显示）
@@ -6290,6 +6354,19 @@ function openBeautyPromptPanel() {
    - 关闭「跟随美化」：插件自定义设置（图片、透明背景、形状等）优先，外部 CSS 对悬浮球的控制会被限制
    - 如果只想给展开状态换图，请同时写默认态 \`.ih-floating-ball\`，再写展开态 \`.ih-floating-ball.ih-ball-expanded\`，避免收起状态没有图片
 
+   关于透明度：
+   - 插件设置中的透明度滑块通过 inline CSS 变量 \`--ih-ball-opacity\` 生效。
+     插件内部规则为：默认态 \`opacity: var(--ih-ball-opacity, 0.85)\`，
+     悬停态 \`opacity: calc(var(--ih-ball-opacity, 0.85) + 0.15)\`
+   - 若希望保留用户的调节能力：请勿设置 opacity，透明度交由插件处理
+   - 若希望推荐一个透明度、同时仍允许用户覆盖：请设置 \`--ih-ball-opacity: 0.5\`
+     （取值为 0~1 的小数，不支持百分比写法；悬停提亮会自动跟随，无需额外处理）
+   - 若希望完全接管：请设置 \`opacity: 0.5 !important\`。此时用户的滑块将失效，
+     并且必须同时为 \`.ih-floating-ball:hover\` 设置 opacity，
+     否则插件的 calc 规则被覆盖后，悬停时会出现异常的亮度跳变
+   - 「跟随美化」开关仅影响背景、边框、阴影等属性的判定逻辑。
+     透明度滑块在开关的两种状态下均会写入 \`--ih-ball-opacity\`，
+     但开启跟随美化时，美化 CSS 中设置的 opacity 会覆盖该变量
    如果悬浮球设置了自定义图片（走插件内置方式），球内部会有一个 <img> 元素，
    CSS 背景色/背景图会被图片遮住。美化有图片的球时，
    建议用 border、box-shadow、outline 等不会被遮挡的属性做外框装饰。
@@ -6300,9 +6377,15 @@ function openBeautyPromptPanel() {
      backdrop-filter、filter、outline
    - ⚠️ 谨慎：background、background-color、background-image、color
    - ❌ 禁止：position、z-index、width、height、top、left、right、
-     bottom、transform
+     bottom、transform、display、visibility、pointer-events
    面板的位置由插件根据悬浮球位置自动计算，width/height 由内容撑开。
    border-radius 允许自由设置（与悬浮球不同）。
+
+   \`display\` / \`visibility\` / \`pointer-events\` 由插件控制面板的展开收起，
+   设置后（尤其加 \`!important\`）会使收起失效；面板层级高于悬浮球，
+   停留在其上方会吞掉悬浮球的点击。
+   区分展开态请使用状态类 \`.ih-floating-panel.ih-fp-open\`，
+   不要用 display / visibility / opacity 自行模拟展开收起。
 
    如果希望悬浮面板继续跟随插件 JS 读取到的酒馆主题背景/文字色，
    不要在全局 CSS 里给 \`.ih-floating-panel\` 写：
@@ -6445,16 +6528,21 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "3.2.2";
+const CHANGELOG_VERSION = "3.2.3";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.2</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.3</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>备选回复批量删除</b>：消息编辑子页面新增多选模式。点击备选栏右侧的多选按钮进入后，可勾选同一楼层的多条备选并一次性删除。多选状态下点击备选会同时完成勾选与预览，可在确认内容后再决定是否删除。</li>
-  <li><b>全选备选时删除整楼</b>：多选状态下勾选全部备选时，操作栏转为警示色并提示该楼层将被整条删除，执行前需二次确认。删除后其后楼层号整体前移，转存篮中来自受影响聊天档的消息将自动移出。</li>
-  <li><b>搜索预览快捷入口</b>：搜索结果预览页新增「多选删除备选」按钮，可携带当前查看的备选直接进入消息编辑子页面的多选模式。</li>
-  <li><b>备选计数即时刷新</b>：在消息管理面板中删除或追加当前聊天档的备选后，聊天区的备选计数与切换箭头立即同步，无需切换或刷新聊天。</li>
-  <li><b>编辑状态隐藏备选箭头</b>：开启「解锁历史消息切换备选」后，若有任意消息处于编辑状态，历史楼层的备选箭头与计数将不再显示，避免编辑过程中误触切换。</li>
-  <li><b>兼容聊天 DOM 虚拟化</b>：修复在 TauriTavern 等开启「聊天 DOM 虚拟化」的环境中，执行删除当前备选、批量删除备选、追加备选、并为备选等操作后，虚拟化因判定楼层结构变更而停止的问题。这些操作改为原地修改消息数据、不再替换消息对象，撤回功能与原有行为保持一致。</li>
+  <li><b>悬浮球透明度调节</b>：悬浮面板设置新增透明度滑块，可在 20%~100% 范围内调整，鼠标悬停时在设定值基础上提亮 15%。自定义图片的悬浮球同样支持调节。未手动调整时，普通背景下为 85%，开启「透明背景」时为 100%，与此前版本表现一致。</li>
+  <li><b>纳入图片方案</b>：透明度设置随图片方案一并保存与切换，图片方案现共保存七项设置。</li>
+  <li><b>美化 CSS 协作方式</b>：悬浮球透明度改由 CSS 变量 <code>--ih-ball-opacity</code> 控制。美化 CSS 可设置该变量以推荐透明度并保留用户的滑块调节能力，也可直接设置 opacity 完全接管。美化指南已同步补充说明。</li>
+  <li><b>修复透明度相关异常</b>：修复开启「自动隐藏」后，固定面板模式的面板显示时被错误设为半透明，以及部分显示模式的悬浮球悬停时不再提亮的问题。</li>
+  <li><b>修复流式中断后视图跳回消息顶部</b>：开启「非流自动跳转至AI消息顶部」时，若流式生成在首个 token 之前中断（连接错误、立即停止、宿主异常等），酒馆不会派发流式事件，此前会被误判为非流式生成并将视图跳回消息顶部、且后续不再自动滚动。现改用酒馆自身的流式状态判定，不再依据流式事件是否送达。</li>
+  <li><b>修复自动滚动失效</b>：酒馆在空运行（dryRun）时同样派发生成开始事件，但不会派发对应的生成结束事件。此前会因此残留「续写时锁定滚动」的状态，使酒馆的流式自动滚动在一分钟内失效。现已跳过空运行。</li>
+  <li><b>兼容聊天 DOM 虚拟化</b>：「解锁历史消息切换备选」的箭头不再穿透宿主的整屏隐藏（TauriTavern 等在虚拟化初始化阶段会隐藏整个聊天区）；生成期间不再刷新历史楼层的备选标记，减少虚拟化宿主下的多余 DOM 变更。该期间箭头本就由酒馆隐藏，显示效果不变。</li>
+  <li><b>修复悬浮球无法点击</b>：悬浮面板层级高于悬浮球，收起时仅依赖行内 <code>display: none</code>。美化 CSS 若为面板设置了带 <code>!important</code> 的 <code>display</code>，收起后的面板会停留在悬浮球上方并吞掉点击。现新增状态类 <code>.ih-fp-open</code>，未展开的面板一定不可见且不接收指针事件；自动隐藏同理改用状态类 <code>.ih-ball-autohidden</code>。</li>
+  <li><b>新增悬浮球遮挡自检</b>：悬浮球重建、软键盘收放、窗口尺寸变化后检查悬浮球是否可以点击，确认被遮挡时清理插件自身的残留浮层，必要时复位并提示遮挡来源。展开、拖动、自动隐藏及弹窗打开期间不触发。</li>
+  <li><b>修复悬浮球位置逐渐偏移</b>：拖动结束时记录的是渲染位置，包含 CSS <code>transform</code> 造成的偏移，而定位时按原坐标写回，每次拖动累加。现改为记录实际写入的坐标，并跳过拖动中被重建的情况。</li>
+  <li><b>修复软键盘弹出时悬浮球移出屏幕</b>：上移避让键盘时缺少下边界约束，顶栏高度被美化 CSS 改变时可能将悬浮球移出可视区域。</li>
 </ul>
 `;
 
@@ -6804,8 +6892,20 @@ function openHelpPanel() {
     <li>形状可选圆形或方形</li>
     <li>大小可在 32~80px 范围内调整</li>
     <li><b>透明背景</b>：仅在上传了自定义图片时生效，开启后悬浮球的边框、阴影、背景色都将隐藏，只显示图片本身</li>
+    <li><b>透明度</b>：可在 20%~100% 范围内调整，鼠标悬停时会在设定值基础上自动提亮 15%</li>
     <li><b>跟随美化</b>：开启后全局 CSS 可控制悬浮球外观；关闭后插件自定义设置优先于美化 CSS</li>
 </ul>
+
+<p class="ih-help-sub"><i class="fa-solid fa-droplet"></i> 悬浮球透明度</p>
+<p>透明度滑块的实际作用范围取决于当前悬浮球的显示方式：</p>
+<ul>
+    <li><b>自定义图片 + 普通背景</b>：背景板、边框与图片整体一起变淡</li>
+    <li><b>自定义图片 + 透明背景</b>：仅图片本身变淡（边框与背景色已被隐藏）</li>
+    <li><b>美化 CSS 接管</b>（开启「跟随美化」且美化 CSS 设置了背景图）：若美化 CSS 中设置了 opacity，则以美化 CSS 为准，滑块不生效；未设置时滑块正常生效</li>
+    <li><b>插件默认外观</b>：整个悬浮球一起变淡</li>
+</ul>
+<p>未手动调整过滑块时，默认值为 85%；若已开启「透明背景」，默认值为 100%。点击滑块右侧的重置按钮可恢复为默认值。</p>
+<p>透明度设置随「图片方案」一并保存，切换图片方案时会同步切换。</p>
 
 <p class="ih-help-sub">面板方案</p>
 <p>可创建多套面板按钮配置（例如<q>「全屏模式」</q>使用翻页按钮、<q>「编辑模式」</q>使用符号按钮），可通过设置面板中的方案管理器切换，或将<q>「切换面板方案」</q>按钮添加至工具栏或悬浮面板中循环切换，也支持绑定快捷键。</p>
@@ -6820,13 +6920,14 @@ function openHelpPanel() {
 
 <p class="ih-help-sub">图片方案</p>
 <p>悬浮球的外观由独立的图片方案管理，与面板方案分开切换。</p>
-<p><b>图片方案保存以下六项设置</b>：</p>
+<p><b>图片方案保存以下七项设置</b>：</p>
 <ul>
     <li>悬浮球图片 URL</li>
     <li>展开状态图片 URL</li>
     <li>球大小</li>
     <li>球形状（圆形 / 方形）</li>
     <li>透明背景开关</li>
+    <li>透明度</li>
     <li>跟随美化开关</li>
 </ul>
 
@@ -18137,9 +18238,15 @@ const floatingPanelController = {
     this._setupDialogDetection();
     this._setupKeyboardAdaptation();
     this._setupWindowResize();
+    this._scheduleBallHitCheck(900);
   },
 
   destroy() {
+    clearTimeout(this._ballHitTimer);
+    this._ballHitTimer = null;
+    this._ballBlockedKey = null;
+    clearTimeout(this._refreshDebounceTimer);
+    this._refreshDebounceTimer = null;
     this._removeOutsideClose();
     this._removeAutoHide();
     this._removeDialogDetection();
@@ -18184,8 +18291,9 @@ const floatingPanelController = {
       innerHtml = `<i class="fa-solid fa-ellipsis" style="font-size:${Math.max(14, size / 3)}px;"></i>`;
       _ballUseCustomClass = !fp.followTheme || !_hasThemeCSS;
     }
+    const _ballOpacity = ihGetBallOpacity();
     const ball = $(
-      `<div class="ih-floating-ball" style="width:${size}px;height:${size}px;border-radius:${ballRadius};">${innerHtml}</div>`,
+      `<div class="ih-floating-ball" style="width:${size}px;height:${size}px;border-radius:${ballRadius};--ih-ball-opacity:${_ballOpacity};">${innerHtml}</div>`,
     );
     if (_ballUseCustomClass) {
       ball.addClass("ih-ball-custom");
@@ -18478,6 +18586,9 @@ const floatingPanelController = {
     this._panelEl = panel;
     if (fp.displayMode === "ball") {
       panel.hide();
+    } else {
+      // 固定面板模式常驻显示，解除 style.css 里 :not(.ih-fp-open) 的收起兜底
+      panel.addClass("ih-fp-open");
     }
     syncDialogTheme(panel[0]);
     syncToolbarButtonStyles(panel);
@@ -18539,7 +18650,8 @@ const floatingPanelController = {
               return;
             }
             this._expanded = false;
-            if (this._panelEl) this._panelEl.stop(true).hide();
+            if (this._panelEl)
+              this._panelEl.removeClass("ih-fp-open").stop(true).hide();
             if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
             this._updateBallImage();
             this._removeOutsideClose();
@@ -18586,13 +18698,22 @@ const floatingPanelController = {
         }
         el.removeData("ih-orig-transition");
         if (moved) {
-          const rect2 = el[0].getBoundingClientRect();
-          const fp = getSettings().floatingPanel;
-          fp.position = {
-            x: Math.round(rect2.left),
-            y: Math.round(rect2.top),
-          };
-          saveSettingsDebounced();
+          // 存 style.left/top 而不是 getBoundingClientRect()：重建时（_createBall）
+          // 这个坐标是直接写回 left/top 的，而 rect 会把 transform 一起算进去
+          // （用户美化 CSS 的 hover/动画，甚至本插件 :hover 的 scale(1.06)），
+          // 祖先的 filter/transform 改掉 fixed 包含块时偏移更大 —— 存进去的值
+          // 下一轮又被偏移一次，每拖一次就累加一点，最后球会走出屏幕。
+          // 另外元素被 destroy() 摘掉后 rect 全是 0，会把位置存成 {0,0}。
+          const _dropX = parseFloat(el[0].style.left);
+          const _dropY = parseFloat(el[0].style.top);
+          if (el[0].isConnected && !isNaN(_dropX) && !isNaN(_dropY)) {
+            const fp = getSettings().floatingPanel;
+            fp.position = {
+              x: Math.round(_dropX),
+              y: Math.round(_dropY),
+            };
+            saveSettingsDebounced();
+          }
           setTimeout(() => {
             this._isDragging = false;
           }, 50);
@@ -18625,17 +18746,24 @@ const floatingPanelController = {
     if (now - (this._lastToggleTime || 0) < 400) {
       return;
     }
+    // 这个守卫必须在翻转 _expanded 之前：元素缺失时如果照样翻转，_expanded 就会
+    // 卡在 true 而面板根本没显示，之后每次点球都走"收起"分支（看起来毫无反应），
+    // 而且 _ahChatClick / _ahDocClick 都拿 _expanded 当开关，会连自动隐藏的
+    // 恢复路径一起锁死，只有 destroy() 能解——也就是只能靠手点"重置悬浮球位置"。
+    if (!this._panelEl || !this._ballEl) return;
     this._lastToggleTime = now;
     this._expanded = !this._expanded;
-    if (!this._panelEl || !this._ballEl) return;
     if (this._expanded) {
+      // 先解除 style.css 里 :not(.ih-fp-open) 的收起兜底，否则下面的量尺寸和
+      // fadeIn 都会被 visibility:hidden !important 拦住
+      this._panelEl.addClass("ih-fp-open");
       if (getSettings().floatingPanel.autoHide) {
         this._autoHideVisible = true;
         if (this._ballEl) {
-          this._ballEl.stop(true).css({
+          this._ballEl.removeClass("ih-ball-autohidden").stop(true).css({
             visibility: "",
             "pointer-events": "",
-            opacity: "0.85",
+            opacity: "",
           });
         }
       }
@@ -18798,7 +18926,7 @@ const floatingPanelController = {
         .toggleClass("input-helper-btn-active", autoScrollController.active);
       this._setupOutsideClose();
     } else {
-      this._panelEl.stop(true).fadeOut(50);
+      this._panelEl.removeClass("ih-fp-open").stop(true).fadeOut(50);
       this._removeOutsideClose();
       if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
       closeAllFolderDropdowns();
@@ -19080,11 +19208,17 @@ const floatingPanelController = {
     this._autoHideVisible = true;
     const target = this._ballEl || this._panelEl;
     if (target) {
-      target.stop(true).css({ visibility: "", "pointer-events": "" });
+      const finalOpacity = this._ballEl ? ihGetBallOpacity() : 1;
+      target
+        .removeClass("ih-ball-autohidden")
+        .stop(true)
+        .css({ visibility: "", "pointer-events": "" });
       if (wasVisible) {
-        target.css("opacity", "0.85");
+        target.css("opacity", "");
       } else {
-        target.animate({ opacity: 0.85 }, 200);
+        target.animate({ opacity: finalOpacity }, 200, function () {
+          $(this).css("opacity", "");
+        });
       }
     }
     if (this._panelEl) {
@@ -19106,7 +19240,8 @@ const floatingPanelController = {
     this._autoHideVisible = false;
     if (this._expanded) {
       this._expanded = false;
-      if (this._panelEl) this._panelEl.stop(true).hide();
+      if (this._panelEl)
+        this._panelEl.removeClass("ih-fp-open").stop(true).hide();
       if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
       this._updateBallImage();
       this._removeOutsideClose();
@@ -19117,7 +19252,7 @@ const floatingPanelController = {
     if (target) {
       target.stop(true).animate({ opacity: 0 }, 150, function () {
         if (self._autoHideVisible) return;
-        $(this).css({
+        $(this).addClass("ih-ball-autohidden").css({
           visibility: "hidden",
           "pointer-events": "none",
         });
@@ -19214,6 +19349,177 @@ const floatingPanelController = {
         }
       }
     }
+    this._scheduleBallHitCheck(600);
+  },
+
+  // ===== 悬浮球可点性看门狗 =====
+  // 悬浮球 z-index 是 10003，而文件夹浮层 10004、悬浮面板 10005、取色器 10006、
+  // 管理器折叠球 10010 都在它上面。这些浮层任何一个没收干净（最典型的是用户美化
+  // CSS 用 display: … !important 顶掉了面板 .hide() 写的内联 display:none），
+  // 球就会变成"看得见、拖不动、点不开"，而插件自身的重建救不回来——重建只会把
+  // 遮挡物重新造出来，只有把球挪开才行。这就是"悬浮球卡死、只能靠重置位置恢复"
+  // 的成因。这里不猜原因，直接用 elementFromPoint 问浏览器"球中心那个点归谁"，
+  // 确认被挡就自救，并把遮挡者报出来，省得让用户去翻控制台。
+  _ballHitTimer: null,
+  _ballBlockedKey: null,
+
+  _scheduleBallHitCheck(delay) {
+    if (!this._ballEl) return;
+    clearTimeout(this._ballHitTimer);
+    this._ballHitTimer = setTimeout(() => {
+      this._ballHitTimer = null;
+      try {
+        this._checkBallReachable();
+      } catch (e) {
+        console.warn("快捷工具栏: 悬浮球可点性自检失败", e);
+      }
+    }, delay || 400);
+  },
+
+  // 当前这一刻球"本该"是能点的吗——把所有正常的不可点状态先排掉，避免误判
+  _ballShouldBeClickable() {
+    const b = this._ballEl && this._ballEl[0];
+    if (!b || !b.isConnected) return null;
+    if (this._expanded || this._isDragging) return null;
+    if (!this._autoHideVisible) return null; // 自动隐藏中，本来就该不可点
+    if (this._currentDialogHost) return null; // 球被搬进弹窗里了，另一套坐标系
+    if (document.querySelector("dialog[open]")) return null; // 模态弹窗期间整页 inert
+    if (
+      document.querySelector(
+        ".ih-folder-dropdown-portal, .ih-color-picker-portal, .ih-dialog-overlay",
+      )
+    )
+      return null; // 插件自己的浮层正开着，挡住是正常的
+    const r = b.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) return null;
+    const cx = Math.round(r.left + r.width / 2);
+    const cy = Math.round(r.top + r.height / 2);
+    const vw = window.innerWidth || 0;
+    const vh = window.innerHeight || 0;
+    // 球中心已经在视口外了就不管，那是 _clampToViewport 的活
+    if (cx < 1 || cy < 1 || cx > vw - 1 || cy > vh - 1) return null;
+    return { el: b, cx: cx, cy: cy };
+  },
+
+  _describeBlocker(el) {
+    if (!el) return "未知元素";
+    let s = (el.tagName || "").toLowerCase();
+    if (el.id) s += "#" + el.id;
+    const cls = typeof el.className === "string" ? el.className.trim() : "";
+    if (cls) s += "." + cls.split(/\s+/).slice(0, 3).join(".");
+    return s.replace(/[^\w#.\-]/g, "").slice(0, 60) || "未知元素";
+  },
+
+  _checkBallReachable() {
+    const ctx = this._ballShouldBeClickable();
+    if (!ctx) {
+      this._ballBlockedKey = null;
+      return;
+    }
+    // 情况一：球自己吃到了 pointer-events:none（自动隐藏没收干净，或者用户美化
+    // CSS 直接写了）。这种 elementFromPoint 会直接穿透过去，得单独判。
+    if (getComputedStyle(ctx.el).pointerEvents === "none") {
+      this._ballEl.removeClass("ih-ball-autohidden");
+      ctx.el.style.setProperty("pointer-events", "auto", "important");
+      ctx.el.style.removeProperty("visibility");
+      console.warn("快捷工具栏: 悬浮球 pointer-events 为 none，已强制恢复");
+      this._ballBlockedKey = null;
+      this._warnBallBlocked("pointer-events:none", false);
+      return;
+    }
+    // 情况二：被别的元素盖住
+    const hit = document.elementFromPoint(ctx.cx, ctx.cy);
+    if (!hit || hit === ctx.el || ctx.el.contains(hit)) {
+      this._ballBlockedKey = null;
+      return;
+    }
+    // toast / tooltip 这类一闪而过的浮层不算故障（酒馆的 toast 默认就飘在右上角，
+    // 正好是悬浮球最常待的位置，不排掉的话会自己触发自己）
+    if (
+      hit.closest &&
+      hit.closest("#toast-container, .toast, #tooltip, .ui-tooltip")
+    ) {
+      this._ballBlockedKey = null;
+      return;
+    }
+    const key = this._describeBlocker(hit);
+    // 连续两次（间隔 500ms）都确认被同一个东西挡住才动手，躲开动画/过渡中的瞬时误判
+    if (this._ballBlockedKey !== key) {
+      this._ballBlockedKey = key;
+      this._scheduleBallHitCheck(500);
+      return;
+    }
+    this._ballBlockedKey = null;
+    // 第一步：遮挡物是插件自己的浮层，就地收干净
+    const own = hit.closest
+      ? hit.closest(".ih-floating-panel, .ih-folder-dropdown-portal")
+      : null;
+    if (own) {
+      if (own.classList.contains("ih-floating-panel")) {
+        own.classList.remove("ih-fp-open");
+        $(own).stop(true).hide();
+        this._expanded = false;
+        this._removeOutsideClose();
+      } else {
+        own.remove();
+      }
+    }
+    const after = document.elementFromPoint(ctx.cx, ctx.cy);
+    if (!after || after === ctx.el || ctx.el.contains(after)) {
+      // 收干净就好了，不用动球的位置
+      this._warnBallBlocked(key, false);
+      return;
+    }
+    // 第二步：还被挡着就把球挪回默认位置（等同于手点"重置悬浮球位置"）。
+    // 先探一下默认位置是不是被同一个东西挡着——比如整屏的编辑器浮层，
+    // 挪过去也一样点不到，那就只报告不折腾用户的球。
+    const fp = getSettings().floatingPanel;
+    const size = fp.ballSize || 48;
+    const tx = Math.max(0, (window.innerWidth || 0) - size - 16) + size / 2;
+    const ty = 200 + size / 2;
+    const probe = document.elementFromPoint(Math.round(tx), Math.round(ty));
+    const sameBlocker =
+      probe &&
+      (probe === after ||
+        (own && own.contains(probe)) ||
+        this._describeBlocker(probe) === key);
+    let repositioned = false;
+    if (!sameBlocker) {
+      fp.position = { x: null, y: null };
+      saveSettingsDebounced();
+      this._ballEl.css({
+        left: Math.max(0, (window.innerWidth || 0) - size - 16) + "px",
+        top: "200px",
+        right: "auto",
+        bottom: "auto",
+      });
+      repositioned = true;
+    }
+    console.warn(
+      "快捷工具栏: 悬浮球被遮挡，遮挡者 =",
+      key,
+      hit,
+      "已复位 =",
+      repositioned,
+    );
+    this._warnBallBlocked(key, repositioned);
+  },
+
+  _ballWarnTime: 0,
+
+  _warnBallBlocked(what, repositioned) {
+    // 30 秒内只提示一次，避免持续存在的遮挡物（比如别的脚本的整屏面板）刷屏
+    const now = Date.now();
+    if (now - (this._ballWarnTime || 0) < 30000) return;
+    this._ballWarnTime = now;
+    try {
+      toastr.warning(
+        `悬浮球被「${what}」遮挡，已自动恢复${repositioned ? "并复位" : ""}。` +
+          `如反复出现，请检查美化 CSS 中悬浮球 / 悬浮面板的 display、z-index、pointer-events 设置。`,
+        "快捷工具栏",
+        { timeOut: 10000, extendedTimeOut: 5000 },
+      );
+    } catch (e) {}
   },
 
   _removeKeyboardAdaptation() {
@@ -19459,7 +19765,16 @@ const floatingPanelController = {
           }
 
           const newTop = Math.max(minTop, vv.offsetTop + 10);
-          target.css("top", newTop + "px");
+          // 这个分支的本意是"把被键盘挡住的球抬到可视区顶部"，但原来只有下界
+          // Math.max，没有上界：minTop 取的是 #top-bar 的 bottom + 10，只要美化
+          // CSS 把顶栏改高、或者退化到 #top-settings-holder（抽屉展开时它的
+          // bounding box 会包含整个抽屉内容），minTop 就会变成几百 px，
+          // 于是球被"抬"到了可视区外面，反而更找不到。补一个上界。
+          const _kbMaxTop = vvBottom - elHeight - 10;
+          target.css(
+            "top",
+            (_kbMaxTop > minTop ? Math.min(newTop, _kbMaxTop) : newTop) + "px",
+          );
         } else if (this._savedTopBeforeKeyboard !== null && !keyboardVisible) {
           target.css("top", this._savedTopBeforeKeyboard + "px");
           this._savedTopBeforeKeyboard = null;
@@ -19494,6 +19809,7 @@ const floatingPanelController = {
       this._lastRepositionKey = null;
       this._repositionPanel();
     }
+    this._scheduleBallHitCheck(700);
   },
 
   _setupDialogDetection() {
@@ -19617,20 +19933,21 @@ const floatingPanelController = {
     const target = this._ballEl || this._panelEl;
     if (!target) return;
     if (this._autoHideVisible) {
-      target.css({
+      target.removeClass("ih-ball-autohidden").css({
         visibility: "",
         opacity: "",
         "pointer-events": "",
       });
     } else {
-      target.css({
+      target.addClass("ih-ball-autohidden").css({
         visibility: "hidden",
         opacity: "0",
         "pointer-events": "none",
       });
       if (this._expanded) {
         this._expanded = false;
-        if (this._panelEl) this._panelEl.stop(true).hide();
+        if (this._panelEl)
+          this._panelEl.removeClass("ih-fp-open").stop(true).hide();
         if (this._ballEl) this._ballEl.removeClass("ih-ball-expanded");
         this._updateBallImage();
       }
@@ -19736,7 +20053,7 @@ const floatingPanelController = {
       }
     }
     if (fp.displayMode === "ball" && this._panelEl) {
-      this._panelEl.hide();
+      this._panelEl.removeClass("ih-fp-open").hide();
       if (wasExpanded && wasVisible) {
         setTimeout(() => this.toggleExpand(), 30);
       }
@@ -21354,6 +21671,7 @@ function getBallProfileData() {
     ballSize: fp.ballSize || 48,
     ballShape: fp.ballShape || "circle",
     transparentBall: fp.transparentBall || false,
+    ballOpacity: fp.ballOpacity ?? null,
     followTheme: fp.followTheme !== false,
   };
 }
@@ -21365,6 +21683,7 @@ function applyBallProfileData(data) {
   fp.ballSize = data.ballSize || 48;
   fp.ballShape = data.ballShape || "circle";
   fp.transparentBall = data.transparentBall || false;
+  fp.ballOpacity = data.ballOpacity ?? null;
   fp.followTheme = data.followTheme !== false;
 }
 
@@ -21378,6 +21697,7 @@ function createBallProfile(name) {
     ballSize: 48,
     ballShape: "circle",
     transparentBall: false,
+    ballOpacity: null,
     followTheme: true,
   };
   fp.ballProfiles.push(data);
@@ -21415,6 +21735,7 @@ function _isBallProfileDirty() {
   if ((saved.ballShape || "circle") !== (cur.ballShape || "circle"))
     return true;
   if (!!saved.transparentBall !== !!cur.transparentBall) return true;
+  if ((saved.ballOpacity ?? null) !== (cur.ballOpacity ?? null)) return true;
   if ((saved.followTheme !== false) !== (cur.followTheme !== false))
     return true;
   return false;
@@ -21631,6 +21952,7 @@ function renderFloatingPanelSettings() {
   container.off();
   container.empty();
   const fp = getSettings().floatingPanel || {};
+  const _ballOpacityPct = Math.round(ihGetBallOpacity() * 100);
   const allKeys = [...ALL_BUTTON_KEYS];
   const customSymbols = getSettings().customSymbols || [];
   customSymbols.forEach((_, i) => allKeys.push(`custom_${i}`));
@@ -21702,6 +22024,16 @@ function renderFloatingPanelSettings() {
                 </div>
                                 <div style="font-size:10px;opacity:0.5;margin-top:2px;padding-left:22px;line-height:1.5;">
                     开启后悬浮球的边框、阴影、背景色都会隐藏，只显示图片本身
+                </div>
+                <div class="ih-hm-row" style="gap:6px;align-items:center;margin-top:8px;">
+                    <label style="font-size:11px;flex-shrink:0;">透明度</label>
+                    <input type="range" id="ih_fp_ball_opacity" min="20" max="100" value="${_ballOpacityPct}" style="flex:1;min-width:50px;accent-color:var(--SmartThemeQuoteColor,cornflowerblue);" />
+                    <input type="number" id="ih_fp_ball_opacity_input" min="20" max="100" value="${_ballOpacityPct}" style="width:48px;padding:3px 4px;border:1px solid var(--SmartThemeBorderColor);border-radius:4px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;text-align:center;" />
+                    <span style="font-size:11px;flex-shrink:0;opacity:0.6;">%</span>
+                    <div class="menu_button menu_button_icon" id="ih_fp_ball_opacity_reset" title="恢复默认透明度" style="cursor:pointer;margin-left:0;padding:3px 6px;"><i class="fa-solid fa-rotate-left"></i></div>
+                </div>
+                <div style="font-size:10px;opacity:0.5;margin-top:2px;line-height:1.5;">
+                    鼠标悬停时会在设定值基础上提亮 15%。若开启「跟随美化」且美化 CSS 中设置了 opacity，则以美化 CSS 为准
                 </div>
                 <div class="ih-switch-row" style="margin-top:6px;">
                     <label class="ih-switch-label" style="font-size:12px;">
@@ -21889,6 +22221,20 @@ function renderFloatingPanelSettings() {
       }
     }
   }
+  function _applyBallOpacityLive(rawVal) {
+    let val = parseInt(rawVal);
+    if (isNaN(val)) val = 85;
+    val = Math.max(20, Math.min(100, val));
+    getSettings().floatingPanel.ballOpacity = val;
+    $("#ih_fp_ball_opacity").val(val);
+    $("#ih_fp_ball_opacity_input").val(val);
+    saveSettingsDebounced();
+    const ball = floatingPanelController._ballEl;
+    if (ball && ball.length) {
+      ball[0].style.setProperty("--ih-ball-opacity", String(val / 100));
+      ball.css("opacity", "");
+    }
+  }
   container.on("input", "#ih_fp_ball_size", function () {
     _applyBallSizeLive($(this).val());
   });
@@ -21965,6 +22311,24 @@ function renderFloatingPanelSettings() {
     getSettings().floatingPanel.ballShape = $(this).val();
     saveSettingsDebounced();
     floatingPanelController.refresh();
+  });
+  container.on("input", "#ih_fp_ball_opacity", function () {
+    _applyBallOpacityLive($(this).val());
+  });
+  container.on("input change", "#ih_fp_ball_opacity_input", function () {
+    _applyBallOpacityLive($(this).val());
+  });
+  container.on("click", "#ih_fp_ball_opacity_reset", function () {
+    getSettings().floatingPanel.ballOpacity = null;
+    saveSettingsDebounced();
+    const def = Math.round(ihGetBallOpacity() * 100);
+    $("#ih_fp_ball_opacity").val(def);
+    $("#ih_fp_ball_opacity_input").val(def);
+    const ball = floatingPanelController._ballEl;
+    if (ball && ball.length) {
+      ball[0].style.setProperty("--ih-ball-opacity", String(def / 100));
+      ball.css("opacity", "");
+    }
   });
   container.on("change", "#ih_fp_profile_select", function () {
     const idx = parseInt($(this).val());
@@ -22058,6 +22422,11 @@ function renderFloatingPanelSettings() {
   container.on("change", "#ih_fp_transparent_ball", function () {
     getSettings().floatingPanel.transparentBall = $(this).prop("checked");
     saveSettingsDebounced();
+    if (getSettings().floatingPanel.ballOpacity == null) {
+      const def = Math.round(ihGetBallOpacity() * 100);
+      $("#ih_fp_ball_opacity").val(def);
+      $("#ih_fp_ball_opacity_input").val(def);
+    }
     floatingPanelController.refresh();
   });
   container.on("change", "#ih_fp_follow_theme", function () {
@@ -23727,6 +24096,8 @@ async function loadSettings() {
     s.floatingPanel.ballShape = "circle";
   if (s.floatingPanel.transparentBall === undefined)
     s.floatingPanel.transparentBall = false;
+  if (s.floatingPanel.ballOpacity === undefined)
+    s.floatingPanel.ballOpacity = null;
   if (s.floatingPanel.followTheme === undefined)
     s.floatingPanel.followTheme = true;
   if (s.floatingPanel.buttonSize === undefined) s.floatingPanel.buttonSize = 12;
@@ -25144,15 +25515,25 @@ jQuery(async () => {
       } catch (e) {}
     }
 
-    eventSource.on(event_types.GENERATION_STARTED, function (type) {
-      if (type === "regenerate") {
-        chatUndoManager.saveFromRegenerate();
-      }
-      autoScrollController.setStreaming(true);
-      streamScrollController.onStreamStart();
-      scrollLockController.onGenerationStart(type);
-      sendStopController.setGenerating();
-    });
+    // 第三个参数是 dryRun。酒馆在 Generate() 最开头就 emit 这个事件，"即使本次生成
+    // 因为斜杠命令而中止也会发"，dryRun 时同样会发。而 dryRun 不会调 showStopButton()，
+    // 于是收尾的 hideStopButton() 被它自己的 NOOP 守卫拦掉、GENERATION_ENDED 一次都不发。
+    // 不挡住 dryRun 的话，下面这些「生成开始」状态就没有对应的「生成结束」来收：
+    // 尤其 scrollLockController 会把 power_user.auto_scroll_chat_to_bottom 置为 false，
+    // 只能等 60 秒安全定时器兜底，这段时间里酒馆的流式自动滚动是整个失效的。
+    eventSource.on(
+      event_types.GENERATION_STARTED,
+      function (type, _params, dryRun) {
+        if (dryRun) return;
+        if (type === "regenerate") {
+          chatUndoManager.saveFromRegenerate();
+        }
+        autoScrollController.setStreaming(true);
+        streamScrollController.onStreamStart();
+        scrollLockController.onGenerationStart(type);
+        sendStopController.setGenerating();
+      },
+    );
 
     eventSource.on(event_types.GENERATION_ENDED, function () {
       autoScrollController.setStreaming(false);

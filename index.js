@@ -6528,21 +6528,13 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "3.2.3";
+const CHANGELOG_VERSION = "3.2.4";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.3</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.4</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>悬浮球透明度调节</b>：悬浮面板设置新增透明度滑块，可在 20%~100% 范围内调整，鼠标悬停时在设定值基础上提亮 15%。自定义图片的悬浮球同样支持调节。未手动调整时，普通背景下为 85%，开启「透明背景」时为 100%，与此前版本表现一致。</li>
-  <li><b>纳入图片方案</b>：透明度设置随图片方案一并保存与切换，图片方案现共保存七项设置。</li>
-  <li><b>美化 CSS 协作方式</b>：悬浮球透明度改由 CSS 变量 <code>--ih-ball-opacity</code> 控制。美化 CSS 可设置该变量以推荐透明度并保留用户的滑块调节能力，也可直接设置 opacity 完全接管。美化指南已同步补充说明。</li>
-  <li><b>修复透明度相关异常</b>：修复开启「自动隐藏」后，固定面板模式的面板显示时被错误设为半透明，以及部分显示模式的悬浮球悬停时不再提亮的问题。</li>
-  <li><b>修复流式中断后视图跳回消息顶部</b>：开启「非流自动跳转至AI消息顶部」时，若流式生成在首个 token 之前中断（连接错误、立即停止、宿主异常等），酒馆不会派发流式事件，此前会被误判为非流式生成并将视图跳回消息顶部、且后续不再自动滚动。现改用酒馆自身的流式状态判定，不再依据流式事件是否送达。</li>
-  <li><b>修复自动滚动失效</b>：酒馆在空运行（dryRun）时同样派发生成开始事件，但不会派发对应的生成结束事件。此前会因此残留「续写时锁定滚动」的状态，使酒馆的流式自动滚动在一分钟内失效。现已跳过空运行。</li>
-  <li><b>兼容聊天 DOM 虚拟化</b>：「解锁历史消息切换备选」的箭头不再穿透宿主的整屏隐藏（TauriTavern 等在虚拟化初始化阶段会隐藏整个聊天区）；生成期间不再刷新历史楼层的备选标记，减少虚拟化宿主下的多余 DOM 变更。该期间箭头本就由酒馆隐藏，显示效果不变。</li>
-  <li><b>修复悬浮球无法点击</b>：悬浮面板层级高于悬浮球，收起时仅依赖行内 <code>display: none</code>。美化 CSS 若为面板设置了带 <code>!important</code> 的 <code>display</code>，收起后的面板会停留在悬浮球上方并吞掉点击。现新增状态类 <code>.ih-fp-open</code>，未展开的面板一定不可见且不接收指针事件；自动隐藏同理改用状态类 <code>.ih-ball-autohidden</code>。</li>
-  <li><b>新增悬浮球遮挡自检</b>：悬浮球重建、软键盘收放、窗口尺寸变化后检查悬浮球是否可以点击，确认被遮挡时清理插件自身的残留浮层，必要时复位并提示遮挡来源。展开、拖动、自动隐藏及弹窗打开期间不触发。</li>
-  <li><b>修复悬浮球位置逐渐偏移</b>：拖动结束时记录的是渲染位置，包含 CSS <code>transform</code> 造成的偏移，而定位时按原坐标写回，每次拖动累加。现改为记录实际写入的坐标，并跳过拖动中被重建的情况。</li>
-  <li><b>修复软键盘弹出时悬浮球移出屏幕</b>：上移避让键盘时缺少下边界约束，顶栏高度被美化 CSS 改变时可能将悬浮球移出可视区域。</li>
+  <li><b>修复分支操作可能清空聊天档</b>：保存分支备注、指定父档、分支树改名、以及改名后重连父子关系时，可能把目标聊天档覆盖为仅剩一行档头，消息全部丢失。原因是读取聊天档后未校验返回内容——酒馆的 <code>/api/chats/get</code> 在读取出错时（角色目录缺失、文件内容无法解析等）返回的是成功状态加一个空对象，此前会被当成「这是一个空聊天档」并据此写回。现已严格区分读取失败与空档，读取异常时中止写入并提示。仅有档头、没有消息的正常聊天档不受影响。</li>
+  <li><b>修复部分聊天档在搜索与转存列表中不显示</b>：酒馆生成聊天档列表时只解析文件的最后一行，该行异常时会把整个聊天档从列表中剔除，即使其中消息完好。搜索、转存、指定聊天档三处列表此前受此影响，现改为直接获取文件名清单，不再漏档。分支标签页原本就不受影响。</li>
+  <li><b>分支树标出读取失败的聊天档</b>：读取失败的聊天档此前显示为 0 条消息的节点，与真正的空档无法区分，现会明确标记「读取失败」。</li>
 </ul>
 `;
 
@@ -7568,6 +7560,12 @@ async function ihBranchFetchList(avatar) {
     const resp = await fetch("/api/characters/chats", {
       method: "POST",
       headers: getRequestHeaders(),
+      // simple:true 是刻意的，别去掉。不带它本体会走 getChatInfo，而 getChatInfo
+      // 只解析文件的最后一行：一旦最后一行解析失败、或缺 name/character_name/
+      // chat_metadata，它就返回 {}，随后被 filter(i => i.file_name) 整条丢掉——
+      // 聊天档内容明明完好，却在列表/搜索/最近里同时凭空消失。simple:true 直接
+      // 返回文件名清单，绕过这个坑。低版本本体不认识该参数会直接忽略，返回的对象
+      // 里仍然有 file_name，因此向下兼容（该参数自 2024-06 起存在）。
       body: JSON.stringify({ avatar_url: avatar, simple: true }),
     });
     if (!resp.ok) return [];
@@ -7596,10 +7594,15 @@ async function ihBranchFetchChat(charName, nameNoExt, avatar) {
   });
   if (!resp.ok) throw new Error("读取失败 " + nameNoExt);
   const data = await resp.json();
-  if (Array.isArray(data) && data.length > 0) {
-    return { header: data[0], messages: data.slice(1) };
+  // 本体 /api/chats/get 出错时返回的是 200 + {}（目录不存在、file_name 为空、
+  // 或读取过程抛异常都走这条），文件整体解析失败时返回 []。这两种都必须当成
+  // 「读取失败」抛出去，绝不能当成「这是个空聊天档」——否则调用方会拿
+  // messages: [] 去 /api/chats/save，把好档覆盖成只剩一行 header。
+  // 注意：[header] （长度 1）是合法的「只有 header、没有消息」的档，不算失败。
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error("读取失败或内容无法解析 " + nameNoExt);
   }
-  return { header: null, messages: [] };
+  return { header: data[0], messages: data.slice(1) };
 }
 
 async function ihBranchScan(onProgress) {
@@ -10553,7 +10556,9 @@ function openHideManagerPanel() {
       const resp = await fetch("/api/characters/chats", {
         method: "POST",
         headers: getRequestHeaders(),
-        body: JSON.stringify({ avatar_url: info.avatar }),
+        // simple:true 必须带，否则本体 getChatInfo 会把「最后一行解析失败」的
+        // 聊天档整条从列表里丢掉（详见 ihBranchFetchList 处的说明）。
+        body: JSON.stringify({ avatar_url: info.avatar, simple: true }),
       });
       if (resp.ok) {
         const data = await resp.json();
@@ -14440,7 +14445,9 @@ function openHideManagerPanel() {
       const resp = await fetch("/api/characters/chats", {
         method: "POST",
         headers: getRequestHeaders(),
-        body: JSON.stringify({ avatar_url: info.avatar }),
+        // simple:true 必须带，否则本体 getChatInfo 会把「最后一行解析失败」的
+        // 聊天档整条从列表里丢掉（详见 ihBranchFetchList 处的说明）。
+        body: JSON.stringify({ avatar_url: info.avatar, simple: true }),
       });
       if (resp.ok) {
         const data = await resp.json();
@@ -14750,7 +14757,9 @@ function openHideManagerPanel() {
       const resp = await fetch("/api/characters/chats", {
         method: "POST",
         headers: getRequestHeaders(),
-        body: JSON.stringify({ avatar_url: info.avatar }),
+        // simple:true 必须带，否则本体 getChatInfo 会把「最后一行解析失败」的
+        // 聊天档整条从列表里丢掉（详见 ihBranchFetchList 处的说明）。
+        body: JSON.stringify({ avatar_url: info.avatar, simple: true }),
       });
       if (resp.ok) {
         const data = await resp.json();

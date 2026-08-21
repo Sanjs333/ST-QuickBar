@@ -1632,13 +1632,6 @@ const autoScrollController = {
   },
 };
 
-// 本功能是「非流式生成结束后跳到 AI 消息顶部」，判断依据原先只有
-// STREAM_TOKEN_RECEIVED 到没到（_isRealStream）。但酒馆全仓库只在 StreamingProcessor
-// 的 token 循环里 emit 这个事件，一旦流式在首个 token 之前就被打断（宿主虚拟化熔断、
-// 连接错误、立刻点停止等），事件一次都不会来，这里就会把真流式误判成非流式，
-// 于是主动把视图拽回消息顶部 —— 用户看到的就是「闪一下自动回到消息开头、之后不再自动滚动」。
-// 所以改成以酒馆自己的 isStreamingEnabled() 为准：只要本次生成走的是流式通道，
-// 无论有没有收到过 token，都不属于本功能的适用场景。
 function ihIsStreamingEnabled() {
   try {
     if (typeof SillyTavernScript.isStreamingEnabled === "function") {
@@ -4021,10 +4014,6 @@ const chatUndoManager = {
     this._pushSnapshot(snapshot);
   },
 
-  // 只把目标楼层深拷贝进快照，chat[floor] 保持同一个对象引用，改动原地进行。
-  // 别改回「深拷贝塞回 chat[floor]」的写法：宿主可能按消息对象身份记账（如
-  // TauriTavern ChatSurface 用 WeakMap 存虚拟化 structure key），换对象会被判成
-  // 结构变更并熔断。返回 false 表示这一楼数据异常，调用方应放弃本次操作。
   saveWithFloor(floor) {
     let snapshot;
     try {
@@ -4208,6 +4197,28 @@ const chatUndoManager = {
   },
 };
 
+function ihSetDirectedSelection(el, anchor, focus) {
+  const start = Math.min(anchor, focus);
+  const end = Math.max(anchor, focus);
+  const keepScroll = el.scrollTop;
+  try {
+    el.setSelectionRange(start, end, focus < anchor ? "backward" : "forward");
+  } catch (e) {
+    try {
+      el.selectionStart = start;
+      el.selectionEnd = end;
+    } catch (e2) {}
+  }
+  try {
+    el.scrollTop = keepScroll;
+  } catch (e) {}
+  requestAnimationFrame(() => {
+    try {
+      el.scrollTop = keepScroll;
+    } catch (e) {}
+  });
+}
+
 const shiftMode = {
   active: false,
   anchorPos: 0,
@@ -4364,8 +4375,7 @@ const shiftMode = {
         if (pointerPos !== null) {
           try {
             const anchor = this.anchorPos;
-            ta.selectionStart = Math.min(anchor, pointerPos);
-            ta.selectionEnd = Math.max(anchor, pointerPos);
+            ihSetDirectedSelection(ta, anchor, pointerPos);
           } catch (e) {}
         }
 
@@ -4390,8 +4400,7 @@ const shiftMode = {
                   : start;
             }
 
-            ta.selectionStart = Math.min(anchor, t);
-            ta.selectionEnd = Math.max(anchor, t);
+            ihSetDirectedSelection(ta, anchor, t);
           } catch (e) {}
         }, 10);
       };
@@ -4486,10 +4495,16 @@ const _faIconContentCache = new Map();
 let _faProtectionTimer = null;
 let _lastIconHash = "";
 let _toolbarHeightTimer = null;
+let _ihLastToolbarMeasureWidth = -1;
 
 function updateToolbarMaxHeight() {
   clearTimeout(_toolbarHeightTimer);
   _toolbarHeightTimer = setTimeout(_doUpdateToolbarMaxHeight, 80);
+}
+
+function updateToolbarMaxHeightOnResize() {
+  if (window.innerWidth === _ihLastToolbarMeasureWidth) return;
+  updateToolbarMaxHeight();
 }
 
 function _doUpdateToolbarMaxHeight() {
@@ -4523,6 +4538,7 @@ function _doUpdateToolbarMaxHeight() {
 
   if (height > 0) {
     toolbar.style.setProperty("--ih-toolbar-max-h", height + "px");
+    _ihLastToolbarMeasureWidth = window.innerWidth;
   }
 }
 
@@ -5503,12 +5519,7 @@ function ihInjectUnlockSwipesCSS() {
 body.ih-unlock-swipes:not(.hideAllSwipeButtons):not([data-generating="true"]):not([data-swiping="true"]) #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipe_left,
 body.ih-unlock-swipes:not(.hideAllSwipeButtons):not([data-generating="true"]):not([data-swiping="true"]) #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipe_right,
 body.ih-unlock-swipes:not(.hideAllSwipeButtons):not([data-generating="true"]):not([data-swiping="true"]) #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipes-counter {
-  opacity: 0.3 !important; /* 平时箭头/计数的透明度，0~1，想更显眼就调大 */
-  /* 用 inherit 而不是 visible：酒馆隐藏 swipe 用的是 visibility:hidden（没带
-     !important、选择器权重也低于本条），inherit 已经足够盖掉它。而 visibility 是
-     可以被后代反向覆盖的，写死 visible 会连祖先级的整体隐藏一起穿透 —— 例如
-     TauriTavern 在虚拟化 bootstrap 阶段用 #chat[data-tt-chat-bootstrap] > .mes
-     { visibility: hidden } 遮住整个聊天区，写 visible 就会在空白聊天区上闪出一排箭头。 */
+  opacity: 0.3 !important;
   visibility: inherit !important;
   pointer-events: auto !important;
   display: flex !important;
@@ -5517,12 +5528,12 @@ body.ih-unlock-swipes:not(.hideAllSwipeButtons):not([data-generating="true"]):no
 body.ih-unlock-swipes #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipe_left:hover,
 body.ih-unlock-swipes #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipe_right:hover,
 body.ih-unlock-swipes #chat .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipes-counter:hover {
-  opacity: 0.9 !important; /* 鼠标悬停时的透明度 */
+  opacity: 0.9 !important;
 }
 body.ih-unlock-swipes #chat:has(#curEditTextarea) .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipe_left,
 body.ih-unlock-swipes #chat:has(#curEditTextarea) .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipe_right,
 body.ih-unlock-swipes #chat:has(#curEditTextarea) .mes.ih-has-swipes:not(.last_mes):not(.smallSysMes)[is_user="false"] .swipes-counter {
-  display: none !important; /* 有消息正在编辑时，隐藏历史楼层的备选箭头与计数 */
+  display: none !important;
 }
 `;
   document.head.appendChild(style);
@@ -5537,12 +5548,6 @@ function ihMarkSwipeableMessages() {
   _ihSwipeMarkTimer = setTimeout(_ihDoMarkSwipeableMessages, 120);
 }
 
-// 生成中 / 切换备选中，酒馆会给 body 挂 data-generating 或 data-swiping，
-// 同时 refreshSwipeButtons() 会加上 hideAllSwipeButtons —— 上面的显示规则把这三个
-// 条件全部排除掉了，所以这期间给 .mes 打 ih-has-swipes 是 100% 看不见的空写入。
-// 在开了「聊天 DOM 虚拟化」的宿主（TauriTavern 等）里，楼层节点会随滚动不断新建回收，
-// 空写入就变成了流式期间源源不断往 #chat 里塞属性变更，白白干扰宿主对楼层的记账。
-// 因此生成期间一律跳过；GENERATION_ENDED 上已经绑了全量刷新，结束后会自动补齐。
 function _ihSwipeMarkPaused() {
   const ds = document.body.dataset;
   return ds.generating === "true" || ds.swiping === "true";
@@ -5550,10 +5555,6 @@ function _ihSwipeMarkPaused() {
 
 let _ihSwipeMarkQueue = null;
 let _ihSwipeMarkRaf = 0;
-
-// 不在 MutationObserver 回调里同步回写 DOM：宿主的虚拟化通常也挂着自己的
-// MutationObserver，在它的回调微任务里改属性容易和它正在进行的提交流程互相打断。
-// 统一攒到下一帧处理，顺便把一批插入合并成一次遍历。
 function _ihQueueMarkSwipeable(el) {
   if (!_ihSwipeMarkQueue) _ihSwipeMarkQueue = [];
   _ihSwipeMarkQueue.push(el);
@@ -6528,13 +6529,12 @@ async function checkRemoteUpdate() {
   }
 }
 
-const CHANGELOG_VERSION = "3.2.4";
+const CHANGELOG_VERSION = "3.2.5";
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.4</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.5</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>修复分支操作可能清空聊天档</b>：保存分支备注、指定父档、分支树改名、以及改名后重连父子关系时，可能把目标聊天档覆盖为仅剩一行档头，消息全部丢失。原因是读取聊天档后未校验返回内容——酒馆的 <code>/api/chats/get</code> 在读取出错时（角色目录缺失、文件内容无法解析等）返回的是成功状态加一个空对象，此前会被当成「这是一个空聊天档」并据此写回。现已严格区分读取失败与空档，读取异常时中止写入并提示。仅有档头、没有消息的正常聊天档不受影响。</li>
-  <li><b>修复部分聊天档在搜索与转存列表中不显示</b>：酒馆生成聊天档列表时只解析文件的最后一行，该行异常时会把整个聊天档从列表中剔除，即使其中消息完好。搜索、转存、指定聊天档三处列表此前受此影响，现改为直接获取文件名清单，不再漏档。分支标签页原本就不受影响。</li>
-  <li><b>分支树标出读取失败的聊天档</b>：读取失败的聊天档此前显示为 0 条消息的节点，与真正的空档无法区分，现会明确标记「读取失败」。</li>
+  <li><b>修复「选中模式」下视图异常跳转</b>：现已优化，无论自上而下还是自下而上选择，选中结束后视图均保持在当前阅读位置。</li>
+  <li><b>优化手机键盘弹出、收起时的流畅度</b>：减少了键盘开合过程中的多余计算，配置较低的手机上输入栏会更跟手。</li>
 </ul>
 `;
 
@@ -7002,8 +7002,8 @@ const _IH_SEARCH_CACHE_MAX = 300; // 最多缓存多少个聊天档（只管份�
 const _IH_SEARCH_CACHE_MAX_CHARS = 60000000; // 缓存总字数上限，约 120MB 内存；内存吃紧调小，聊天档特别长可调大
 let _IH_SEARCH_CACHE_CHARS = 0;
 const _IH_BRANCH_CACHE_LS_KEY = "ih_branch_cache";
-const _IH_BRANCH_CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 分支扫描缓存有效期：3 天，想更短就调小
-const _IH_BRANCH_CACHE_MAX_CHARS = 5; // 最多缓存几个角色的扫描结果，想多存就调大
+const _IH_BRANCH_CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 分支扫描缓存有效期：3 天
+const _IH_BRANCH_CACHE_MAX_CHARS = 5; // 最多缓存几个角色的扫描结果
 
 function _ihGetBranchCacheKey() {
   try {
@@ -7560,12 +7560,6 @@ async function ihBranchFetchList(avatar) {
     const resp = await fetch("/api/characters/chats", {
       method: "POST",
       headers: getRequestHeaders(),
-      // simple:true 是刻意的，别去掉。不带它本体会走 getChatInfo，而 getChatInfo
-      // 只解析文件的最后一行：一旦最后一行解析失败、或缺 name/character_name/
-      // chat_metadata，它就返回 {}，随后被 filter(i => i.file_name) 整条丢掉——
-      // 聊天档内容明明完好，却在列表/搜索/最近里同时凭空消失。simple:true 直接
-      // 返回文件名清单，绕过这个坑。低版本本体不认识该参数会直接忽略，返回的对象
-      // 里仍然有 file_name，因此向下兼容（该参数自 2024-06 起存在）。
       body: JSON.stringify({ avatar_url: avatar, simple: true }),
     });
     if (!resp.ok) return [];
@@ -7594,11 +7588,6 @@ async function ihBranchFetchChat(charName, nameNoExt, avatar) {
   });
   if (!resp.ok) throw new Error("读取失败 " + nameNoExt);
   const data = await resp.json();
-  // 本体 /api/chats/get 出错时返回的是 200 + {}（目录不存在、file_name 为空、
-  // 或读取过程抛异常都走这条），文件整体解析失败时返回 []。这两种都必须当成
-  // 「读取失败」抛出去，绝不能当成「这是个空聊天档」——否则调用方会拿
-  // messages: [] 去 /api/chats/save，把好档覆盖成只剩一行 header。
-  // 注意：[header] （长度 1）是合法的「只有 header、没有消息」的档，不算失败。
   if (!Array.isArray(data) || data.length === 0) {
     throw new Error("读取失败或内容无法解析 " + nameNoExt);
   }
@@ -10556,8 +10545,6 @@ function openHideManagerPanel() {
       const resp = await fetch("/api/characters/chats", {
         method: "POST",
         headers: getRequestHeaders(),
-        // simple:true 必须带，否则本体 getChatInfo 会把「最后一行解析失败」的
-        // 聊天档整条从列表里丢掉（详见 ihBranchFetchList 处的说明）。
         body: JSON.stringify({ avatar_url: info.avatar, simple: true }),
       });
       if (resp.ok) {
@@ -14445,8 +14432,6 @@ function openHideManagerPanel() {
       const resp = await fetch("/api/characters/chats", {
         method: "POST",
         headers: getRequestHeaders(),
-        // simple:true 必须带，否则本体 getChatInfo 会把「最后一行解析失败」的
-        // 聊天档整条从列表里丢掉（详见 ihBranchFetchList 处的说明）。
         body: JSON.stringify({ avatar_url: info.avatar, simple: true }),
       });
       if (resp.ok) {
@@ -14757,8 +14742,6 @@ function openHideManagerPanel() {
       const resp = await fetch("/api/characters/chats", {
         method: "POST",
         headers: getRequestHeaders(),
-        // simple:true 必须带，否则本体 getChatInfo 会把「最后一行解析失败」的
-        // 聊天档整条从列表里丢掉（详见 ihBranchFetchList 处的说明）。
         body: JSON.stringify({ avatar_url: info.avatar, simple: true }),
       });
       if (resp.ok) {
@@ -18596,7 +18579,6 @@ const floatingPanelController = {
     if (fp.displayMode === "ball") {
       panel.hide();
     } else {
-      // 固定面板模式常驻显示，解除 style.css 里 :not(.ih-fp-open) 的收起兜底
       panel.addClass("ih-fp-open");
     }
     syncDialogTheme(panel[0]);
@@ -18707,12 +18689,6 @@ const floatingPanelController = {
         }
         el.removeData("ih-orig-transition");
         if (moved) {
-          // 存 style.left/top 而不是 getBoundingClientRect()：重建时（_createBall）
-          // 这个坐标是直接写回 left/top 的，而 rect 会把 transform 一起算进去
-          // （用户美化 CSS 的 hover/动画，甚至本插件 :hover 的 scale(1.06)），
-          // 祖先的 filter/transform 改掉 fixed 包含块时偏移更大 —— 存进去的值
-          // 下一轮又被偏移一次，每拖一次就累加一点，最后球会走出屏幕。
-          // 另外元素被 destroy() 摘掉后 rect 全是 0，会把位置存成 {0,0}。
           const _dropX = parseFloat(el[0].style.left);
           const _dropY = parseFloat(el[0].style.top);
           if (el[0].isConnected && !isNaN(_dropX) && !isNaN(_dropY)) {
@@ -18755,16 +18731,10 @@ const floatingPanelController = {
     if (now - (this._lastToggleTime || 0) < 400) {
       return;
     }
-    // 这个守卫必须在翻转 _expanded 之前：元素缺失时如果照样翻转，_expanded 就会
-    // 卡在 true 而面板根本没显示，之后每次点球都走"收起"分支（看起来毫无反应），
-    // 而且 _ahChatClick / _ahDocClick 都拿 _expanded 当开关，会连自动隐藏的
-    // 恢复路径一起锁死，只有 destroy() 能解——也就是只能靠手点"重置悬浮球位置"。
     if (!this._panelEl || !this._ballEl) return;
     this._lastToggleTime = now;
     this._expanded = !this._expanded;
     if (this._expanded) {
-      // 先解除 style.css 里 :not(.ih-fp-open) 的收起兜底，否则下面的量尺寸和
-      // fadeIn 都会被 visibility:hidden !important 拦住
       this._panelEl.addClass("ih-fp-open");
       if (getSettings().floatingPanel.autoHide) {
         this._autoHideVisible = true;
@@ -19360,15 +19330,6 @@ const floatingPanelController = {
     }
     this._scheduleBallHitCheck(600);
   },
-
-  // ===== 悬浮球可点性看门狗 =====
-  // 悬浮球 z-index 是 10003，而文件夹浮层 10004、悬浮面板 10005、取色器 10006、
-  // 管理器折叠球 10010 都在它上面。这些浮层任何一个没收干净（最典型的是用户美化
-  // CSS 用 display: … !important 顶掉了面板 .hide() 写的内联 display:none），
-  // 球就会变成"看得见、拖不动、点不开"，而插件自身的重建救不回来——重建只会把
-  // 遮挡物重新造出来，只有把球挪开才行。这就是"悬浮球卡死、只能靠重置位置恢复"
-  // 的成因。这里不猜原因，直接用 elementFromPoint 问浏览器"球中心那个点归谁"，
-  // 确认被挡就自救，并把遮挡者报出来，省得让用户去翻控制台。
   _ballHitTimer: null,
   _ballBlockedKey: null,
 
@@ -19384,28 +19345,25 @@ const floatingPanelController = {
       }
     }, delay || 400);
   },
-
-  // 当前这一刻球"本该"是能点的吗——把所有正常的不可点状态先排掉，避免误判
   _ballShouldBeClickable() {
     const b = this._ballEl && this._ballEl[0];
     if (!b || !b.isConnected) return null;
     if (this._expanded || this._isDragging) return null;
-    if (!this._autoHideVisible) return null; // 自动隐藏中，本来就该不可点
-    if (this._currentDialogHost) return null; // 球被搬进弹窗里了，另一套坐标系
-    if (document.querySelector("dialog[open]")) return null; // 模态弹窗期间整页 inert
+    if (!this._autoHideVisible) return null;
+    if (this._currentDialogHost) return null;
+    if (document.querySelector("dialog[open]")) return null;
     if (
       document.querySelector(
         ".ih-folder-dropdown-portal, .ih-color-picker-portal, .ih-dialog-overlay",
       )
     )
-      return null; // 插件自己的浮层正开着，挡住是正常的
+      return null;
     const r = b.getBoundingClientRect();
     if (r.width < 8 || r.height < 8) return null;
     const cx = Math.round(r.left + r.width / 2);
     const cy = Math.round(r.top + r.height / 2);
     const vw = window.innerWidth || 0;
     const vh = window.innerHeight || 0;
-    // 球中心已经在视口外了就不管，那是 _clampToViewport 的活
     if (cx < 1 || cy < 1 || cx > vw - 1 || cy > vh - 1) return null;
     return { el: b, cx: cx, cy: cy };
   },
@@ -19425,8 +19383,6 @@ const floatingPanelController = {
       this._ballBlockedKey = null;
       return;
     }
-    // 情况一：球自己吃到了 pointer-events:none（自动隐藏没收干净，或者用户美化
-    // CSS 直接写了）。这种 elementFromPoint 会直接穿透过去，得单独判。
     if (getComputedStyle(ctx.el).pointerEvents === "none") {
       this._ballEl.removeClass("ih-ball-autohidden");
       ctx.el.style.setProperty("pointer-events", "auto", "important");
@@ -19436,14 +19392,11 @@ const floatingPanelController = {
       this._warnBallBlocked("pointer-events:none", false);
       return;
     }
-    // 情况二：被别的元素盖住
     const hit = document.elementFromPoint(ctx.cx, ctx.cy);
     if (!hit || hit === ctx.el || ctx.el.contains(hit)) {
       this._ballBlockedKey = null;
       return;
     }
-    // toast / tooltip 这类一闪而过的浮层不算故障（酒馆的 toast 默认就飘在右上角，
-    // 正好是悬浮球最常待的位置，不排掉的话会自己触发自己）
     if (
       hit.closest &&
       hit.closest("#toast-container, .toast, #tooltip, .ui-tooltip")
@@ -19452,14 +19405,12 @@ const floatingPanelController = {
       return;
     }
     const key = this._describeBlocker(hit);
-    // 连续两次（间隔 500ms）都确认被同一个东西挡住才动手，躲开动画/过渡中的瞬时误判
     if (this._ballBlockedKey !== key) {
       this._ballBlockedKey = key;
       this._scheduleBallHitCheck(500);
       return;
     }
     this._ballBlockedKey = null;
-    // 第一步：遮挡物是插件自己的浮层，就地收干净
     const own = hit.closest
       ? hit.closest(".ih-floating-panel, .ih-folder-dropdown-portal")
       : null;
@@ -19475,13 +19426,9 @@ const floatingPanelController = {
     }
     const after = document.elementFromPoint(ctx.cx, ctx.cy);
     if (!after || after === ctx.el || ctx.el.contains(after)) {
-      // 收干净就好了，不用动球的位置
       this._warnBallBlocked(key, false);
       return;
     }
-    // 第二步：还被挡着就把球挪回默认位置（等同于手点"重置悬浮球位置"）。
-    // 先探一下默认位置是不是被同一个东西挡着——比如整屏的编辑器浮层，
-    // 挪过去也一样点不到，那就只报告不折腾用户的球。
     const fp = getSettings().floatingPanel;
     const size = fp.ballSize || 48;
     const tx = Math.max(0, (window.innerWidth || 0) - size - 16) + size / 2;
@@ -19517,9 +19464,8 @@ const floatingPanelController = {
   _ballWarnTime: 0,
 
   _warnBallBlocked(what, repositioned) {
-    // 30 秒内只提示一次，避免持续存在的遮挡物（比如别的脚本的整屏面板）刷屏
     const now = Date.now();
-    if (now - (this._ballWarnTime || 0) < 30000) return;
+    if (now - (this._ballWarnTime || 0) < 60000) return;
     this._ballWarnTime = now;
     try {
       toastr.warning(
@@ -19774,11 +19720,6 @@ const floatingPanelController = {
           }
 
           const newTop = Math.max(minTop, vv.offsetTop + 10);
-          // 这个分支的本意是"把被键盘挡住的球抬到可视区顶部"，但原来只有下界
-          // Math.max，没有上界：minTop 取的是 #top-bar 的 bottom + 10，只要美化
-          // CSS 把顶栏改高、或者退化到 #top-settings-holder（抽屉展开时它的
-          // bounding box 会包含整个抽屉内容），minTop 就会变成几百 px，
-          // 于是球被"抬"到了可视区外面，反而更找不到。补一个上界。
           const _kbMaxTop = vvBottom - elHeight - 10;
           target.css(
             "top",
@@ -25523,13 +25464,6 @@ jQuery(async () => {
         });
       } catch (e) {}
     }
-
-    // 第三个参数是 dryRun。酒馆在 Generate() 最开头就 emit 这个事件，"即使本次生成
-    // 因为斜杠命令而中止也会发"，dryRun 时同样会发。而 dryRun 不会调 showStopButton()，
-    // 于是收尾的 hideStopButton() 被它自己的 NOOP 守卫拦掉、GENERATION_ENDED 一次都不发。
-    // 不挡住 dryRun 的话，下面这些「生成开始」状态就没有对应的「生成结束」来收：
-    // 尤其 scrollLockController 会把 power_user.auto_scroll_chat_to_bottom 置为 false，
-    // 只能等 60 秒安全定时器兜底，这段时间里酒馆的流式自动滚动是整个失效的。
     eventSource.on(
       event_types.GENERATION_STARTED,
       function (type, _params, dryRun) {
@@ -25570,7 +25504,7 @@ jQuery(async () => {
   } catch (e) {
     console.warn("快捷工具栏: 无法监听事件", e);
   }
-  window.addEventListener("resize", updateToolbarMaxHeight);
+  window.addEventListener("resize", updateToolbarMaxHeightOnResize);
   eventSource.on("st_quickbar_reset_floating_ball", () =>
     doResetFloatingBall(),
   );

@@ -11,6 +11,7 @@ import {
 } from "../../../../script.js";
 import * as SillyTavernScript from "../../../../script.js";
 import { extension_settings } from "../../../extensions.js";
+import * as STExtensions from "../../../extensions.js";
 import { power_user } from "../../../power-user.js";
 import * as SlashCommands from "../../../slash-commands.js";
 
@@ -385,6 +386,8 @@ const defaultSettings = {
   toolbarPinned: false,
   toolbarBtnSize: 12,
   lastSeenChangelogVersion: "",
+  autoCheckUpdate: true,
+  autoReloadAfterUpdate: true,
   autoScrollSpeed: 50,
   pagingScrollRatio: 0.93,
   autoScrollToAiOnStream: false,
@@ -6470,7 +6473,45 @@ function openBeautyPromptPanel() {
   }
 }
 
-let _latestRemoteVersion = "";
+const EXTENSION_VERSION = "3.2.5";
+
+const EXTENSION_FOLDER_NAME = (() => {
+  try {
+    const segs = new URL(".", import.meta.url).pathname
+      .replace(/\/+$/, "")
+      .split("/");
+    return decodeURIComponent(segs[segs.length - 1] || "") || extensionName;
+  } catch (e) {
+    return extensionName;
+  }
+})();
+
+const UPDATE_STATUS = {
+  IDLE: "idle",
+  CHECKING: "checking",
+  LATEST: "latest",
+  AVAILABLE: "available",
+  STAGED: "staged",
+  ERROR: "error",
+};
+
+const updateState = {
+  status: UPDATE_STATUS.IDLE,
+  installed: "",
+  remote: "",
+  branch: "",
+  repo: null,
+  scope: null,
+  git: null,
+  gitAt: 0,
+  gitError: "",
+  checkedAt: 0,
+  message: "",
+  busy: false,
+};
+
+let _updatePanelRender = null;
+let _stagedNoticeShown = false;
 
 function compareVersions(a, b) {
   const pa = String(a || "")
@@ -6487,52 +6528,763 @@ function compareVersions(a, b) {
   return 0;
 }
 
-async function checkRemoteUpdate() {
+const IH_VERSION_RE = /^\d+(?:\.\d+){0,4}$/;
+
+function ihGetExtensionScope() {
   try {
-    const localResp = await fetch(
-      `/scripts/extensions/third-party/${extensionName}/manifest.json`,
-    );
-    if (!localResp.ok) return;
-    const localManifest = await localResp.json();
-    const localVersion = localManifest.version || "";
-    const homePage = localManifest.homePage || localManifest.homepage || "";
-    const match = homePage.match(/github\.com\/([^/]+)\/([^/.]+)/);
-    if (!match) return;
-    const owner = match[1];
-    const repo = match[2];
-    let remoteVersion = "";
-    for (const branch of ["main", "master"]) {
-      try {
-        const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/manifest.json?t=${Date.now()}`;
-        const resp = await fetch(url, { cache: "no-cache" });
-        if (resp.ok) {
-          const m = await resp.json();
-          remoteVersion = m.version || "";
-          if (remoteVersion) break;
-        }
-      } catch (e) {}
+    const types = STExtensions && STExtensions.extensionTypes;
+    if (types && typeof types === "object") {
+      const id = Object.keys(types).find(
+        (k) =>
+          k === EXTENSION_FOLDER_NAME ||
+          (k.startsWith("third-party") && k.endsWith(EXTENSION_FOLDER_NAME)),
+      );
+      if (id && types[id]) return types[id] === "global" ? "global" : "local";
     }
-    if (!remoteVersion) return;
-    _latestRemoteVersion = remoteVersion;
-    if (compareVersions(remoteVersion, localVersion) > 0) {
-      const s = getSettings();
-      if (s.lastSeenChangelogVersion !== remoteVersion) {
-        const badge = document.getElementById("ih_new_badge");
-        if (badge) {
-          badge.style.display = "inline-block";
-          badge.title = `发现新版本 v${remoteVersion}（当前 v${localVersion}），请在扩展管理器中更新`;
-        }
+  } catch (e) {}
+  return null;
+}
+
+function ihScopeOrder() {
+  const known = updateState.scope || ihGetExtensionScope();
+  return known === "global" ? ["global", "local"] : ["local", "global"];
+}
+
+async function ihFetchInstalledManifest() {
+  const resp = await fetch(
+    `/scripts/extensions/third-party/${encodeURIComponent(
+      EXTENSION_FOLDER_NAME,
+    )}/manifest.json?t=${Date.now()}`,
+    { cache: "no-store" },
+  );
+  if (!resp.ok) throw new Error("读取插件 manifest.json 失败");
+  return await resp.json();
+}
+
+function ihParseRepo(homePage) {
+  const m = String(homePage || "").match(/github\.com\/([^/\s]+)\/([^/\s.]+)/);
+  if (!m) return null;
+  return {
+    owner: m[1],
+    repo: m[2],
+    url: `https://github.com/${m[1]}/${m[2]}`,
+  };
+}
+
+async function ihFetchRemoteVersion(repo) {
+  for (const branch of ["main", "master"]) {
+    try {
+      const url = `https://raw.githubusercontent.com/${encodeURIComponent(
+        repo.owner,
+      )}/${encodeURIComponent(repo.repo)}/${branch}/manifest.json?t=${Date.now()}`;
+      const resp = await fetch(url, { cache: "no-cache" });
+      if (!resp.ok) continue;
+      const m = await resp.json();
+      const v = String((m && m.version) || "").trim();
+      if (IH_VERSION_RE.test(v)) return { version: v, branch };
+    } catch (e) {}
+  }
+  return { version: "", branch: "" };
+}
+
+async function ihFetchGitInfo(force) {
+  if (!force && updateState.git && Date.now() - updateState.gitAt < 60000) {
+    return updateState.git;
+  }
+  let lastErr = "";
+  for (const scope of ihScopeOrder()) {
+    try {
+      const resp = await fetch("/api/extensions/version", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        body: JSON.stringify({
+          extensionName: EXTENSION_FOLDER_NAME,
+          global: scope === "global",
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        updateState.scope = scope;
+        updateState.git = data;
+        updateState.gitAt = Date.now();
+        updateState.gitError = "";
+        return data;
       }
+      if (resp.status !== 404) {
+        lastErr = (await resp.text().catch(() => "")) || resp.statusText;
+      }
+    } catch (e) {
+      lastErr = (e && e.message) || "";
     }
+  }
+  throw new Error(lastErr || `未找到扩展目录 ${EXTENSION_FOLDER_NAME}`);
+}
+
+async function ihRequestUpdate() {
+  let lastErr = "";
+  for (const scope of ihScopeOrder()) {
+    let resp;
+    try {
+      resp = await fetch("/api/extensions/update", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        body: JSON.stringify({
+          extensionName: EXTENSION_FOLDER_NAME,
+          global: scope === "global",
+        }),
+      });
+    } catch (e) {
+      lastErr = (e && e.message) || "网络请求失败";
+      continue;
+    }
+    if (resp.ok) {
+      updateState.scope = scope;
+      return await resp.json();
+    }
+    const text = (await resp.text().catch(() => "")).trim();
+    if (resp.status === 404) {
+      lastErr = lastErr || text;
+      continue;
+    }
+    if (resp.status === 403) {
+      throw new Error(
+        "当前账号没有更新全局扩展的权限。请使用管理员账号登录，或把插件安装到用户目录后重试。",
+      );
+    }
+    throw new Error(
+      text || `更新失败（HTTP ${resp.status}），详情见酒馆后台日志`,
+    );
+  }
+  throw new Error(lastErr || `未找到扩展目录 ${EXTENSION_FOLDER_NAME}`);
+}
+
+async function ihReloadForUpdate() {
+  try {
+    const loader = await import("../../../loader.js");
+    if (loader && typeof loader.showLoader === "function") loader.showLoader();
+  } catch (e) {}
+  try {
+    location.reload();
   } catch (e) {
-    console.warn("快捷工具栏: 远程版本检查失败", e);
+    window.location.href = window.location.href;
   }
 }
 
-const CHANGELOG_VERSION = "3.2.5";
+function ihComputeUpdateStatus() {
+  const installed = updateState.installed || EXTENSION_VERSION;
+  if (
+    updateState.remote &&
+    compareVersions(updateState.remote, installed) > 0
+  ) {
+    updateState.status = UPDATE_STATUS.AVAILABLE;
+  } else if (compareVersions(installed, EXTENSION_VERSION) > 0) {
+    updateState.status = UPDATE_STATUS.STAGED;
+  } else {
+    updateState.status = UPDATE_STATUS.LATEST;
+  }
+}
+
+function ihSyncUpdateBadge() {
+  const badge = document.getElementById("ih_new_badge");
+  if (!badge) return;
+  const s = getSettings();
+  if (updateState.status === UPDATE_STATUS.AVAILABLE) {
+    if (s.lastSeenChangelogVersion !== updateState.remote) {
+      badge.style.display = "inline-block";
+      badge.title = `发现新版本 v${updateState.remote}（当前 v${EXTENSION_VERSION}），可在插件设置顶部一键更新`;
+    }
+  } else if (updateState.status === UPDATE_STATUS.STAGED) {
+    badge.style.display = "inline-block";
+    badge.title = `v${updateState.installed} 已下载完成，刷新页面即可生效`;
+  }
+}
+
+async function ihCheckForUpdates(options) {
+  const opts = options || {};
+  if (updateState.status === UPDATE_STATUS.CHECKING) return updateState;
+  updateState.status = UPDATE_STATUS.CHECKING;
+  updateState.message = "";
+  ihRenderUpdateUi();
+  try {
+    const manifest = await ihFetchInstalledManifest();
+    updateState.installed = String((manifest && manifest.version) || "").trim();
+    updateState.repo = ihParseRepo(
+      (manifest && (manifest.homePage || manifest.homepage)) || "",
+    );
+    if (updateState.repo) {
+      const remote = await ihFetchRemoteVersion(updateState.repo);
+      if (remote.version) updateState.remote = remote.version;
+      if (remote.branch) updateState.branch = remote.branch;
+    }
+    updateState.checkedAt = Date.now();
+    ihComputeUpdateStatus();
+  } catch (e) {
+    updateState.status = UPDATE_STATUS.ERROR;
+    updateState.message = (e && e.message) || "检查更新失败";
+    console.warn("快捷工具栏: 检查更新失败", e);
+  }
+  ihSyncUpdateBadge();
+  ihRenderUpdateUi();
+  if (opts.deep) {
+    ihFetchGitInfo(true)
+      .catch((e) => {
+        updateState.gitError = (e && e.message) || "";
+      })
+      .finally(() => ihRenderUpdateUi());
+  }
+  if (!opts.silent) {
+    try {
+      if (updateState.status === UPDATE_STATUS.LATEST) {
+        toastr.success(`已是最新版本 v${EXTENSION_VERSION}`, "快捷工具栏", {
+          timeOut: 2000,
+        });
+      } else if (updateState.status === UPDATE_STATUS.AVAILABLE) {
+        toastr.info(`发现新版本 v${updateState.remote}`, "快捷工具栏", {
+          timeOut: 2500,
+        });
+      } else if (updateState.status === UPDATE_STATUS.STAGED) {
+        toastr.info("新版本已下载，刷新页面即可生效", "快捷工具栏", {
+          timeOut: 3000,
+        });
+      } else if (updateState.status === UPDATE_STATUS.ERROR) {
+        toastr.error(updateState.message, "检查更新失败", { timeOut: 4000 });
+      }
+    } catch (e) {}
+  }
+  return updateState;
+}
+
+function ihNotifyStagedUpdate() {
+  if (updateState.status !== UPDATE_STATUS.STAGED) return;
+  if (_stagedNoticeShown) return;
+  _stagedNoticeShown = true;
+  try {
+    toastr.info(
+      `快捷工具栏 v${updateState.installed} 已下载完成，点此刷新页面生效。`,
+      "新版本已就绪",
+      {
+        timeOut: 12000,
+        extendedTimeOut: 8000,
+        closeButton: true,
+        onclick: () => ihReloadForUpdate(),
+      },
+    );
+  } catch (e) {}
+}
+
+function ihUpdateBarView() {
+  const st = updateState;
+  switch (st.status) {
+    case UPDATE_STATUS.CHECKING:
+      return {
+        tone: "busy",
+        pill: "正在检查更新…",
+        btn: "检查中",
+        icon: "fa-spinner fa-spin",
+        accent: false,
+        disabled: true,
+      };
+    case UPDATE_STATUS.AVAILABLE:
+      return {
+        tone: "new",
+        pill: `发现新版本 v${st.remote}`,
+        btn: `更新到 v${st.remote}`,
+        icon: "fa-cloud-arrow-down",
+        accent: true,
+        disabled: false,
+      };
+    case UPDATE_STATUS.STAGED:
+      return {
+        tone: "new",
+        pill: `v${st.installed} 已就绪，刷新生效`,
+        btn: "刷新页面",
+        icon: "fa-arrows-rotate",
+        accent: true,
+        disabled: false,
+      };
+    case UPDATE_STATUS.LATEST:
+      return {
+        tone: "ok",
+        pill: "已是最新版本",
+        btn: "检查更新",
+        icon: "fa-rotate",
+        accent: false,
+        disabled: false,
+      };
+    case UPDATE_STATUS.ERROR:
+      return {
+        tone: "err",
+        pill: st.message || "检查更新失败",
+        btn: "重试",
+        icon: "fa-rotate",
+        accent: false,
+        disabled: false,
+      };
+    default:
+      return {
+        tone: "idle",
+        pill: "点击检查更新",
+        btn: "检查更新",
+        icon: "fa-rotate",
+        accent: false,
+        disabled: false,
+      };
+  }
+}
+
+function ihSetBtnContent(btn, iconClass, label) {
+  if (!btn) return;
+  btn.textContent = "";
+  const i = document.createElement("i");
+  i.className = `fa-solid ${iconClass}`;
+  // 标签用纯文本节点，与面板里其它 menu_button / ih-hm-btn 的写法一致
+  // （包成 <span> 会被 .menu_button_icon span 的字号规则顶大一号）
+  btn.append(i, document.createTextNode(` ${label}`));
+}
+
+function ihRenderUpdateUi() {
+  const view = ihUpdateBarView();
+  const ver = document.getElementById("ih_version_label");
+  if (ver) ver.textContent = `v${EXTENSION_VERSION}`;
+  const pill = document.getElementById("ih_update_pill");
+  if (pill) {
+    pill.dataset.tone = view.tone;
+    const text = pill.querySelector(".ih-update-state-text");
+    if (text) text.textContent = view.pill;
+    pill.title = `${view.pill}　·　点击查看更新详情`;
+  }
+  const btn = document.getElementById("ih_update_action");
+  if (btn) {
+    btn.dataset.status = updateState.status;
+    btn.disabled = !!view.disabled || updateState.busy;
+    btn.classList.toggle("ih-update-action-accent", !!view.accent);
+    ihSetBtnContent(btn, view.icon, view.btn);
+  }
+  if (_updatePanelRender) {
+    try {
+      _updatePanelRender();
+    } catch (e) {}
+  }
+}
+
+function ihUpdateActionClick() {
+  if (updateState.busy) return;
+  if (updateState.status === UPDATE_STATUS.STAGED) {
+    ihReloadForUpdate();
+    return;
+  }
+  if (updateState.status === UPDATE_STATUS.AVAILABLE) {
+    openUpdatePanel({ autoUpdate: true });
+    return;
+  }
+  ihCheckForUpdates({ silent: false, deep: false });
+}
+
+function openUpdatePanel(options) {
+  const opts = options || {};
+  if (document.querySelector(".ih-update-panel-content")) return;
+  const s = getSettings();
+  const { overlay, escHandler } = createDialogOverlay();
+  const content = $(`
+    <div class="ih-update-panel-content">
+      <h3 class="ih-update-title">
+        <i class="fa-solid fa-cloud-arrow-down"></i> 检查更新
+        <span class="ih-update-title-ver"></span>
+      </h3>
+      <div class="ih-update-compare">
+        <div class="ih-update-vcard">
+          <div class="ih-update-vcard-label">运行中</div>
+          <div class="ih-update-vcard-ver" id="ih_up_local"></div>
+        </div>
+        <div class="ih-update-arrow"><i class="fa-solid fa-arrow-right-long"></i></div>
+        <div class="ih-update-vcard" id="ih_up_target_card">
+          <div class="ih-update-vcard-label">最新</div>
+          <div class="ih-update-vcard-ver" id="ih_up_remote">—</div>
+        </div>
+      </div>
+      <div class="ih-update-status" id="ih_up_status" data-tone="idle">
+        <span class="ih-update-dot"></span>
+        <span class="ih-update-status-text"></span>
+      </div>
+      <div class="ih-update-meta" id="ih_up_meta"></div>
+      <div class="ih-update-opts">
+        <div class="ih-switch-row">
+          <label class="ih-switch-label" for="ih_up_autoreload" style="font-size:12px;">
+            <i class="fa-solid fa-arrows-rotate"></i>
+            更新完成后自动刷新页面
+          </label>
+          <label class="ih-toggle">
+            <input type="checkbox" id="ih_up_autoreload" />
+            <span class="ih-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="ih-switch-row">
+          <label class="ih-switch-label" for="ih_up_autocheck" style="font-size:12px;">
+            <i class="fa-solid fa-satellite-dish"></i>
+            打开酒馆时自动检查更新
+          </label>
+          <label class="ih-toggle">
+            <input type="checkbox" id="ih_up_autocheck" />
+            <span class="ih-toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="ih-update-actions">
+        <button class="ih-hm-btn ih-update-repo-btn" id="ih_up_repo" title="在浏览器中打开仓库主页">
+          <i class="fa-solid fa-arrow-up-right-from-square"></i> 仓库
+        </button>
+        <button class="ih-hm-btn ih-hm-btn-ok" id="ih_up_primary"></button>
+        <button class="ih-hm-btn ih-hm-btn-close" id="ih_up_close">关闭</button>
+      </div>
+    </div>
+  `);
+  overlay.append(content);
+  syncDialogTheme(content[0]);
+  content.on("click", (e) => e.stopPropagation());
+  generateFaIconProtectionCSS();
+
+  let phase = "view";
+  let doneInfo = null;
+  let countdown = 0;
+  let countdownTimer = null;
+
+  const stopCountdown = () => {
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+    countdown = 0;
+  };
+
+  const isAlive = () => !!content[0] && content[0].isConnected;
+
+  // 面板可能被 ESC / 遮罩点击直接移除，这里兜底清理，避免倒计时在面板关闭后仍刷新页面
+  const teardownIfDetached = () => {
+    if (isAlive()) return false;
+    stopCountdown();
+    if (_updatePanelRender === render) _updatePanelRender = null;
+    document.removeEventListener("keydown", escHandler, true);
+    return true;
+  };
+
+  const closeDialog = () => {
+    stopCountdown();
+    _updatePanelRender = null;
+    document.removeEventListener("keydown", escHandler, true);
+    overlay.remove();
+  };
+  overlay.off("click").on("click", (e) => {
+    if (e.target === overlay[0]) closeDialog();
+  });
+  content.find("#ih_up_close").on("click", closeDialog);
+
+  const metaRow = (label, value, mono) => {
+    const row = document.createElement("div");
+    row.className = "ih-update-meta-row";
+    const dt = document.createElement("span");
+    dt.className = "ih-update-meta-key";
+    dt.textContent = label;
+    const dd = document.createElement("span");
+    dd.className = mono
+      ? "ih-update-meta-val ih-update-meta-mono"
+      : "ih-update-meta-val";
+    dd.textContent = value;
+    row.append(dt, dd);
+    return row;
+  };
+
+  const isNonGitInstall = () =>
+    !!updateState.git && !updateState.git.currentCommitHash;
+
+  const statusView = () => {
+    if (phase === "updating") {
+      return { tone: "busy", icon: "spin", text: "正在从 GitHub 拉取更新…" };
+    }
+    if (phase === "done") {
+      const hash = (doneInfo && doneInfo.shortCommitHash) || "";
+      const base =
+        doneInfo && doneInfo.isUpToDate
+          ? "文件已是最新，无需拉取"
+          : `更新完成${hash ? `（${hash}）` : ""}`;
+      const tail =
+        countdown > 0 ? `　·　${countdown} 秒后自动刷新` : "　·　刷新后生效";
+      return { tone: "ok", icon: "check", text: base + tail };
+    }
+    if (phase === "failed") {
+      return {
+        tone: "err",
+        icon: "warn",
+        text: updateState.message || "更新失败",
+      };
+    }
+    if (isNonGitInstall() && updateState.status === UPDATE_STATUS.AVAILABLE) {
+      return {
+        tone: "err",
+        icon: "warn",
+        text: "插件目录不是 Git 仓库（手动解压安装），无法自动更新。请在扩展管理器中卸载后用仓库地址重新安装。",
+      };
+    }
+    const v = ihUpdateBarView();
+    const iconMap = { busy: "spin", ok: "check", new: "down", err: "warn" };
+    let text = v.pill;
+    if (updateState.status === UPDATE_STATUS.AVAILABLE) {
+      text = `发现新版本 v${updateState.remote}，可直接一键更新`;
+    } else if (updateState.status === UPDATE_STATUS.STAGED) {
+      text = `v${updateState.installed} 已下载完成，刷新页面即可生效`;
+    } else if (updateState.status === UPDATE_STATUS.LATEST) {
+      text = "已是最新版本，无需更新";
+    }
+    return { tone: v.tone, icon: iconMap[v.tone] || "info", text };
+  };
+
+  const primaryView = () => {
+    if (phase === "updating") {
+      return { icon: "fa-spinner fa-spin", label: "更新中…", disabled: true };
+    }
+    if (phase === "done") {
+      return { icon: "fa-arrows-rotate", label: "立即刷新", disabled: false };
+    }
+    if (
+      isNonGitInstall() &&
+      (phase === "failed" || updateState.status === UPDATE_STATUS.AVAILABLE)
+    ) {
+      return {
+        icon: "fa-triangle-exclamation",
+        label: "无法自动更新",
+        disabled: true,
+      };
+    }
+    if (phase === "failed") {
+      return { icon: "fa-rotate-right", label: "重试更新", disabled: false };
+    }
+    switch (updateState.status) {
+      case UPDATE_STATUS.CHECKING:
+        return { icon: "fa-spinner fa-spin", label: "检查中…", disabled: true };
+      case UPDATE_STATUS.AVAILABLE:
+        return {
+          icon: "fa-cloud-arrow-down",
+          label: "立即更新",
+          disabled: false,
+        };
+      case UPDATE_STATUS.STAGED:
+        return { icon: "fa-arrows-rotate", label: "刷新生效", disabled: false };
+      default:
+        return { icon: "fa-rotate", label: "重新检查", disabled: false };
+    }
+  };
+
+  const render = () => {
+    if (teardownIfDetached()) return;
+    content
+      .find(".ih-update-title-ver")
+      .text(updateState.scope === "global" ? "全局扩展" : "");
+    content.find("#ih_up_local").text(`v${EXTENSION_VERSION}`);
+
+    const target =
+      updateState.remote ||
+      updateState.installed ||
+      (updateState.status === UPDATE_STATUS.CHECKING ? "" : EXTENSION_VERSION);
+    content.find("#ih_up_remote").text(target ? `v${target}` : "检查中…");
+    const isNewer = !!target && compareVersions(target, EXTENSION_VERSION) > 0;
+    content
+      .find("#ih_up_target_card")
+      .toggleClass("ih-update-vcard-new", isNewer);
+
+    const sv = statusView();
+    const statusBox = content.find("#ih_up_status");
+    statusBox.attr("data-tone", sv.tone);
+    const dot = statusBox.find(".ih-update-dot")[0];
+    if (dot) {
+      dot.className = "ih-update-dot";
+      if (sv.icon === "spin") {
+        dot.classList.add("ih-update-dot-spin");
+      } else if (sv.icon === "check") {
+        dot.classList.add("ih-update-dot-ok");
+      }
+    }
+    statusBox.find(".ih-update-status-text").text(sv.text);
+
+    const meta = content.find("#ih_up_meta")[0];
+    if (meta) {
+      meta.textContent = "";
+      meta.append(
+        metaRow(
+          "安装位置",
+          updateState.scope === "global"
+            ? "全局目录（public/scripts/extensions/third-party）"
+            : updateState.scope === "local"
+              ? "用户目录（data/<用户>/extensions）"
+              : "读取中…",
+        ),
+      );
+      meta.append(metaRow("目录名", EXTENSION_FOLDER_NAME, true));
+      const git = updateState.git;
+      if (git && git.currentCommitHash) {
+        meta.append(metaRow("分支", git.currentBranchName || "-", true));
+        meta.append(
+          metaRow("本地提交", String(git.currentCommitHash).slice(0, 7), true),
+        );
+      } else if (git) {
+        meta.append(
+          metaRow("Git 状态", "非 Git 仓库（手动解压安装），无法自动更新"),
+        );
+      } else if (updateState.gitError) {
+        meta.append(metaRow("Git 状态", updateState.gitError));
+      } else {
+        meta.append(metaRow("Git 状态", "读取中…"));
+      }
+    }
+
+    const pv = primaryView();
+    const primary = content.find("#ih_up_primary")[0];
+    if (primary) {
+      primary.disabled = pv.disabled;
+      ihSetBtnContent(primary, pv.icon, pv.label);
+    }
+    content.find("#ih_up_repo").toggle(!!updateState.repo);
+  };
+
+  _updatePanelRender = render;
+
+  content
+    .find("#ih_up_autoreload")
+    .prop("checked", s.autoReloadAfterUpdate !== false);
+  content.find("#ih_up_autocheck").prop("checked", s.autoCheckUpdate !== false);
+  content.find("#ih_up_autoreload").on("change", function () {
+    getSettings().autoReloadAfterUpdate = $(this).prop("checked");
+    saveSettingsDebounced();
+  });
+  content.find("#ih_up_autocheck").on("change", function () {
+    getSettings().autoCheckUpdate = $(this).prop("checked");
+    saveSettingsDebounced();
+  });
+  content.find("#ih_up_repo").on("click", function () {
+    if (!updateState.repo) return;
+    window.open(updateState.repo.url, "_blank", "noopener");
+  });
+
+  const startCountdown = () => {
+    if (getSettings().autoReloadAfterUpdate === false) return;
+    countdown = 3;
+    render();
+    countdownTimer = setInterval(() => {
+      if (teardownIfDetached()) return;
+      countdown -= 1;
+      if (countdown <= 0) {
+        stopCountdown();
+        ihReloadForUpdate();
+        return;
+      }
+      render();
+    }, 1000);
+  };
+
+  const runUpdate = async () => {
+    if (updateState.busy) return;
+    updateState.busy = true;
+    phase = "updating";
+    stopCountdown();
+    render();
+    ihRenderUpdateUi();
+    try {
+      const result = await ihRequestUpdate();
+      doneInfo = result || {};
+      phase = "done";
+      updateState.installed = updateState.remote || updateState.installed;
+      try {
+        const m = await ihFetchInstalledManifest();
+        if (m && m.version) updateState.installed = String(m.version).trim();
+      } catch (e) {}
+      ihComputeUpdateStatus();
+      updateState.git = null;
+      try {
+        toastr.success(
+          doneInfo.isUpToDate
+            ? "插件文件已是最新"
+            : `已更新到 v${updateState.installed}`,
+          "快捷工具栏",
+          { timeOut: 3000 },
+        );
+      } catch (e) {}
+      render();
+      startCountdown();
+    } catch (e) {
+      phase = "failed";
+      updateState.message = (e && e.message) || "更新失败";
+      try {
+        toastr.error(updateState.message, "更新失败", { timeOut: 6000 });
+      } catch (e2) {}
+      render();
+    } finally {
+      updateState.busy = false;
+      ihRenderUpdateUi();
+    }
+  };
+
+  content.find("#ih_up_primary").on("click", function () {
+    if (phase === "done") {
+      stopCountdown();
+      ihReloadForUpdate();
+      return;
+    }
+    if (phase === "failed") {
+      runUpdate();
+      return;
+    }
+    if (updateState.status === UPDATE_STATUS.STAGED) {
+      ihReloadForUpdate();
+      return;
+    }
+    if (updateState.status === UPDATE_STATUS.AVAILABLE) {
+      runUpdate();
+      return;
+    }
+    ihCheckForUpdates({ silent: true, deep: true });
+  });
+
+  render();
+
+  // 面板打开时总是补一次 git 信息（安装位置 / 分支 / 提交），与版本检查互不阻塞
+  const loadGitInfo = () =>
+    ihFetchGitInfo(false)
+      .catch((e) => {
+        updateState.gitError = (e && e.message) || "";
+      })
+      .finally(() => render());
+
+  const needsCheck =
+    updateState.status === UPDATE_STATUS.IDLE ||
+    updateState.status === UPDATE_STATUS.ERROR ||
+    !updateState.checkedAt ||
+    Date.now() - updateState.checkedAt > 60000;
+  if (opts.autoUpdate && updateState.status === UPDATE_STATUS.AVAILABLE) {
+    // 先读一次 git 信息：既填充下方元信息，也能在非 Git 安装时提前拦住必定失败的更新
+    phase = "updating";
+    render();
+    loadGitInfo().finally(() => {
+      if (!isAlive()) return;
+      if (isNonGitInstall()) {
+        phase = "failed";
+        updateState.message =
+          "插件目录不是 Git 仓库（手动解压安装），无法自动更新。请在扩展管理器中卸载后用仓库地址重新安装。";
+        render();
+        return;
+      }
+      phase = "view";
+      runUpdate();
+    });
+  } else {
+    loadGitInfo();
+    if (needsCheck) ihCheckForUpdates({ silent: true });
+  }
+}
+
+const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
 <h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.5</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
+  <li><b>新增「一键更新」</b>：设置面板顶部新增更新状态条，可直接检查并更新插件，无需再去扩展管理器。点击状态文字可打开更新面板，查看安装位置、分支、本地提交等信息。</li>
+  <li><b>更新后自动刷新</b>：更新完成后默认倒计时 3 秒自动刷新页面使新版本生效，可在更新面板中关闭。若酒馆已在后台自动下载好新版本，插件会提示「刷新即生效」，点击提示即可刷新。</li>
   <li><b>修复「选中模式」下视图异常跳转</b>：现已优化，无论自上而下还是自下而上选择，选中结束后视图均保持在当前阅读位置。</li>
   <li><b>优化手机键盘弹出、收起时的流畅度</b>：减少了键盘开合过程中的多余计算，配置较低的手机上输入栏会更跟手。</li>
 </ul>
@@ -6562,9 +7314,9 @@ function setupChangelogAutoPopup() {
 
 function openChangelogPanel() {
   const latestKnown =
-    _latestRemoteVersion &&
-    compareVersions(_latestRemoteVersion, CHANGELOG_VERSION) > 0
-      ? _latestRemoteVersion
+    updateState.remote &&
+    compareVersions(updateState.remote, CHANGELOG_VERSION) > 0
+      ? updateState.remote
       : CHANGELOG_VERSION;
   getSettings().lastSeenChangelogVersion = latestKnown;
   saveSettingsDebounced();
@@ -24001,6 +24753,8 @@ async function loadSettings() {
   if (s.twoRowMode === undefined) s.twoRowMode = false;
   if (s.twoRowOrder === undefined) s.twoRowOrder = "input-first";
   if (s.lastSeenChangelogVersion === undefined) s.lastSeenChangelogVersion = "";
+  if (s.autoCheckUpdate === undefined) s.autoCheckUpdate = true;
+  if (s.autoReloadAfterUpdate === undefined) s.autoReloadAfterUpdate = true;
   setTimeout(() => {
     const verEl = document.getElementById("ih_version_label");
     if (verEl) verEl.textContent = `v${CHANGELOG_VERSION}`;
@@ -24009,9 +24763,11 @@ async function loadSettings() {
       if (badge) badge.style.display = "inline-block";
     }
     setupChangelogAutoPopup();
+    ihRenderUpdateUi();
   }, 100);
   setTimeout(() => {
-    checkRemoteUpdate();
+    if (getSettings().autoCheckUpdate === false) return;
+    ihCheckForUpdates({ silent: true }).then(() => ihNotifyStagedUpdate());
   }, 800);
   if (s.bottomNavMode === undefined) s.bottomNavMode = false;
   bottomNavController.active = !!s.bottomNavMode;
@@ -25035,6 +25791,14 @@ jQuery(async () => {
   });
   $(document).on("click", "#ih_open_help_btn", function () {
     openHelpPanel();
+  });
+  $(document).on("click", "#ih_update_pill", function (e) {
+    e.stopPropagation();
+    openUpdatePanel();
+  });
+  $(document).on("click", "#ih_update_action", function (e) {
+    e.stopPropagation();
+    ihUpdateActionClick();
   });
   $(document).on("click", "#ih_fp_reset_pos_header", function (e) {
     e.stopPropagation();

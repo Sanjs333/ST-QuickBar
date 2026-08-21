@@ -33,17 +33,26 @@
       ></div>
     </div>
     <div class="inline-drawer-content">
-      <div
-        id="ih_version_label"
-        style="
-          text-align: left;
-          font-size: 10px;
-          opacity: 0.5;
-          margin-bottom: 4px;
-          letter-spacing: 0.5px;
-          padding-left: 2px;
-        "
-      ></div>
+      <div class="ih-update-bar" id="ih_update_bar">
+        <span class="ih-update-ver" id="ih_version_label"></span>
+        <span
+          class="ih-update-state"
+          id="ih_update_pill"
+          data-tone="idle"
+          title="点击查看更新详情"
+        >
+          <span class="ih-update-dot"></span>
+          <span class="ih-update-state-text">点击检查更新</span>
+        </span>
+        <button
+          type="button"
+          id="ih_update_action"
+          class="ih-update-action menu_button menu_button_icon"
+          style="padding: 3px 10px; font-size: 11px"
+        >
+          <i class="fa-solid fa-rotate"></i> 检查更新
+        </button>
+      </div>
       <div
         style="
           display: flex;

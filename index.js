@@ -399,6 +399,7 @@ const defaultSettings = {
   colorPicker: { x: null, y: null, width: 0, height: 0 },
   branchSort: { by: "modified", desc: true, relative: false },
   searchTreeView: true,
+  lastMgrTab: "hide",
   floatingPanel: {
     enabled: false,
     orientation: "vertical",
@@ -6473,7 +6474,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.2.5";
+const EXTENSION_VERSION = "3.2.6";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -7281,12 +7282,10 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.5</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.6</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>新增「一键更新」</b>：设置面板顶部新增更新状态条，可直接检查并更新插件，无需再去扩展管理器。点击状态文字可打开更新面板，查看安装位置、分支、本地提交等信息。</li>
-  <li><b>更新后自动刷新</b>：更新完成后默认倒计时 3 秒自动刷新页面使新版本生效，可在更新面板中关闭。若酒馆已在后台自动下载好新版本，插件会提示「刷新即生效」，点击提示即可刷新。</li>
-  <li><b>修复「选中模式」下视图异常跳转</b>：现已优化，无论自上而下还是自下而上选择，选中结束后视图均保持在当前阅读位置。</li>
-  <li><b>优化手机键盘弹出、收起时的流畅度</b>：减少了键盘开合过程中的多余计算，配置较低的手机上输入栏会更跟手。</li>
+  <li><b>消息管理面板记忆标签页</b>：关闭面板后再次打开，将自动回到上次使用的标签页，无需重新切换。</li>
+  <li><b>移除悬浮球遮挡提示</b>：悬浮球被其他元素遮挡时不再弹出提示消息，自动恢复与位置复位逻辑保持不变。</li>
 </ul>
 `;
 
@@ -9070,6 +9069,15 @@ async function ihAskDeleteDuplicates(dupList) {
   }
 }
 
+const IH_MGR_TAB_KEYS = [
+  "hide",
+  "delete",
+  "move",
+  "insert",
+  "search",
+  "branch",
+  "transfer",
+];
 let _ihMgrInstance = null;
 let _ihMgrFoldBallPos = { x: null, y: null };
 function openHideManagerPanel() {
@@ -9975,6 +9983,11 @@ function openHideManagerPanel() {
     renderVisible();
     if (sharedState.scrollTop > 0) vlistEl.scrollTop = sharedState.scrollTop;
     updateCount();
+    const _savedTab = getSettings().lastMgrTab;
+    if (_savedTab && _savedTab !== "hide") {
+      const _tabBtn = content.find(`.ih-mgr-tab[data-tab="${_savedTab}"]`);
+      if (_tabBtn.length) _tabBtn.trigger("click");
+    }
   }, 0);
 
   let _mgrChatSyncTimer = null;
@@ -10452,6 +10465,8 @@ function openHideManagerPanel() {
     sharedState.scrollTop = vlistEl.scrollTop;
     sharedState.activeTab = tab;
     content.attr("data-active-tab", tab);
+    getSettings().lastMgrTab = tab;
+    saveSettingsDebounced();
     _closeTransferDropdown();
     _closeSearchS2Dropdown();
     sharedState.rangeStart = null;
@@ -20141,7 +20156,6 @@ const floatingPanelController = {
       ctx.el.style.removeProperty("visibility");
       console.warn("快捷工具栏: 悬浮球 pointer-events 为 none，已强制恢复");
       this._ballBlockedKey = null;
-      this._warnBallBlocked("pointer-events:none", false);
       return;
     }
     const hit = document.elementFromPoint(ctx.cx, ctx.cy);
@@ -20178,7 +20192,6 @@ const floatingPanelController = {
     }
     const after = document.elementFromPoint(ctx.cx, ctx.cy);
     if (!after || after === ctx.el || ctx.el.contains(after)) {
-      this._warnBallBlocked(key, false);
       return;
     }
     const fp = getSettings().floatingPanel;
@@ -20210,23 +20223,6 @@ const floatingPanelController = {
       "已复位 =",
       repositioned,
     );
-    this._warnBallBlocked(key, repositioned);
-  },
-
-  _ballWarnTime: 0,
-
-  _warnBallBlocked(what, repositioned) {
-    const now = Date.now();
-    if (now - (this._ballWarnTime || 0) < 60000) return;
-    this._ballWarnTime = now;
-    try {
-      toastr.warning(
-        `悬浮球被「${what}」遮挡，已自动恢复${repositioned ? "并复位" : ""}。` +
-          `如反复出现，请检查美化 CSS 中悬浮球 / 悬浮面板的 display、z-index、pointer-events 设置。`,
-        "快捷工具栏",
-        { timeOut: 10000, extendedTimeOut: 5000 },
-      );
-    } catch (e) {}
   },
 
   _removeKeyboardAdaptation() {
@@ -24740,6 +24736,7 @@ async function loadSettings() {
   if (typeof s.branchSort.desc !== "boolean") s.branchSort.desc = true;
   if (typeof s.branchSort.relative !== "boolean") s.branchSort.relative = false;
   if (s.searchTreeView === undefined) s.searchTreeView = true;
+  if (!IH_MGR_TAB_KEYS.includes(s.lastMgrTab)) s.lastMgrTab = "hide";
   if (s.enabled === undefined) s.enabled = true;
   if (s.confirmDangerousActions === undefined)
     s.confirmDangerousActions = false;

@@ -8881,3 +8881,63 @@ body.ih-cp-selecting input::-moz-selection {
     flex-basis: 54px;
   }
 }
+
+.ih-me-model-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: var(--monoFontFamily);
+  padding: 2px 8px;
+  border-radius: 9px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 14%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 28%,
+      transparent
+    );
+  cursor: default;
+}
+
+.ih-chat-model-badge {
+  font-size: 10px;                   /* 字号，可调整 */
+  font-family: var(--monoFontFamily, monospace);
+  opacity: 0.65;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 12%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--SmartThemeQuoteColor, cornflowerblue) 22%,
+      transparent
+    );
+  margin-left: 4px;
+  white-space: nowrap;
+  max-width: 180px;                  /* 超长模型名截断宽度 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  vertical-align: middle;
+  cursor: default;
+}
+
+.input-helper-btn svg,
+.ih-fp-btn svg {
+    display: block;         /* 消除 inline SVG 可能产生的基线间距 */
+    width: 11px;            /* 与 FA 图标保护 CSS 强制的 11px 对齐 */
+    height: 11px;
+    flex-shrink: 0;
+}

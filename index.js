@@ -89,7 +89,7 @@ const BUTTON_DEFS = {
   },
   editLastMsg: {
     label: "编辑最后消息",
-    icon: "bi bi-pencil-fill",
+    icon: "fa-solid fa-pen",
     text: null,
   },
   generateSwipe: {
@@ -263,16 +263,6 @@ function ensureFeatherLoaded() {
   document.head.appendChild(s);
 }
 
-function ensureBootstrapIconsLoaded() {
-  if (document.getElementById("ih-bootstrap-icons-css")) return;
-  const link = document.createElement("link");
-  link.id = "ih-bootstrap-icons-css";
-  link.rel = "stylesheet";
-  link.href =
-    "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css";
-  document.head.appendChild(link);
-}
-
 function getFeatherSendSvg() {
   try {
     if (window.feather && window.feather.icons && window.feather.icons.send) {
@@ -400,6 +390,7 @@ const defaultSettings = {
   branchSort: { by: "modified", desc: true, relative: false },
   searchTreeView: true,
   lastMgrTab: "hide",
+  showModelInChat: false,
   floatingPanel: {
     enabled: false,
     orientation: "vertical",
@@ -6474,7 +6465,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.2.6";
+const EXTENSION_VERSION = "3.2.7";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -7282,10 +7273,13 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.6</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.7</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>消息管理面板记忆标签页</b>：关闭面板后再次打开，将自动回到上次使用的标签页，无需重新切换。</li>
-  <li><b>移除悬浮球遮挡提示</b>：悬浮球被其他元素遮挡时不再弹出提示消息，自动恢复与位置复位逻辑保持不变。</li>
+  <li><b>聊天界面新增显示模型名</b>：设置中新增「聊天界面显示模型名」开关，开启后每条 AI 消息时间戳旁会显示生成时所用的模型名称，方便对比不同模型回复效果；关闭则不显示，消息管理面板内模型名不受此开关影响。</li>
+  <li><b>消息管理面板显示模型名</b>：消息列表中每条 AI 消息右侧会显示该备选生成时所用的模型名；消息详情页的备选标签区同步显示当前备选的模型名，鼠标悬停各备选标签可查看对应模型。</li>
+  <li><b>修复原生自定义端点图标显示为 ❓</b>：酒馆原生使用自定义 API 端点时，显示图标模型功能只会显示为❓，现在会根据模型名称自动识别并显示对应厂商图标（支持 OpenAI、Claude、DeepSeek、Gemini 等主流模型），无法识别时自动隐藏错误占位符。</li>
+  <li><b>编辑最后消息图标更新</b>：图标改为 Font Awesome 钢笔图标，并移除了对 Bootstrap Icons CDN 的依赖。</li>
+  <li><b>修复发送/停止按钮图标高度不一致</b>：发送/停止按钮的 SVG 图标高度现与其他图标对齐，消除工具栏中图标高低不平的视觉问题。</li>
 </ul>
 `;
 
@@ -8087,6 +8081,235 @@ function ihEnsureSwipeArrays(msg) {
   if (msg.swipe_info.length > msg.swipes.length) {
     msg.swipe_info.length = msg.swipes.length;
   }
+}
+function ihGetSwipeModelName(msg, swipeIdx) {
+  if (!msg) return "";
+  const curIdx = typeof msg.swipe_id === "number" ? msg.swipe_id : 0;
+  const idx =
+    typeof swipeIdx === "number" && swipeIdx >= 0 ? swipeIdx : curIdx;
+  if (Array.isArray(msg.swipe_info) && msg.swipe_info[idx]) {
+    const extra = msg.swipe_info[idx].extra;
+    if (extra && typeof extra === "object" && extra.model) {
+      return String(extra.model);
+    }
+  }
+  if (idx === curIdx && msg.extra && msg.extra.model) {
+    return String(msg.extra.model);
+  }
+  return "";
+}
+const IH_CUSTOM_MODEL_ICON_RULES = [
+  { test: /gpt|chatgpt|\bo\d[-_]/i, icon: "openai" },
+  { test: /claude/i, icon: "claude" },
+  { test: /deepseek/i, icon: "deepseek" },
+  { test: /gemini|gemma/i, icon: "makersuite" },
+  { test: /mistral|mixtral|devstral|magistral|codestral/i, icon: "mistralai" },
+  { test: /llama/i, icon: "llamacpp" },
+  { test: /cohere|command-r/i, icon: "cohere" },
+  { test: /sonar|perplexity/i, icon: "perplexity" },
+  { test: /grok|xai/i, icon: "xai" },
+  { test: /moonshot|kimi/i, icon: "moonshot" },
+  { test: /siliconflow/i, icon: "siliconflow" },
+  { test: /minimax/i, icon: "minimax" },
+];
+
+function ihGetIconNameForCustomModel(modelName) {
+  if (!modelName) return null;
+  for (const rule of IH_CUSTOM_MODEL_ICON_RULES) {
+    if (rule.test.test(modelName)) return rule.icon;
+  }
+  return null;
+}
+
+function ihFixCustomModelIconForMsg(mesEl, mesId) {
+  try {
+    if (!power_user || !power_user.timestamp_model_icon) return;
+    const msg = typeof mesId === "number" ? chat[mesId] : null;
+    if (!msg || msg.is_user || !msg.extra || msg.extra.api !== "custom") return;
+    const iconName = ihGetIconNameForCustomModel(String(msg.extra.model || ""));
+    if (!iconName) return;
+    const imgEl = mesEl.querySelector("img.timestamp-icon.icon-svg");
+    if (imgEl) {
+      imgEl.src = `/img/${iconName}.svg`;
+      return;
+    }
+    const existingIcon = mesEl.querySelector(".timestamp-icon");
+    if (!existingIcon) return;
+    const newImg = document.createElement("img");
+    newImg.classList.add("icon-svg", "timestamp-icon");
+    newImg.title = `${msg.extra.api} - ${msg.extra.model || ""}`;
+    newImg.src = `/img/${iconName}.svg`;
+    if (window.SVGInject) {
+      newImg.onload = function () {
+        try { SVGInject(newImg); } catch (e) {}
+      };
+    }
+    existingIcon.parentNode.replaceChild(newImg, existingIcon);
+  } catch (e) {
+    console.warn("快捷工具栏: 修复自定义模型图标失败", e);
+  }
+}
+
+function ihFixAllCustomModelIcons() {
+  try {
+    if (!power_user || !power_user.timestamp_model_icon) return;
+    document.querySelectorAll('#chat .mes[is_user="false"]').forEach(function (mesEl) {
+      const mesId = parseInt(mesEl.getAttribute("mesid"));
+      if (!isNaN(mesId)) ihFixCustomModelIconForMsg(mesEl, mesId);
+    });
+  } catch (e) {
+    console.warn("快捷工具栏: 批量修复模型图标失败", e);
+  }
+}
+let _ihStreamingApi = "";
+let _ihStreamingModel = "";
+
+function ihApplyStreamingBadges() {
+  try {
+    if (!_ihStreamingApi && !_ihStreamingModel) return;
+    const lastIdx = chat.length - 1;
+    if (lastIdx < 0) return;
+    const msg = chat[lastIdx];
+    if (!msg || msg.is_user) return;
+    const mesEl = document.querySelector(`#chat .mes[mesid="${lastIdx}"]`);
+    if (!mesEl) return;
+    const api = _ihStreamingApi;
+    const model = _ihStreamingModel;
+    if (
+      power_user &&
+      power_user.timestamp_model_icon &&
+      api === "custom" &&
+      model &&
+      !mesEl.querySelector(".timestamp-icon")
+    ) {
+      const iconName = ihGetIconNameForCustomModel(model);
+      if (iconName) {
+        const img = new Image();
+        img.classList.add("icon-svg", "timestamp-icon");
+        img.src = `/img/${iconName}.svg`;
+        img.title = `${api} - ${model}`;
+        img._ihIconFixed = true;
+        if (window.SVGInject) {
+          img.onload = function () {
+            try {
+              SVGInject(img);
+            } catch (e) {}
+          };
+        }
+        img.onerror = function () {
+          img.style.display = "none";
+        };
+        const tsEl = mesEl.querySelector(".timestamp");
+        if (tsEl && tsEl.parentNode) {
+          tsEl.parentNode.insertBefore(img, tsEl.nextSibling);
+        }
+      }
+    }
+    if (getSettings().showModelInChat && model) {
+      mesEl.querySelectorAll(".ih-chat-model-badge").forEach(function (el) {
+        el.remove();
+      });
+      const badge = document.createElement("span");
+      badge.className = "ih-chat-model-badge";
+      badge.textContent = model;
+      badge.title = model;
+      const iconEl = mesEl.querySelector(".timestamp-icon");
+      const anchor = iconEl || mesEl.querySelector(".timestamp");
+      if (anchor && anchor.parentNode) {
+        anchor.parentNode.insertBefore(badge, anchor.nextSibling);
+      }
+    }
+  } catch (e) {
+    console.warn("快捷工具栏: 应用流式生成标志失败", e);
+  }
+}
+function ihUpdateChatModelBadge(mesId) {
+  if (!getSettings().showModelInChat) return;
+  const msg = typeof mesId === "number" ? chat[mesId] : null;
+  if (!msg || msg.is_user) return;
+  const modelName = ihGetSwipeModelName(msg);
+  const mesEl = document.querySelector(`#chat .mes[mesid="${mesId}"]`);
+  if (!mesEl) return;
+  mesEl.querySelectorAll(".ih-chat-model-badge").forEach(function (el) {
+    el.remove();
+  });
+  if (!modelName) return;
+  const badge = document.createElement("span");
+  badge.className = "ih-chat-model-badge";
+  badge.textContent = modelName;
+  badge.title = modelName;
+  const iconEl = mesEl.querySelector(".timestamp-icon");
+  const anchor = iconEl || mesEl.querySelector(".timestamp");
+  if (anchor && anchor.parentNode) {
+    anchor.parentNode.insertBefore(badge, anchor.nextSibling);
+  }
+}
+
+function ihUpdateAllChatModelBadges() {
+  if (!getSettings().showModelInChat) {
+    document.querySelectorAll("#chat .mes .ih-chat-model-badge").forEach(function (el) {
+      el.remove();
+    });
+    return;
+  }
+  for (let i = 0; i < chat.length; i++) {
+    ihUpdateChatModelBadge(i);
+  }
+}
+
+function ihSetupChatModelIconFix() {
+  const chatEl = document.getElementById("chat");
+  if (!chatEl || chatEl._ihIconObserver) return;
+  chatEl._ihIconObserver = new MutationObserver(function (mutations) {
+    for (const mut of mutations) {
+      for (const node of mut.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (
+          node.classList &&
+          node.classList.contains("mes") &&
+          node.getAttribute("is_user") !== "true" &&
+          (_ihStreamingApi || _ihStreamingModel)
+        ) {
+          setTimeout(function () {
+            ihApplyStreamingBadges();
+          }, 80);
+        }
+        const imgs = [];
+        if (node.classList && node.classList.contains("timestamp-icon") && node.classList.contains("icon-svg")) {
+          imgs.push(node);
+        }
+        if (node.querySelectorAll) {
+          node.querySelectorAll(".timestamp-icon.icon-svg").forEach(function (n) {
+            imgs.push(n);
+          });
+        }
+        imgs.forEach(function (img) {
+          if (img._ihIconFixed) return;
+          img._ihIconFixed = true;
+          if (img.src && img.src.includes("/img/custom.svg")) {
+            const mesEl = img.closest && img.closest("#chat .mes");
+            if (mesEl) {
+              const mesId = parseInt(mesEl.getAttribute("mesid"));
+              if (!isNaN(mesId)) {
+                const msg = chat[mesId];
+                const api = (msg && msg.extra && msg.extra.api) || _ihStreamingApi;
+                const model = (msg && msg.extra && msg.extra.model) || _ihStreamingModel;
+                if (api === "custom" && model) {
+                  const iconName = ihGetIconNameForCustomModel(model);
+                  if (iconName) img.src = `/img/${iconName}.svg`;
+                }
+              }
+            }
+          }
+          img.addEventListener("error", function () {
+            img.style.display = "none";
+          });
+          if (img.complete && img.naturalWidth === 0) img.style.display = "none";
+        });
+      }
+    }
+  });
+  chatEl._ihIconObserver.observe(chatEl, { childList: true, subtree: true });
 }
 
 function ihPickSwipeMergeTarget(srcFloor) {
@@ -9788,19 +10011,24 @@ function openHideManagerPanel() {
       : hidden
         ? '<span class="ih-mgr-msg-ghost"><i class="fa-solid fa-ghost"></i></span>'
         : "";
+    const _modelName = !msg.is_user ? ihGetSwipeModelName(msg) : "";
+    const _modelHtml = _modelName
+      ? `<span class="ih-mgr-msg-model" title="${ihEscapeAttr(_modelName)}">${ihEscapeHtml(_modelName)}</span>`
+      : "";
     return `
-      <div class="${cls.join(" ")}" data-floor="${floor}" style="height:${ROW_HEIGHT}px;">
-        <span class="ih-mgr-msg-check"><input type="checkbox" data-floor="${floor}" ${isChecked ? "checked" : ""} /></span>
-        <span class="ih-mgr-msg-lead">
-          <button class="ih-mgr-msg-jump" data-floor="${floor}" title="跳转到此消息"><i class="fa-solid fa-location-arrow"></i></button>
-          <span class="ih-mgr-msg-floor">#${floor}</span>
-        </span>
-        <span class="ih-mgr-msg-sender">${sender}</span>
-        ${previewHtml}
-        <button class="ih-mgr-msg-edit" data-floor="${floor}" title="查看 / 编辑此楼层"><i class="fa-solid fa-eye"></i></button>
-        ${ghost}
-      </div>
-    `;
+        <div class="${cls.join(" ")}" data-floor="${floor}" style="height:${ROW_HEIGHT}px;">
+          <span class="ih-mgr-msg-check"><input type="checkbox" data-floor="${floor}" ${isChecked ? "checked" : ""} /></span>
+          <span class="ih-mgr-msg-lead">
+            <button class="ih-mgr-msg-jump" data-floor="${floor}" title="跳转到此消息"><i class="fa-solid fa-location-arrow"></i></button>
+            <span class="ih-mgr-msg-floor">#${floor}</span>
+          </span>
+          <span class="ih-mgr-msg-sender">${sender}</span>
+          ${previewHtml}
+          ${_modelHtml}
+          <button class="ih-mgr-msg-edit" data-floor="${floor}" title="查看 / 编辑此楼层"><i class="fa-solid fa-eye"></i></button>
+          ${ghost}
+        </div>
+      `;
   }
 
   function renderVisible() {
@@ -13247,7 +13475,10 @@ function openHideManagerPanel() {
         if (ev.selMode) {
           tip = isSel ? "已勾选，点一下取消" : "点一下勾选，同时在下方预览这条";
         } else {
-          tip = isLive ? "当前显示的备选" : "备选 " + (i + 1);
+          const _swipeModel = ihGetSwipeModelName(m, i);
+          tip =
+            (isLive ? "当前显示的备选" : "备选 " + (i + 1)) +
+            (_swipeModel ? " · " + _swipeModel : "");
         }
         html +=
           '<button class="ih-me-swipe' +
@@ -13270,13 +13501,19 @@ function openHideManagerPanel() {
           '<button class="ih-me-swipe" id="ih_me_swipe_add" title="给这一楼追加一条空白备选，追加后自动切到它并进入编辑"><i class="fa-solid fa-plus"></i></button>';
       }
       html += "</div>";
+      const _curSwipeIdx =
+        ev.swipeIdx >= 0
+          ? ev.swipeIdx
+          : typeof m.swipe_id === "number"
+            ? m.swipe_id
+            : 0;
+      const _curModel = ihGetSwipeModelName(m, _curSwipeIdx);
+      if (_curModel) {
+        html += `<span class="ih-me-model-badge" title="${ihEscapeAttr(_curModel)}">${ihEscapeHtml(_curModel)}</span>`;
+      }
       if (_meMulti) {
         html +=
-          '<button class="ih-me-swipe ih-me-sel-toggle' +
-          (ev.selMode ? " ih-me-swipe-on" : "") +
-          '" id="ih_me_sel_toggle" title="' +
-          (ev.selMode ? "退出多选" : "多选备选，可一次删掉多条") +
-          '"><i class="fa-solid fa-list-check"></i></button>';
+          `<button class="ih-me-swipe ih-me-sel-toggle${ev.selMode ? " ih-me-swipe-on" : ""}" id="ih_me_sel_toggle" title="${ev.selMode ? "退出多选" : "多选备选，可一次删掉多条"}"><i class="fa-solid fa-list-check"></i></button>`;
       }
       html += "</div>";
     }
@@ -18732,6 +18969,18 @@ function openHideManagerPanel() {
 }
 
 function doChatManager() {
+  let hasChat = false;
+  try {
+    const ctx = SillyTavern.getContext();
+    hasChat = ctx.characterId !== undefined || !!ctx.groupId;
+  } catch (e) {
+    hasChat = this_chid !== undefined;
+  }
+  if (!hasChat) {
+    const rmBtn = document.getElementById("rm_button_characters");
+    if (rmBtn) rmBtn.click();
+    return;
+  }
   const btn = document.getElementById("option_select_chat");
   if (btn) btn.click();
   else toastr.warning("找不到聊天管理器入口", "", { timeOut: 1200 });
@@ -18746,9 +18995,23 @@ function doChatNew() {
 }
 
 function doChatClose() {
+  let hasChat = false;
+  try {
+    const ctx = SillyTavern.getContext();
+    hasChat = ctx.characterId !== undefined || !!ctx.groupId;
+  } catch (e) {
+    hasChat = this_chid !== undefined;
+  }
+  if (!hasChat) {
+    toastr.info("当前没有打开的聊天", "", { timeOut: 1200 });
+    return;
+  }
   const btn = document.getElementById("option_close_chat");
-  if (btn) btn.click();
-  else toastr.warning("找不到关闭聊天入口", "", { timeOut: 1200 });
+  if (btn && $(btn).is(":visible")) {
+    btn.click();
+  } else {
+    toastr.warning("找不到关闭聊天入口", "", { timeOut: 1200 });
+  }
 }
 
 function doResetFloatingBall() {
@@ -24737,6 +25000,7 @@ async function loadSettings() {
   if (typeof s.branchSort.relative !== "boolean") s.branchSort.relative = false;
   if (s.searchTreeView === undefined) s.searchTreeView = true;
   if (!IH_MGR_TAB_KEYS.includes(s.lastMgrTab)) s.lastMgrTab = "hide";
+  if (s.showModelInChat === undefined) s.showModelInChat = false;
   if (s.enabled === undefined) s.enabled = true;
   if (s.confirmDangerousActions === undefined)
     s.confirmDangerousActions = false;
@@ -24868,6 +25132,7 @@ async function loadSettings() {
   $("#enable_two_row_mode").prop("checked", s.twoRowMode);
   $("#ih_two_row_order").val(s.twoRowOrder || "input-first");
   $("#ih_two_row_order_row").toggle(!!s.twoRowMode);
+  $("#enable_show_model_in_chat").prop("checked", !!s.showModelInChat);
   $("#enable_floating_panel").prop("checked", s.floatingPanel.enabled);
   loadCustomSymbolButtons();
   renderFolderSettings();
@@ -25462,7 +25727,6 @@ jQuery(async () => {
     `;
   document.head.appendChild(hiddenCSS);
   ensureFeatherLoaded();
-  ensureBootstrapIconsLoaded();
   extension_settings[extensionName] = extension_settings[extensionName] || {};
   const settingsHtml = await $.get(`${extensionFolderPath}/settings.html`);
   $("#extensions_settings2").prepend(settingsHtml);
@@ -25488,7 +25752,7 @@ jQuery(async () => {
 
   if (!$("#input_edit_last_msg_btn").length) {
     const editLastBtn = $(
-      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息"><i class="bi bi-pencil-fill"></i></button>',
+      '<button id="input_edit_last_msg_btn" class="input-helper-btn" title="编辑最后消息"><i class="fa-solid fa-pen"></i></button>',
     );
     $("#input_helper_toolbar").append(editLastBtn);
   }
@@ -25733,6 +25997,11 @@ jQuery(async () => {
     saveSettingsDebounced();
     buildToolbar();
     $("#ih_two_row_order_row").toggle($(this).prop("checked"));
+  });
+  $(document).on("change", "#enable_show_model_in_chat", function () {
+    getSettings().showModelInChat = $(this).prop("checked");
+    saveSettingsDebounced();
+    ihUpdateAllChatModelBadges();
   });
 
   if (!$("#ih_two_row_order_row").length) {
@@ -26113,6 +26382,7 @@ jQuery(async () => {
   }
   setupAutoScrollPauseOnUserScroll();
   setupNavFlagClearOnUserScroll();
+  ihSetupChatModelIconFix();
 
   historyManager.init();
   setupInputTracking();
@@ -26194,6 +26464,8 @@ jQuery(async () => {
       setTimeout(() => {
         historyManager.init();
         chatUndoManager.updateStableSnapshot(true);
+        ihUpdateAllChatModelBadges();
+        ihFixAllCustomModelIcons();
       }, 200);
     });
 
@@ -26236,6 +26508,19 @@ jQuery(async () => {
         streamScrollController.onStreamStart();
         scrollLockController.onGenerationStart(type);
         sendStopController.setGenerating();
+        try {
+          _ihStreamingApi =
+            typeof SillyTavernScript.getGeneratingApi === "function"
+              ? String(SillyTavernScript.getGeneratingApi())
+              : "";
+          _ihStreamingModel =
+            typeof SillyTavernScript.getGeneratingModel === "function"
+              ? String(SillyTavernScript.getGeneratingModel())
+              : "";
+        } catch (e) {
+          _ihStreamingApi = "";
+          _ihStreamingModel = "";
+        }
       },
     );
 
@@ -26244,6 +26529,8 @@ jQuery(async () => {
       scrollLockController.onGenerationEnd();
       streamScrollController.onStreamEnd();
       sendStopController.setGenerating();
+      _ihStreamingApi = "";
+      _ihStreamingModel = "";
     });
 
     eventSource.on(event_types.GENERATION_STOPPED, function () {
@@ -26251,6 +26538,8 @@ jQuery(async () => {
       streamScrollController.onGenerationStopped();
       scrollLockController.release();
       sendStopController.setGenerating();
+      _ihStreamingApi = "";
+      _ihStreamingModel = "";
     });
 
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, function () {
@@ -26262,6 +26551,17 @@ jQuery(async () => {
         streamScrollController.onStreamToken();
       });
     }
+    [event_types.CHARACTER_MESSAGE_RENDERED, event_types.MESSAGE_SWIPED].forEach(function (ev) {
+      if (!ev) return;
+      eventSource.on(ev, function (mesId) {
+        try {
+          const id = typeof mesId === "number" ? mesId : chat.length - 1;
+          ihUpdateChatModelBadge(id);
+          const mesEl = document.querySelector(`#chat .mes[mesid="${id}"]`);
+          if (mesEl) ihFixCustomModelIconForMsg(mesEl, id);
+        } catch (e) {}
+      });
+    });
   } catch (e) {
     console.warn("快捷工具栏: 无法监听事件", e);
   }

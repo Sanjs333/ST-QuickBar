@@ -8889,6 +8889,17 @@ body.ih-cp-selecting input::-moz-selection {
   cursor: default;
 }
 
+.ih-chat-model-unit {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  align-self: center;
+  gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
 .ih-chat-model-badge {
   font-size: 10px;
   font-family: var(--monoFontFamily, monospace);
@@ -8906,12 +8917,23 @@ body.ih-cp-selecting input::-moz-selection {
       var(--SmartThemeQuoteColor, cornflowerblue) 22%,
       transparent
     );
-  margin-left: 5px;
   white-space: nowrap;
   display: inline-block;
   vertical-align: middle;
-  line-height: 1;
+  align-self: center;
+  line-height: 1.4;
   cursor: default;
+}
+
+@media (max-width: 768px) {
+  #chat .mes .ch_name:has(.ih-chat-model-unit) {
+    flex-wrap: wrap;
+  }
+  #chat .mes .ch_name .ih-chat-model-unit {
+    flex-basis: 100%;
+    margin-left: 0;
+    margin-top: 1px;
+  }
 }
 
 .input-helper-btn svg,

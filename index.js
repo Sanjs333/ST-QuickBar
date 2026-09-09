@@ -8085,8 +8085,7 @@ function ihEnsureSwipeArrays(msg) {
 function ihGetSwipeModelName(msg, swipeIdx) {
   if (!msg) return "";
   const curIdx = typeof msg.swipe_id === "number" ? msg.swipe_id : 0;
-  const idx =
-    typeof swipeIdx === "number" && swipeIdx >= 0 ? swipeIdx : curIdx;
+  const idx = typeof swipeIdx === "number" && swipeIdx >= 0 ? swipeIdx : curIdx;
   if (Array.isArray(msg.swipe_info) && msg.swipe_info[idx]) {
     const extra = msg.swipe_info[idx].extra;
     if (extra && typeof extra === "object" && extra.model) {
@@ -8141,7 +8140,9 @@ function ihFixCustomModelIconForMsg(mesEl, mesId) {
     newImg.src = `/img/${iconName}.svg`;
     if (window.SVGInject) {
       newImg.onload = function () {
-        try { SVGInject(newImg); } catch (e) {}
+        try {
+          SVGInject(newImg);
+        } catch (e) {}
       };
     }
     existingIcon.parentNode.replaceChild(newImg, existingIcon);
@@ -8153,10 +8154,12 @@ function ihFixCustomModelIconForMsg(mesEl, mesId) {
 function ihFixAllCustomModelIcons() {
   try {
     if (!power_user || !power_user.timestamp_model_icon) return;
-    document.querySelectorAll('#chat .mes[is_user="false"]').forEach(function (mesEl) {
-      const mesId = parseInt(mesEl.getAttribute("mesid"));
-      if (!isNaN(mesId)) ihFixCustomModelIconForMsg(mesEl, mesId);
-    });
+    document
+      .querySelectorAll('#chat .mes[is_user="false"]')
+      .forEach(function (mesEl) {
+        const mesId = parseInt(mesEl.getAttribute("mesid"));
+        if (!isNaN(mesId)) ihFixCustomModelIconForMsg(mesEl, mesId);
+      });
   } catch (e) {
     console.warn("快捷工具栏: 批量修复模型图标失败", e);
   }
@@ -8206,26 +8209,42 @@ function ihApplyStreamingBadges() {
       }
     }
     if (getSettings().showModelInChat && model) {
-      mesEl.querySelectorAll(".ih-chat-model-badge").forEach(function (el) {
-        el.remove();
-      });
-      const badge = document.createElement("span");
-      badge.className = "ih-chat-model-badge";
-      badge.textContent = model;
-      badge.title = model;
-      const tsEl = mesEl.querySelector(".ch_name .timestamp");
-      if (tsEl) {
-        tsEl.appendChild(badge);
-      } else {
-        const iconEl = mesEl.querySelector(".timestamp-icon");
-        const anchor = iconEl || mesEl.querySelector(".timestamp");
-        if (anchor && anchor.parentNode) {
-          anchor.parentNode.insertBefore(badge, anchor.nextSibling);
-        }
-      }
+      _ihClearModelBadge(mesEl);
+      _ihPlaceModelBadge(mesEl, model);
     }
   } catch (e) {
     console.warn("快捷工具栏: 应用流式生成标志失败", e);
+  }
+}
+function _ihClearModelBadge(mesEl) {
+  mesEl.querySelectorAll(".ih-chat-model-badge").forEach(function (el) {
+    el.remove();
+  });
+  mesEl.querySelectorAll(".ih-chat-model-unit").forEach(function (unit) {
+    const parent = unit.parentNode;
+    if (!parent) return;
+    while (unit.firstChild) parent.insertBefore(unit.firstChild, unit);
+    unit.remove();
+  });
+}
+
+function _ihPlaceModelBadge(mesEl, modelName) {
+  const badge = document.createElement("span");
+  badge.className = "ih-chat-model-badge";
+  badge.textContent = modelName;
+  badge.title = modelName;
+  const iconEl = mesEl.querySelector(".timestamp-icon");
+  const timestampEl =
+    mesEl.querySelector(".ch_name .timestamp") ||
+    mesEl.querySelector(".timestamp");
+  if (iconEl && iconEl.parentNode) {
+    const unit = document.createElement("span");
+    unit.className = "ih-chat-model-unit";
+    iconEl.parentNode.insertBefore(unit, iconEl);
+    unit.appendChild(iconEl);
+    unit.appendChild(badge);
+  } else if (timestampEl && timestampEl.parentNode) {
+    timestampEl.parentNode.insertBefore(badge, timestampEl.nextSibling);
   }
 }
 function ihUpdateChatModelBadge(mesId) {
@@ -8235,31 +8254,18 @@ function ihUpdateChatModelBadge(mesId) {
   const modelName = ihGetSwipeModelName(msg);
   const mesEl = document.querySelector(`#chat .mes[mesid="${mesId}"]`);
   if (!mesEl) return;
-  mesEl.querySelectorAll(".ih-chat-model-badge").forEach(function (el) {
-    el.remove();
-  });
+  _ihClearModelBadge(mesEl);
   if (!modelName) return;
-  const badge = document.createElement("span");
-  badge.className = "ih-chat-model-badge";
-  badge.textContent = modelName;
-  badge.title = modelName;
-  const timestampEl = mesEl.querySelector(".ch_name .timestamp");
-  if (timestampEl) {
-    timestampEl.appendChild(badge);
-  } else {
-    const iconEl = mesEl.querySelector(".timestamp-icon");
-    const anchor = iconEl || mesEl.querySelector(".timestamp");
-    if (anchor && anchor.parentNode) {
-      anchor.parentNode.insertBefore(badge, anchor.nextSibling);
-    }
-  }
+  _ihPlaceModelBadge(mesEl, modelName);
 }
 
 function ihUpdateAllChatModelBadges() {
   if (!getSettings().showModelInChat) {
-    document.querySelectorAll("#chat .mes .ih-chat-model-badge").forEach(function (el) {
-      el.remove();
-    });
+    document
+      .querySelectorAll("#chat .mes")
+      .forEach(function (mesEl) {
+        _ihClearModelBadge(mesEl);
+      });
     return;
   }
   for (let i = 0; i < chat.length; i++) {
@@ -8285,13 +8291,19 @@ function ihSetupChatModelIconFix() {
           }, 80);
         }
         const imgs = [];
-        if (node.classList && node.classList.contains("timestamp-icon") && node.classList.contains("icon-svg")) {
+        if (
+          node.classList &&
+          node.classList.contains("timestamp-icon") &&
+          node.classList.contains("icon-svg")
+        ) {
           imgs.push(node);
         }
         if (node.querySelectorAll) {
-          node.querySelectorAll(".timestamp-icon.icon-svg").forEach(function (n) {
-            imgs.push(n);
-          });
+          node
+            .querySelectorAll(".timestamp-icon.icon-svg")
+            .forEach(function (n) {
+              imgs.push(n);
+            });
         }
         imgs.forEach(function (img) {
           if (img._ihIconFixed) return;
@@ -8302,8 +8314,10 @@ function ihSetupChatModelIconFix() {
               const mesId = parseInt(mesEl.getAttribute("mesid"));
               if (!isNaN(mesId)) {
                 const msg = chat[mesId];
-                const api = (msg && msg.extra && msg.extra.api) || _ihStreamingApi;
-                const model = (msg && msg.extra && msg.extra.model) || _ihStreamingModel;
+                const api =
+                  (msg && msg.extra && msg.extra.api) || _ihStreamingApi;
+                const model =
+                  (msg && msg.extra && msg.extra.model) || _ihStreamingModel;
                 if (api === "custom" && model) {
                   const iconName = ihGetIconNameForCustomModel(model);
                   if (iconName) img.src = `/img/${iconName}.svg`;
@@ -8314,7 +8328,34 @@ function ihSetupChatModelIconFix() {
           img.addEventListener("error", function () {
             img.style.display = "none";
           });
-          if (img.complete && img.naturalWidth === 0) img.style.display = "none";
+          if (img.complete && img.naturalWidth === 0)
+            img.style.display = "none";
+          if (getSettings().showModelInChat) {
+            const mesElForWrap = img.closest && img.closest("#chat .mes");
+            if (mesElForWrap) {
+              const mesIdForWrap = mesElForWrap.getAttribute("mesid");
+              requestAnimationFrame(function () {
+                const mesElRaf = document.querySelector(
+                  `#chat .mes[mesid="${mesIdForWrap}"]`,
+                );
+                if (!mesElRaf) return;
+                const badgeRaf = mesElRaf.querySelector(".ih-chat-model-badge");
+                if (!badgeRaf || badgeRaf.closest(".ih-chat-model-unit")) return;
+                const iconRaf = mesElRaf.querySelector(".timestamp-icon");
+                if (
+                  !iconRaf ||
+                  iconRaf.closest(".ih-chat-model-unit") ||
+                  !iconRaf.parentNode
+                )
+                  return;
+                const unitRaf = document.createElement("span");
+                unitRaf.className = "ih-chat-model-unit";
+                iconRaf.parentNode.insertBefore(unitRaf, iconRaf);
+                unitRaf.appendChild(iconRaf);
+                unitRaf.appendChild(badgeRaf);
+              });
+            }
+          }
         });
       }
     }
@@ -13517,8 +13558,7 @@ function openHideManagerPanel() {
         html += `<span class="ih-me-model-badge" title="${ihEscapeAttr(_curModel)}">${ihEscapeHtml(_curModel)}</span>`;
       }
       if (_meMulti) {
-        html +=
-          `<button class="ih-me-swipe ih-me-sel-toggle${ev.selMode ? " ih-me-swipe-on" : ""}" id="ih_me_sel_toggle" title="${ev.selMode ? "退出多选" : "多选备选，可一次删掉多条"}"><i class="fa-solid fa-list-check"></i></button>`;
+        html += `<button class="ih-me-swipe ih-me-sel-toggle${ev.selMode ? " ih-me-swipe-on" : ""}" id="ih_me_sel_toggle" title="${ev.selMode ? "退出多选" : "多选备选，可一次删掉多条"}"><i class="fa-solid fa-list-check"></i></button>`;
       }
       html += "</div>";
     }
@@ -24646,6 +24686,11 @@ function onEnableInputChange() {
     updateButtonVisibility();
     floatingPanelController.refresh();
     chatUndoManager.startWatcher();
+    historyManager.updateButtons();
+    chatUndoManager.updateButton();
+    sendStopController._update();
+    if (getSettings().showModelInChat) ihUpdateAllChatModelBadges();
+    if (power_user && power_user.timestamp_model_icon) ihFixAllCustomModelIcons();
   } else {
     $("#input_helper_toolbar").addClass("input-helper-hidden");
     if (shiftMode.active) shiftMode.deactivate();
@@ -24656,6 +24701,18 @@ function onEnableInputChange() {
     floatingPanelController.destroy();
     closeAllFolderDropdowns();
     chatUndoManager.stopWatcher();
+    quickHideController.reset();
+    document
+      .querySelectorAll("#chat .mes")
+      .forEach(function (mesEl) {
+        _ihClearModelBadge(mesEl);
+      });
+    document
+      .querySelectorAll(".ih-color-picker-portal")
+      .forEach(function (el) {
+        if (typeof el._ihClose === "function") el._ihClose();
+        else el.remove();
+      });
   }
 }
 
@@ -26556,7 +26613,10 @@ jQuery(async () => {
         streamScrollController.onStreamToken();
       });
     }
-    [event_types.CHARACTER_MESSAGE_RENDERED, event_types.MESSAGE_SWIPED].forEach(function (ev) {
+    [
+      event_types.CHARACTER_MESSAGE_RENDERED,
+      event_types.MESSAGE_SWIPED,
+    ].forEach(function (ev) {
       if (!ev) return;
       eventSource.on(ev, function (mesId) {
         try {

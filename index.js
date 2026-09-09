@@ -8213,10 +8213,15 @@ function ihApplyStreamingBadges() {
       badge.className = "ih-chat-model-badge";
       badge.textContent = model;
       badge.title = model;
-      const iconEl = mesEl.querySelector(".timestamp-icon");
-      const anchor = iconEl || mesEl.querySelector(".timestamp");
-      if (anchor && anchor.parentNode) {
-        anchor.parentNode.insertBefore(badge, anchor.nextSibling);
+      const tsEl = mesEl.querySelector(".ch_name .timestamp");
+      if (tsEl) {
+        tsEl.appendChild(badge);
+      } else {
+        const iconEl = mesEl.querySelector(".timestamp-icon");
+        const anchor = iconEl || mesEl.querySelector(".timestamp");
+        if (anchor && anchor.parentNode) {
+          anchor.parentNode.insertBefore(badge, anchor.nextSibling);
+        }
       }
     }
   } catch (e) {
@@ -8238,10 +8243,15 @@ function ihUpdateChatModelBadge(mesId) {
   badge.className = "ih-chat-model-badge";
   badge.textContent = modelName;
   badge.title = modelName;
-  const iconEl = mesEl.querySelector(".timestamp-icon");
-  const anchor = iconEl || mesEl.querySelector(".timestamp");
-  if (anchor && anchor.parentNode) {
-    anchor.parentNode.insertBefore(badge, anchor.nextSibling);
+  const timestampEl = mesEl.querySelector(".ch_name .timestamp");
+  if (timestampEl) {
+    timestampEl.appendChild(badge);
+  } else {
+    const iconEl = mesEl.querySelector(".timestamp-icon");
+    const anchor = iconEl || mesEl.querySelector(".timestamp");
+    if (anchor && anchor.parentNode) {
+      anchor.parentNode.insertBefore(badge, anchor.nextSibling);
+    }
   }
 }
 

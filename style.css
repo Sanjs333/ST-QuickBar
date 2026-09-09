@@ -8906,10 +8906,10 @@ body.ih-cp-selecting input::-moz-selection {
       var(--SmartThemeQuoteColor, cornflowerblue) 22%,
       transparent
     );
-  margin-left: 4px;
+  margin-left: 5px;
   white-space: nowrap;
   display: inline-block;
-  vertical-align: baseline;
+  vertical-align: middle;
   line-height: 1;
   cursor: default;
 }

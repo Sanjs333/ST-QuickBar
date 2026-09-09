@@ -10011,10 +10011,6 @@ function openHideManagerPanel() {
       : hidden
         ? '<span class="ih-mgr-msg-ghost"><i class="fa-solid fa-ghost"></i></span>'
         : "";
-    const _modelName = !msg.is_user ? ihGetSwipeModelName(msg) : "";
-    const _modelHtml = _modelName
-      ? `<span class="ih-mgr-msg-model" title="${ihEscapeAttr(_modelName)}">${ihEscapeHtml(_modelName)}</span>`
-      : "";
     return `
         <div class="${cls.join(" ")}" data-floor="${floor}" style="height:${ROW_HEIGHT}px;">
           <span class="ih-mgr-msg-check"><input type="checkbox" data-floor="${floor}" ${isChecked ? "checked" : ""} /></span>
@@ -10024,7 +10020,6 @@ function openHideManagerPanel() {
           </span>
           <span class="ih-mgr-msg-sender">${sender}</span>
           ${previewHtml}
-          ${_modelHtml}
           <button class="ih-mgr-msg-edit" data-floor="${floor}" title="查看 / 编辑此楼层"><i class="fa-solid fa-eye"></i></button>
           ${ghost}
         </div>

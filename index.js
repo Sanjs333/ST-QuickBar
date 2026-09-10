@@ -3978,6 +3978,7 @@ const chatUndoManager = {
   _snapshots: [],
   _stableSnapshot: null,
   _autoClearTimers: [],
+  _undoEntries: [],
   _stableSnapshotTimer: null,
   _justSaved: false,
   _justSavedTimer: null,
@@ -3986,10 +3987,15 @@ const chatUndoManager = {
 
   _pushSnapshot(snapshot) {
     this._snapshots.push(snapshot);
+    this._undoEntries.push({ type: "message", snapshot: snapshot });
     while (this._snapshots.length > this.MAX_SNAPSHOTS) {
-      this._snapshots.shift();
+      const removed = this._snapshots.shift();
       const t = this._autoClearTimers.shift();
       if (t) clearTimeout(t);
+      const entryIdx = this._undoEntries.findIndex(
+        (entry) => entry.type === "message" && entry.snapshot === removed,
+      );
+      if (entryIdx >= 0) this._undoEntries.splice(entryIdx, 1);
     }
     const self = this;
     const timer = setTimeout(function () {
@@ -3997,10 +4003,32 @@ const chatUndoManager = {
       if (realIdx > -1) {
         self._snapshots.splice(realIdx, 1);
         self._autoClearTimers.splice(realIdx, 1);
+        const entryIdx = self._undoEntries.findIndex(
+          (entry) => entry.type === "message" && entry.snapshot === snapshot,
+        );
+        if (entryIdx >= 0) self._undoEntries.splice(entryIdx, 1);
         self.updateButton();
       }
     }, this.AUTO_CLEAR_MS);
     this._autoClearTimers.push(timer);
+    this.updateButton();
+  },
+
+  registerChatUndo(restore, successMessage) {
+    if (typeof restore !== "function") return;
+    const entry = {
+      type: "chat",
+      restore: restore,
+      successMessage: successMessage || "已撤回删除",
+    };
+    this._undoEntries.push(entry);
+    entry.timer = setTimeout(() => {
+      const idx = this._undoEntries.indexOf(entry);
+      if (idx >= 0) {
+        this._undoEntries.splice(idx, 1);
+        this.updateButton();
+      }
+    }, this.AUTO_CLEAR_MS);
     this.updateButton();
   },
 
@@ -4086,13 +4114,34 @@ const chatUndoManager = {
   },
 
   async undo() {
-    if (this._snapshots.length === 0) {
+    if (this._isUndoing) return;
+    const entry = this._undoEntries[this._undoEntries.length - 1];
+    if (!entry) {
       toastr.warning("没有可撤回的操作", "", { timeOut: 1000 });
+      return;
+    }
+    if (entry.type === "chat") {
+      this._undoEntries.pop();
+      if (entry.timer) clearTimeout(entry.timer);
+      this.updateButton();
+      this._isUndoing = true;
+      try {
+        await entry.restore();
+        toastr.success(entry.successMessage, "", { timeOut: 1500 });
+      } catch (e) {
+        console.error("快捷工具栏: 撤回聊天档操作失败", e);
+        toastr.error("撤回失败", "", { timeOut: 1800 });
+      } finally {
+        this._isUndoing = false;
+        this.updateStableSnapshot(true);
+        this.updateButton();
+      }
       return;
     }
     const snapshot = this._snapshots.pop();
     const timer = this._autoClearTimers.pop();
     if (timer) clearTimeout(timer);
+    this._undoEntries.pop();
     this.updateButton();
 
     chat.length = 0;
@@ -4106,7 +4155,7 @@ const chatUndoManager = {
     try {
       await ihSaveCurrentChat();
       await executeSlashCommandsWithOptions("/chat-reload");
-      const remaining = this._snapshots.length;
+      const remaining = this._undoEntries.length;
       if (remaining > 0) {
         toastr.success(`已撤回 1 步，剩余可撤回 ${remaining} 步`, "", {
           timeOut: 900,
@@ -4131,6 +4180,9 @@ const chatUndoManager = {
 
   clear() {
     this._snapshots = [];
+    this._undoEntries = this._undoEntries.filter(
+      (entry) => entry.type === "chat",
+    );
     this._stableSnapshot = null;
     this._autoClearTimers.forEach(function (t) {
       clearTimeout(t);
@@ -4144,7 +4196,7 @@ const chatUndoManager = {
   },
 
   hasSnapshot() {
-    return this._snapshots.length > 0;
+    return this._undoEntries.length > 0;
   },
 
   updateButton() {
@@ -4821,6 +4873,17 @@ async function ihRestoreDeletedChat(snapName, messages) {
   await executeSlashCommandsWithOptions(`/renamechat ${snapName}`);
   await executeSlashCommandsWithOptions("/chat-reload");
   _ihInvalidateBranchCache();
+  chatUndoManager.clear();
+}
+
+function ihNotifyChatUndo(message, restore, successMessage) {
+  chatUndoManager.registerChatUndo(restore, successMessage);
+  return toastr.success(message, "", {
+    timeOut: 4500,
+    extendedTimeOut: 1500,
+    closeButton: true,
+    tapToDismiss: true,
+  });
 }
 
 function ihForceSaveSettings() {
@@ -7554,7 +7617,7 @@ function openHelpPanel() {
 </ul>
 
 <p class="ih-help-sub"><i class="fa-solid fa-trash-arrow-up"></i> 撤回删除</p>
-<p>在执行删除消息或删除备选等操作后，点击此按钮可撤回至操作前的状态。快照保留 5 分钟，过期或切换聊天后自动清除。最多保留 20 步快照，可连续撤回多次操作。</p>
+<p>在执行删除消息、删除备选或聊天档操作后，点击此按钮可撤回至操作前的状态。消息快照保留 5 分钟，过期或切换聊天后自动清除；聊天档恢复项在 5 分钟内保留。最多保留 20 步快照，可连续撤回多次操作。</p>
 
 <p class="ih-help-sub"><i class="fa-solid fa-left-right"></i> 解锁历史消息切换备选</p>
 <p>酒馆默认只允许在最后一条消息上左右切换备选回复。在设置中开启此选项后，聊天中<b>任意一条</b>存在多个备选的 AI 消息都会显示切换箭头与计数（平时半透明，鼠标悬停后变清晰），点击即可切换该楼的备选。</p>
@@ -7614,7 +7677,7 @@ function openHelpPanel() {
 <p><b>重命名同步</b>：在分支树中重命名聊天档时，会同步更新所有子分支记录的父档名，以及父档消息中的检查点与分支链接。</p>
 <p><b>浏览档内容</b>：点击分支旁的眼睛按钮可原地翻页浏览该聊天档的全部消息（主线、独立档、增量档均可），支持倒序、楼层跳转、加入转存篮，也可直接点进编辑子页面修改内容。</p>
 <p><b>操作按钮收纳</b>：每个分支常驻显示浏览、对比、打开三个按钮，备注、指定父档、重命名、删除四个管理类操作收进右侧三点按钮，点开后横向展开，点击别处自动收起。</p>
-<p><b>删除聊天档</b>：三点内的删除按钮可删除该聊天档，删除前会提示该档消息数、是否为当前聊天、以及是否有子分支会因此断链；删除后 5 分钟内可点提示撤回。</p>
+<p><b>删除聊天档</b>：三点内的删除按钮可删除该聊天档，删除前会提示该档消息数、是否为当前聊天、以及是否有子分支会因此断链；删除后 5 分钟内可用工具栏的<q>「撤回删除」</q>按钮恢复。</p>
 <p>顶部说明栏右侧的说明按钮可展开完整图例，逐条解释各来源徽章、状态徽章与操作按钮的含义。</p>
 <p><b>注意</b>：分支分析仅支持单角色聊天，不支持群聊。</p>
 
@@ -7678,7 +7741,7 @@ function openHelpPanel() {
     <li><i class="fa-solid fa-comment-slash"></i> <b>删除聊天</b>：删除当前聊天，删除前自动保存快照</li>
     <li><i class="fa-solid fa-xmark"></i> <b>关闭聊天</b>：关闭当前聊天并返回角色选择页</li>
 </ul>
-<p><b>删除聊天的撤回机制</b>：删除后会弹出<q>「点击此处撤回」</q>的提示（5 分钟内有效），点击即可恢复。</p>
+<p><b>删除聊天的撤回机制</b>：删除后会显示短暂通知，5 分钟内可点击工具栏的<q>「撤回删除」</q>按钮恢复。</p>
 <p><b>注意</b>：删除聊天会实际从酒馆中删除文件，5 分钟撤回窗口过期后无法恢复。重要聊天建议提前备份。</p>
 
 <div class="ih-help-h4"><i class="fa-solid fa-folder"></i> 按钮分组</div>
@@ -9382,7 +9445,7 @@ async function ihAskDeleteDuplicates(dupList) {
           `聊天档 <b>${ihEscapeHtml(d.shortName)}</b>（${d.shortCount} 条）的内容<b>完整包含于</b> <b>${ihEscapeHtml(d.longName)}</b>（${d.longCount} 条）的前半部分。`,
           `<span class="ih-cf-dim">该档为残留的旧分支，其内容在另一聊天档中完整保留，删除不会丢失内容。</span>`,
         ];
-    lines.push(`<span class="ih-cf-warn">删除后 5 分钟内可撤回。</span>`);
+    lines.push(`<span class="ih-cf-warn">删除后 5 分钟内可通过「撤回删除」按钮恢复。</span>`);
     const ok = await ihConfirmDialog({
       title: "发现重复的聊天档",
       icon: "fa-clone",
@@ -9411,56 +9474,36 @@ async function ihAskDeleteDuplicates(dupList) {
     }
     _ihDeleteSearchCache(d.shortName + ".jsonl");
     const nameForUndo = d.shortName;
-    const t = toastr.success(
-      `已删除「${nameForUndo}」，点此撤回（5 分钟内有效）`,
-      "",
-      {
-        timeOut: 0,
-        extendedTimeOut: 0,
-        closeButton: true,
-        tapToDismiss: false,
-        onclick: async () => {
-          const header =
-            snap && snap.header
-              ? snap.header
-              : {
-                  user_name: name1 || "User",
-                  character_name: info.character.name,
-                  create_date: new Date().toISOString(),
-                  chat_metadata: {},
-                };
-          const msgs = snap && snap.messages ? snap.messages : [];
-          try {
-            const resp = await fetch("/api/chats/save", {
-              method: "POST",
-              headers: getRequestHeaders(),
-              cache: "no-cache",
-              body: JSON.stringify({
-                ch_name: info.character.name,
-                file_name: nameForUndo,
-                chat: [header, ...msgs],
-                avatar_url: info.avatar,
-                force: true,
-              }),
-            });
-            if (resp.ok) {
-              _ihDeleteSearchCache(nameForUndo + ".jsonl");
-              toastr.success(`已恢复「${nameForUndo}」`, "", { timeOut: 1500 });
-            } else {
-              toastr.error("恢复失败", "", { timeOut: 1800 });
-            }
-          } catch (err) {
-            console.error("快捷工具栏: 恢复重复聊天档失败", err);
-            toastr.error("恢复失败", "", { timeOut: 1800 });
-          }
-        },
+    ihNotifyChatUndo(
+      `已删除「${nameForUndo}」，可通过「撤回删除」按钮恢复（5 分钟内有效）`,
+      async () => {
+        const header =
+          snap && snap.header
+            ? snap.header
+            : {
+                user_name: name1 || "User",
+                character_name: info.character.name,
+                create_date: new Date().toISOString(),
+                chat_metadata: {},
+              };
+        const msgs = snap && snap.messages ? snap.messages : [];
+        const resp = await fetch("/api/chats/save", {
+          method: "POST",
+          headers: getRequestHeaders(),
+          cache: "no-cache",
+          body: JSON.stringify({
+            ch_name: info.character.name,
+            file_name: nameForUndo,
+            chat: [header, ...msgs],
+            avatar_url: info.avatar,
+            force: true,
+          }),
+        });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        _ihDeleteSearchCache(nameForUndo + ".jsonl");
       },
+      `已恢复「${nameForUndo}」`,
     );
-    setTimeout(() => {
-      try {
-        toastr.clear(t);
-      } catch (e) {}
-    }, 300000);
   }
 }
 
@@ -9870,7 +9913,7 @@ function openHideManagerPanel() {
           <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-link"></i></span><span class="ih-br-lg-desc">手动指定父档，或断开现有父档关系</span></div>
           <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-pen-to-square"></i></span><span class="ih-br-lg-desc">重命名聊天档，并同步子分支中记录的父档名</span></div>
           <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-location-arrow"></i></span><span class="ih-br-lg-desc">打开该聊天档</span></div>
-          <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-trash"></i></span><span class="ih-br-lg-desc">删除该聊天档，删除后 5 分钟内可撤回</span></div>
+          <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-trash"></i></span><span class="ih-br-lg-desc">删除该聊天档，删除后 5 分钟内可通过「撤回删除」恢复</span></div>
           <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-ellipsis"></i></span><span class="ih-br-lg-desc">更多操作：点开后横向展开备注、指定父档、重命名、删除四个按钮</span></div>
         </div>
         <div class="ih-br-sortbar" id="ih_mgr_branch_sortbar" style="display:none;">
@@ -16244,7 +16287,7 @@ function openHideManagerPanel() {
       icon: "fa-trash",
       lines: [
         `确定删除聊天档 <b>${ihEscapeHtml(label)}</b> 吗？`,
-        `<span class="ih-cf-dim">删除后 5 分钟内可点提示撤回。</span>`,
+        `<span class="ih-cf-dim">删除后 5 分钟内可用「撤回删除」按钮恢复。</span>`,
       ],
       okText: "删除",
       okIcon: "fa-trash",
@@ -16265,32 +16308,11 @@ function openHideManagerPanel() {
         toastr.error("删除当前聊天档失败", "", { timeOut: 1800 });
         return;
       }
-      const t = toastr.success(
-        `已删除聊天档「${snapName}」，点此撤回（5 分钟内有效）`,
-        "",
-        {
-          timeOut: 0,
-          extendedTimeOut: 0,
-          closeButton: true,
-          tapToDismiss: false,
-          onclick: async () => {
-            try {
-              await ihRestoreDeletedChat(snapName, snapChat);
-              toastr.success(`已恢复聊天档「${snapName}」`, "", {
-                timeOut: 1500,
-              });
-            } catch (err) {
-              console.error("快捷工具栏: 撤回删除当前聊天档失败", err);
-              toastr.error("撤回失败", "", { timeOut: 1800 });
-            }
-          },
-        },
+      ihNotifyChatUndo(
+        `已删除聊天档「${snapName}」，可通过「撤回删除」按钮恢复（5 分钟内有效）`,
+        () => ihRestoreDeletedChat(snapName, snapChat),
+        `已恢复聊天档「${snapName}」`,
       );
-      setTimeout(() => {
-        try {
-          toastr.clear(t);
-        } catch (e2) {}
-      }, 300000);
       return;
     }
     if (!info || info.group) {
@@ -16323,57 +16345,36 @@ function openHideManagerPanel() {
     _searchApplyMerge();
     renderSearchResults();
     _updateBasketBanner();
-    const t2 = toastr.success(
-      `已删除聊天档「${label}」，点此撤回（5 分钟内有效）`,
-      "",
-      {
-        timeOut: 0,
-        extendedTimeOut: 0,
-        closeButton: true,
-        tapToDismiss: false,
-        onclick: async () => {
-          const header =
-            snap && snap.header
-              ? snap.header
-              : {
-                  user_name: name1 || "User",
-                  character_name: info.character.name,
-                  create_date: new Date().toISOString(),
-                  chat_metadata: {},
-                };
-          const msgs = snap && snap.messages ? snap.messages : [];
-          let restoreOk = false;
-          try {
-            const resp = await fetch("/api/chats/save", {
-              method: "POST",
-              headers: getRequestHeaders(),
-              cache: "no-cache",
-              body: JSON.stringify({
-                ch_name: info.character.name,
-                file_name: nameNoExt,
-                chat: [header, ...msgs],
-                avatar_url: info.avatar,
-                force: true,
-              }),
-            });
-            restoreOk = resp.ok;
-          } catch (err) {
-            console.error("快捷工具栏: 恢复聊天档失败", err);
-          }
-          if (restoreOk) {
-            _ihDeleteSearchCache(file);
-            toastr.success(`已恢复聊天档「${label}」`, "", { timeOut: 1500 });
-          } else {
-            toastr.error("恢复失败", "", { timeOut: 1800 });
-          }
-        },
+    ihNotifyChatUndo(
+      `已删除聊天档「${label}」，可通过「撤回删除」按钮恢复（5 分钟内有效）`,
+      async () => {
+        const header =
+          snap && snap.header
+            ? snap.header
+            : {
+                user_name: name1 || "User",
+                character_name: info.character.name,
+                create_date: new Date().toISOString(),
+                chat_metadata: {},
+              };
+        const msgs = snap && snap.messages ? snap.messages : [];
+        const resp = await fetch("/api/chats/save", {
+          method: "POST",
+          headers: getRequestHeaders(),
+          cache: "no-cache",
+          body: JSON.stringify({
+            ch_name: info.character.name,
+            file_name: nameNoExt,
+            chat: [header, ...msgs],
+            avatar_url: info.avatar,
+            force: true,
+          }),
+        });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        _ihDeleteSearchCache(file);
       },
+      `已恢复聊天档「${label}」`,
     );
-    setTimeout(() => {
-      try {
-        toastr.clear(t2);
-      } catch (e2) {}
-    }, 300000);
   });
 
   content.on("click", ".ih-search-group-rename", async function (e) {
@@ -18052,67 +18053,44 @@ function openHideManagerPanel() {
       }
     }
     const undoHeader = header;
-    const t = toastr.success(
-      `已裁剪「${childName}」，移除 ${cut} 条，点此撤回（5 分钟内有效）`,
-      "",
-      {
-        timeOut: 0,
-        extendedTimeOut: 0,
-        closeButton: true,
-        tapToDismiss: false,
-        onclick: async () => {
-          try {
-            if (isCur) {
-              chat.length = 0;
-              snapMsgs.forEach((m) => chat.push(m));
-              try {
-                const ctx2 = SillyTavern.getContext();
-                const meta2 = ctx2.chatMetadata || ctx2.chat_metadata;
-                if (meta2 && meta2.branchInfo) {
-                  delete meta2.branchInfo.trimmedFrom;
-                }
-              } catch (e2) {}
-              await ihSaveCurrentChat();
-              await executeSlashCommandsWithOptions("/chat-reload");
-            } else {
-              const h = undoHeader || {
-                user_name: name1 || "User",
-                character_name: info.character.name,
-                create_date: new Date().toISOString(),
-                chat_metadata: {},
-              };
-              if (h.chat_metadata && h.chat_metadata.branchInfo) {
-                delete h.chat_metadata.branchInfo.trimmedFrom;
-              }
-              const resp = await fetch("/api/chats/save", {
-                method: "POST",
-                headers: getRequestHeaders(),
-                cache: "no-cache",
-                body: JSON.stringify({
-                  ch_name: info.character.name,
-                  file_name: childName,
-                  chat: [h, ...snapMsgs],
-                  avatar_url: info.avatar,
-                  force: true,
-                }),
-              });
-              if (!resp.ok) throw new Error("HTTP " + resp.status);
-              _ihDeleteSearchCache(childName + ".jsonl");
-            }
-            _ihInvalidateBranchCache();
-            toastr.success(`已还原「${childName}」`, "", { timeOut: 1500 });
-          } catch (err) {
-            console.error("快捷工具栏: 撤回裁剪失败", err);
-            toastr.error("撤回失败", "", { timeOut: 1800 });
+    if (isCur) {
+      toastr.success(
+        `已裁剪「${childName}」，移除 ${cut} 条，可通过「撤回删除」按钮还原（5 分钟内有效）`,
+        "",
+        { timeOut: 4500, extendedTimeOut: 1500, closeButton: true },
+      );
+    } else {
+      ihNotifyChatUndo(
+        `已裁剪「${childName}」，移除 ${cut} 条，可通过「撤回删除」按钮还原（5 分钟内有效）`,
+        async () => {
+          const h = undoHeader || {
+            user_name: name1 || "User",
+            character_name: info.character.name,
+            create_date: new Date().toISOString(),
+            chat_metadata: {},
+          };
+          if (h.chat_metadata && h.chat_metadata.branchInfo) {
+            delete h.chat_metadata.branchInfo.trimmedFrom;
           }
+          const resp = await fetch("/api/chats/save", {
+            method: "POST",
+            headers: getRequestHeaders(),
+            cache: "no-cache",
+            body: JSON.stringify({
+              ch_name: info.character.name,
+              file_name: childName,
+              chat: [h, ...snapMsgs],
+              avatar_url: info.avatar,
+              force: true,
+            }),
+          });
+          if (!resp.ok) throw new Error("HTTP " + resp.status);
+          _ihDeleteSearchCache(childName + ".jsonl");
+          _ihInvalidateBranchCache();
         },
-      },
-    );
-    setTimeout(() => {
-      try {
-        toastr.clear(t);
-      } catch (e) {}
-    }, 300000);
+        `已还原「${childName}」`,
+      );
+    }
     sharedState.branchDetailName = null;
     sharedState.branchDetailData = null;
     await runBranchScan();
@@ -18850,7 +18828,7 @@ function openHideManagerPanel() {
         `<span class="ih-cf-warn">该档为当前正在使用的聊天档，删除后酒馆会自动切换到其他聊天。</span>`,
       );
     }
-    lines.push(`<span class="ih-cf-dim">删除后 5 分钟内可点提示撤回。</span>`);
+    lines.push(`<span class="ih-cf-dim">删除后 5 分钟内可用「撤回删除」按钮恢复。</span>`);
     const ok = await ihConfirmDialog({
       title: "删除聊天档",
       icon: "fa-trash",
@@ -18879,35 +18857,11 @@ function openHideManagerPanel() {
         return;
       }
       _ihDeleteSearchCache(name + ".jsonl");
-      const tCur = toastr.success(
-        `已删除聊天档「${name}」，点此撤回（5 分钟内有效）`,
-        "",
-        {
-          timeOut: 0,
-          extendedTimeOut: 0,
-          closeButton: true,
-          tapToDismiss: false,
-          onclick: async () => {
-            try {
-              chat.length = 0;
-              snapMsgs.forEach((m) => chat.push(m));
-              await ihSaveCurrentChat();
-              await executeSlashCommandsWithOptions(`/renamechat ${name}`);
-              await executeSlashCommandsWithOptions("/chat-reload");
-              _ihDeleteSearchCache(name + ".jsonl");
-              toastr.success(`已恢复聊天档「${name}」`, "", { timeOut: 1500 });
-            } catch (err) {
-              console.error("快捷工具栏: 撤回删除当前聊天档失败", err);
-              toastr.error("撤回失败", "", { timeOut: 1800 });
-            }
-          },
-        },
+      ihNotifyChatUndo(
+        `已删除聊天档「${name}」，可通过「撤回删除」按钮恢复（5 分钟内有效）`,
+        () => ihRestoreDeletedChat(name, snapMsgs),
+        `已恢复聊天档「${name}」`,
       );
-      setTimeout(() => {
-        try {
-          toastr.clear(tCur);
-        } catch (err) {}
-      }, 300000);
       await runBranchScan();
       return;
     }
@@ -18934,53 +18888,36 @@ function openHideManagerPanel() {
     _searchApplyMerge();
     renderSearchResults();
     _updateBasketBanner();
-    const tOther = toastr.success(
-      `已删除聊天档「${name}」，点此撤回（5 分钟内有效）`,
-      "",
-      {
-        timeOut: 0,
-        extendedTimeOut: 0,
-        closeButton: true,
-        tapToDismiss: false,
-        onclick: async () => {
-          const header =
-            snap && snap.header
-              ? snap.header
-              : {
-                  user_name: name1 || "User",
-                  character_name: info.character.name,
-                  create_date: new Date().toISOString(),
-                  chat_metadata: {},
-                };
-          const msgs = snap && snap.messages ? snap.messages : [];
-          try {
-            const resp = await fetch("/api/chats/save", {
-              method: "POST",
-              headers: getRequestHeaders(),
-              cache: "no-cache",
-              body: JSON.stringify({
-                ch_name: info.character.name,
-                file_name: name,
-                chat: [header, ...msgs],
-                avatar_url: info.avatar,
-                force: true,
-              }),
-            });
-            if (!resp.ok) throw new Error("HTTP " + resp.status);
-            _ihDeleteSearchCache(name + ".jsonl");
-            toastr.success(`已恢复聊天档「${name}」`, "", { timeOut: 1500 });
-          } catch (err) {
-            console.error("快捷工具栏: 恢复聊天档失败", err);
-            toastr.error("恢复失败", "", { timeOut: 1800 });
-          }
-        },
+    ihNotifyChatUndo(
+      `已删除聊天档「${name}」，可通过「撤回删除」按钮恢复（5 分钟内有效）`,
+      async () => {
+        const header =
+          snap && snap.header
+            ? snap.header
+            : {
+                user_name: name1 || "User",
+                character_name: info.character.name,
+                create_date: new Date().toISOString(),
+                chat_metadata: {},
+              };
+        const msgs = snap && snap.messages ? snap.messages : [];
+        const resp = await fetch("/api/chats/save", {
+          method: "POST",
+          headers: getRequestHeaders(),
+          cache: "no-cache",
+          body: JSON.stringify({
+            ch_name: info.character.name,
+            file_name: name,
+            chat: [header, ...msgs],
+            avatar_url: info.avatar,
+            force: true,
+          }),
+        });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        _ihDeleteSearchCache(name + ".jsonl");
       },
+      `已恢复聊天档「${name}」`,
     );
-    setTimeout(() => {
-      try {
-        toastr.clear(tOther);
-      } catch (err) {}
-    }, 300000);
     await runBranchScan();
   });
 
@@ -19329,7 +19266,7 @@ async function doChatDelete() {
           <h3><i class="fa-solid fa-triangle-exclamation"></i> 删除当前聊天</h3>
           <div style="font-size:12px;line-height:1.7;margin-bottom:14px;">
             确定删除聊天 <b>${ihEscapeHtml(currentChatName)}</b> 吗？<br>
-            <span style="color:rgba(255,120,120,0.9);">此操作不可恢复！</span>
+            <span style="color:rgba(255,180,120,0.9);">删除后 5 分钟内可通过「撤回删除」按钮恢复。</span>
           </div>
           <div class="ih-jump-actions">
             <button class="ih-hm-btn" id="ih_cd_cancel">取消</button>
@@ -19385,28 +19322,10 @@ async function doChatDelete() {
     await executeSlashCommandsWithOptions("/delchat");
     _ihInvalidateBranchCache();
     setTimeout(_restoreToastr, 1500);
-    toastr.success(
-      `已删除聊天"${snapshot.name}"，点击此处撤回（5 分钟内有效）`,
-      "",
-      {
-        timeOut: 0,
-        extendedTimeOut: 0,
-        closeButton: true,
-        tapToDismiss: false,
-        onclick: async () => {
-          try {
-            await ihRestoreDeletedChat(snapshot.name, snapshot.messages);
-            toastr.success(`已恢复聊天"${snapshot.name}"`, "", {
-              timeOut: 1500,
-            });
-          } catch (err) {
-            console.error("撤回删除聊天失败", err);
-            toastr.error("撤回失败：" + (err?.message || err), "", {
-              timeOut: 2000,
-            });
-          }
-        },
-      },
+    ihNotifyChatUndo(
+      `已删除聊天"${snapshot.name}"，可通过「撤回删除」按钮恢复（5 分钟内有效）`,
+      () => ihRestoreDeletedChat(snapshot.name, snapshot.messages),
+      `已恢复聊天"${snapshot.name}"`,
     );
   } catch (e) {
     _restoreToastr();

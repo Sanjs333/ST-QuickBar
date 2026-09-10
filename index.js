@@ -391,6 +391,7 @@ const defaultSettings = {
   searchTreeView: true,
   lastMgrTab: "hide",
   showModelInChat: false,
+  disableSmoothScroll: false,
   floatingPanel: {
     enabled: false,
     orientation: "vertical",
@@ -599,11 +600,16 @@ if (window.visualViewport) {
 
 function ihSmoothScrollTo(el, targetTop, duration) {
   if (!el) return;
-  if (duration === undefined) duration = 320;
   if (el._ihScrollRaf) {
     cancelAnimationFrame(el._ihScrollRaf);
     el._ihScrollRaf = null;
   }
+  if (ihGetScrollBehavior() === "instant") {
+    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    el.scrollTop = Math.max(0, Math.min(maxTop, targetTop));
+    return;
+  }
+  if (duration === undefined) duration = 320;
   const startTop = el.scrollTop;
   const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
   const finalTop = Math.max(0, Math.min(maxTop, targetTop));
@@ -739,7 +745,10 @@ function findActiveScrollContainer() {
   return document.getElementById("chat");
 }
 
-function scrollChatToElement(element, behavior = "smooth", center = false) {
+function scrollChatToElement(element, behavior, center = false) {
+  if (behavior === undefined || behavior === "smooth") {
+    behavior = ihGetScrollBehavior();
+  }
   const chatEl = document.getElementById("chat");
   if (!chatEl || !element) return;
   function doScroll() {
@@ -885,7 +894,10 @@ const messageNavigation = {
         }
       }
       const targetTop = chatEl.scrollTop + (rect.bottom - effectiveBottom);
-      chatEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+      chatEl.scrollTo({
+        top: Math.max(0, targetTop),
+        behavior: ihGetScrollBehavior(),
+      });
     });
   },
 
@@ -983,7 +995,7 @@ const messageNavigation = {
     }
     if (this._pendingJump === "bottom") {
       this._pendingJump = null;
-      const targetIdx = messages.length > 1 ? messages.length - 2 : 0;
+      const targetIdx = messages.length - 1;
       if (bottomNavController.active) {
         this._scrollToMsgBottom(chatEl, messages[targetIdx]);
       } else {
@@ -4780,6 +4792,36 @@ function saveStateBeforeAction() {
 function getSettings() {
   return extension_settings[extensionName];
 }
+function ihGetScrollBehavior() {
+  const s = getSettings();
+  return s && s.disableSmoothScroll ? "instant" : "smooth";
+}
+
+function ihRestoreButtonsToOrder(keys) {
+  const s = getSettings();
+  if (!s || !Array.isArray(s.buttonOrder) || !keys) return;
+  const list = Array.isArray(keys) ? keys : [keys];
+  for (const k of list) {
+    if (!k) continue;
+    if (!s.buttonOrder.includes(k)) s.buttonOrder.push(k);
+    if (s.buttons && s.buttons[k] === undefined) s.buttons[k] = true;
+    if (s.shortcuts && s.shortcuts[k] === undefined) s.shortcuts[k] = "";
+  }
+}
+
+async function ihRestoreDeletedChat(snapName, messages) {
+  const newChat = SillyTavernScript.doNewChat;
+  if (typeof newChat !== "function") {
+    throw new Error("当前酒馆版本不支持新建聊天，无法安全撤回");
+  }
+  await newChat({ deleteCurrentChat: false });
+  chat.length = 0;
+  (messages || []).forEach((m) => chat.push(m));
+  await ihSaveCurrentChat();
+  await executeSlashCommandsWithOptions(`/renamechat ${snapName}`);
+  await executeSlashCommandsWithOptions("/chat-reload");
+  _ihInvalidateBranchCache();
+}
 
 function ihForceSaveSettings() {
   try {
@@ -5296,7 +5338,7 @@ function doScrollToTop() {
   } else if (isCmScroller) {
     ihSmoothScrollTo(scrollEl, 0, 320);
   } else {
-    scrollEl.scrollTo({ top: 0, behavior: "smooth" });
+    scrollEl.scrollTo({ top: 0, behavior: ihGetScrollBehavior() });
   }
   if (scrollEl === document.getElementById("chat")) {
     messageNavigation._currentAiIndex = -1;
@@ -5328,7 +5370,10 @@ function doScrollToBottom() {
     ihSmoothScrollTo(scrollEl, scrollEl.scrollHeight, 320);
     ihSettleScrollBottom(scrollEl);
   } else {
-    scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "smooth" });
+    scrollEl.scrollTo({
+      top: scrollEl.scrollHeight,
+      behavior: ihGetScrollBehavior(),
+    });
   }
   if (scrollEl === document.getElementById("chat")) {
     const aiMessages = $("#chat .mes[is_user='false']:visible");
@@ -5396,15 +5441,16 @@ function doEditLastMsg() {
     toastr.warning("当前没有聊天消息", "", { timeOut: 800 });
     return;
   }
-  const lastMes = $("#chat .mes").last();
+  let lastMes = $(`#chat .mes[mesid="${chat.length - 1}"]`);
+  if (!lastMes.length) lastMes = $("#chat .mes").last();
   if (!lastMes.length) {
     toastr.warning("找不到最后一条消息", "", { timeOut: 800 });
     return;
   }
 
-  const editingTextarea = lastMes.find("textarea:visible").first();
+  const editingTextarea = lastMes.find("textarea.edit_textarea").first();
   if (editingTextarea.length) {
-    const doneBtn = lastMes.find(".mes_edit_done").filter(":visible").first();
+    const doneBtn = lastMes.find(".mes_edit_done").first();
 
     if (doneBtn.length) {
       doneBtn.trigger("click");
@@ -5417,12 +5463,17 @@ function doEditLastMsg() {
     return;
   }
 
+  if (document.body.dataset.generating === "true") {
+    toastr.warning("正在生成回复，请先停止或等生成结束", "", { timeOut: 1200 });
+    return;
+  }
+
   const editBtn = lastMes.find(".mes_edit").first();
-  if (!editBtn.length || !editBtn.is(":visible")) {
+  if (!editBtn.length) {
     toastr.warning("找不到编辑按钮", "", { timeOut: 800 });
     return;
   }
-  scrollChatToElement(lastMes[0], "smooth", false);
+  scrollChatToElement(lastMes[0], undefined, false);
   setTimeout(() => {
     editBtn.trigger("click");
   }, 200);
@@ -5653,6 +5704,42 @@ function ihBindUnlockSwipeEvents() {
       }).observe(chatEl, { childList: true });
     }
   } catch (e) {}
+}
+
+async function ihSwitchHistorySwipeTo(mesId, target) {
+  const msg = typeof mesId === "number" ? chat[mesId] : null;
+  if (
+    !msg ||
+    msg.is_user ||
+    !Array.isArray(msg.swipes) ||
+    target < 0 ||
+    target >= msg.swipes.length
+  ) {
+    return false;
+  }
+  const cur = typeof msg.swipe_id === "number" ? msg.swipe_id : 0;
+  if (cur === target) return true;
+  let ctx = null;
+  try {
+    ctx = SillyTavern.getContext();
+  } catch (err) {}
+  let swipeFn = null;
+  if (ctx) {
+    if (ctx.swipe && typeof ctx.swipe.to === "function") {
+      swipeFn = ctx.swipe.to.bind(ctx.swipe);
+    } else if (typeof ctx.swipe === "function") {
+      swipeFn = ctx.swipe;
+    }
+  }
+  if (!swipeFn) return false;
+  const swipeSource =
+    (ctx.SWIPE_SOURCE && ctx.SWIPE_SOURCE.SWIPE_PICKER) || "swipe_picker";
+  await swipeFn(null, target > cur ? "right" : "left", {
+    source: swipeSource,
+    forceMesId: mesId,
+    forceSwipeId: target,
+  });
+  return !!(chat[mesId] && chat[mesId].swipe_id === target);
 }
 
 async function ihDoHistorySwipe(arrowEl) {
@@ -6465,7 +6552,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.2.7";
+const EXTENSION_VERSION = "3.2.8";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -6829,8 +6916,6 @@ function ihSetBtnContent(btn, iconClass, label) {
   btn.textContent = "";
   const i = document.createElement("i");
   i.className = `fa-solid ${iconClass}`;
-  // 标签用纯文本节点，与面板里其它 menu_button / ih-hm-btn 的写法一致
-  // （包成 <span> 会被 .menu_button_icon span 的字号规则顶大一号）
   btn.append(i, document.createTextNode(` ${label}`));
 }
 
@@ -6949,8 +7034,6 @@ function openUpdatePanel(options) {
   };
 
   const isAlive = () => !!content[0] && content[0].isConnected;
-
-  // 面板可能被 ESC / 遮罩点击直接移除，这里兜底清理，避免倒计时在面板关闭后仍刷新页面
   const teardownIfDetached = () => {
     if (isAlive()) return false;
     stopCountdown();
@@ -7236,7 +7319,6 @@ function openUpdatePanel(options) {
 
   render();
 
-  // 面板打开时总是补一次 git 信息（安装位置 / 分支 / 提交），与版本检查互不阻塞
   const loadGitInfo = () =>
     ihFetchGitInfo(false)
       .catch((e) => {
@@ -7250,7 +7332,6 @@ function openUpdatePanel(options) {
     !updateState.checkedAt ||
     Date.now() - updateState.checkedAt > 60000;
   if (opts.autoUpdate && updateState.status === UPDATE_STATUS.AVAILABLE) {
-    // 先读一次 git 信息：既填充下方元信息，也能在非 Git 安装时提前拦住必定失败的更新
     phase = "updating";
     render();
     loadGitInfo().finally(() => {
@@ -7273,13 +7354,16 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.7</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.8</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>聊天界面新增显示模型名</b>：设置中新增「聊天界面显示模型名」开关，开启后每条 AI 消息时间戳旁会显示生成时所用的模型名称，方便对比不同模型回复效果；关闭则不显示，消息管理面板内模型名不受此开关影响。</li>
-  <li><b>消息管理面板显示模型名</b>：消息列表中每条 AI 消息右侧会显示该备选生成时所用的模型名；消息详情页的备选标签区同步显示当前备选的模型名，鼠标悬停各备选标签可查看对应模型。</li>
-  <li><b>修复原生自定义端点图标显示为 ❓</b>：酒馆原生使用自定义 API 端点时，显示图标模型功能只会显示为❓，现在会根据模型名称自动识别并显示对应厂商图标（支持 OpenAI、Claude、DeepSeek、Gemini 等主流模型），无法识别时自动隐藏错误占位符。</li>
-  <li><b>编辑最后消息图标更新</b>：图标改为 Font Awesome 钢笔图标，并移除了对 Bootstrap Icons CDN 的依赖。</li>
-  <li><b>修复发送/停止按钮图标高度不一致</b>：发送/停止按钮的 SVG 图标高度现与其他图标对齐，消除工具栏中图标高低不平的视觉问题。</li>
+  <li><b>新增「禁用所有动效」开关</b>：滚动与界面动画全部改为瞬时，适合墨水屏和低刷新率设备。</li>
+  <li><b>修复关闭聊天按钮失效</b>：此前点击总是提示「找不到关闭聊天入口」。</li>
+  <li><b>修复编辑最后一条消息偶尔无反应</b>：生成回复中或刚切换备选时点击会提示找不到编辑按钮。</li>
+  <li><b>修复撤回删除聊天档会覆盖其他聊天档</b>：删除当前聊天后酒馆会自动切到另一个已有聊天，此时点撤回会把那个聊天的内容覆盖并改名；现在改为新建聊天档来恢复，不再破坏已有数据。</li>
+  <li><b>修复按钮移出分组后消失</b>：从分组移出、清空或删除分组时，按钮会正确回到主工具栏，不再需要重启酒馆才能找回。</li>
+  <li><b>修复跳到底部后「下一条 AI 消息」反而往回跳一条</b>：现在会停在最后一条。</li>
+  <li><b>修复插入空白消息后不会自动进入编辑状态</b>。</li>
+  <li><b>模型名与图标显示修正</b>：调整模型名徽章位置，修复自定义端点图标（含 3.2.7.1~3.2.7.3 的累积修复）。</li>
 </ul>
 `;
 
@@ -8169,48 +8253,100 @@ let _ihStreamingModel = "";
 
 function ihApplyStreamingBadges() {
   try {
-    if (!_ihStreamingApi && !_ihStreamingModel) return;
     const lastIdx = chat.length - 1;
     if (lastIdx < 0) return;
     const msg = chat[lastIdx];
     if (!msg || msg.is_user) return;
     const mesEl = document.querySelector(`#chat .mes[mesid="${lastIdx}"]`);
     if (!mesEl) return;
-    const api = _ihStreamingApi;
-    const model = _ihStreamingModel;
+    const api = _ihStreamingApi || (msg.extra && msg.extra.api) || "";
+    const model = _ihStreamingModel || (msg.extra && msg.extra.model) || "";
     if (
       power_user &&
       power_user.timestamp_model_icon &&
       api === "custom" &&
-      model &&
-      !mesEl.querySelector(".timestamp-icon")
+      model
     ) {
       const iconName = ihGetIconNameForCustomModel(model);
       if (iconName) {
-        const img = new Image();
-        img.classList.add("icon-svg", "timestamp-icon");
-        img.src = `/img/${iconName}.svg`;
-        img.title = `${api} - ${model}`;
-        img._ihIconFixed = true;
-        if (window.SVGInject) {
-          img.onload = function () {
-            try {
-              SVGInject(img);
-            } catch (e) {}
-          };
-        }
-        img.onerror = function () {
-          img.style.display = "none";
-        };
-        const tsEl = mesEl.querySelector(".timestamp");
-        if (tsEl && tsEl.parentNode) {
-          tsEl.parentNode.insertBefore(img, tsEl.nextSibling);
+        const wantedSrc = `/img/${iconName}.svg`;
+        const currentIcon = mesEl.querySelector(".timestamp-icon");
+        const currentIconSrc = currentIcon
+          ? currentIcon.getAttribute("src") ||
+            currentIcon.getAttribute("data-inject-url") ||
+            ""
+          : "";
+        const isStreamingIcon =
+          currentIcon &&
+          currentIcon.classList.contains("ih-streaming-model-icon") &&
+          currentIconSrc.includes(wantedSrc);
+        const currentImg =
+          currentIcon && currentIcon.tagName === "IMG" ? currentIcon : null;
+        const currentSrc = currentImg
+          ? currentImg.getAttribute("src") || currentImg.src || ""
+          : "";
+        if (!isStreamingIcon) {
+          if (currentIconSrc.includes(wantedSrc)) {
+            currentIcon.classList.add("ih-streaming-model-icon");
+            if (currentImg) currentImg.title = `${api} - ${model}`;
+          } else if (currentImg) {
+            currentImg.classList.add("ih-streaming-model-icon");
+            currentImg.title = `${api} - ${model}`;
+            if (!currentSrc.includes(wantedSrc)) {
+              currentImg.src = wantedSrc;
+            }
+          } else if (currentIcon && currentIcon.parentNode) {
+            const img = new Image();
+            Array.from(currentIcon.classList).forEach((c) =>
+              img.classList.add(c),
+            );
+            img.classList.add(
+              "icon-svg",
+              "timestamp-icon",
+              "ih-streaming-model-icon",
+            );
+            img.src = wantedSrc;
+            img.title = `${api} - ${model}`;
+            img._ihIconFixed = true;
+            if (window.SVGInject) {
+              img.onload = function () {
+                try {
+                  SVGInject(img);
+                } catch (e) {}
+              };
+            }
+            currentIcon.parentNode.replaceChild(img, currentIcon);
+          } else {
+            const img = new Image();
+            img.classList.add(
+              "icon-svg",
+              "timestamp-icon",
+              "ih-streaming-model-icon",
+            );
+            img.src = wantedSrc;
+            img.title = `${api} - ${model}`;
+            img._ihIconFixed = true;
+            if (window.SVGInject) {
+              img.onload = function () {
+                try {
+                  SVGInject(img);
+                } catch (e) {}
+              };
+            }
+            const tsEl = mesEl.querySelector(".timestamp");
+            if (tsEl && tsEl.parentNode) {
+              tsEl.parentNode.insertBefore(img, tsEl.nextSibling);
+            }
+          }
         }
       }
     }
     if (getSettings().showModelInChat && model) {
-      _ihClearModelBadge(mesEl);
-      _ihPlaceModelBadge(mesEl, model);
+      const badge = mesEl.querySelector(".ih-chat-model-badge");
+      if (!badge || badge.textContent !== model) {
+        _ihClearModelBadge(mesEl);
+        _ihPlaceModelBadge(mesEl, model);
+      }
     }
   } catch (e) {
     console.warn("快捷工具栏: 应用流式生成标志失败", e);
@@ -8237,16 +8373,12 @@ function _ihPlaceModelBadge(mesEl, modelName) {
   const timestampEl =
     mesEl.querySelector(".ch_name .timestamp") ||
     mesEl.querySelector(".timestamp");
-  if (iconEl && iconEl.parentNode) {
-    const unit = document.createElement("span");
-    unit.className = "ih-chat-model-unit";
-    iconEl.parentNode.insertBefore(unit, iconEl);
-    unit.appendChild(iconEl);
-    unit.appendChild(badge);
-  } else if (timestampEl && timestampEl.parentNode) {
-    timestampEl.parentNode.insertBefore(badge, timestampEl.nextSibling);
+  const anchor = iconEl || timestampEl;
+  if (anchor && anchor.parentNode) {
+    anchor.parentNode.insertBefore(badge, anchor.nextSibling);
   }
 }
+
 function ihUpdateChatModelBadge(mesId) {
   if (!getSettings().showModelInChat) return;
   const msg = typeof mesId === "number" ? chat[mesId] : null;
@@ -8261,11 +8393,9 @@ function ihUpdateChatModelBadge(mesId) {
 
 function ihUpdateAllChatModelBadges() {
   if (!getSettings().showModelInChat) {
-    document
-      .querySelectorAll("#chat .mes")
-      .forEach(function (mesEl) {
-        _ihClearModelBadge(mesEl);
-      });
+    document.querySelectorAll("#chat .mes").forEach(function (mesEl) {
+      _ihClearModelBadge(mesEl);
+    });
     return;
   }
   for (let i = 0; i < chat.length; i++) {
@@ -8320,7 +8450,24 @@ function ihSetupChatModelIconFix() {
                   (msg && msg.extra && msg.extra.model) || _ihStreamingModel;
                 if (api === "custom" && model) {
                   const iconName = ihGetIconNameForCustomModel(model);
-                  if (iconName) img.src = `/img/${iconName}.svg`;
+                  if (iconName && img.parentNode) {
+                    const fixImg = new Image();
+                    fixImg._ihIconFixed = true;
+                    Array.from(img.classList).forEach(function (c) {
+                      fixImg.classList.add(c);
+                    });
+                    fixImg.title = img.title;
+                    if (window.SVGInject) {
+                      fixImg.onload = function () {
+                        try {
+                          SVGInject(fixImg);
+                        } catch (e) {}
+                      };
+                    }
+                    fixImg.src = "/img/" + iconName + ".svg";
+                    img.parentNode.replaceChild(fixImg, img);
+                    return;
+                  }
                 }
               }
             }
@@ -8330,32 +8477,6 @@ function ihSetupChatModelIconFix() {
           });
           if (img.complete && img.naturalWidth === 0)
             img.style.display = "none";
-          if (getSettings().showModelInChat) {
-            const mesElForWrap = img.closest && img.closest("#chat .mes");
-            if (mesElForWrap) {
-              const mesIdForWrap = mesElForWrap.getAttribute("mesid");
-              requestAnimationFrame(function () {
-                const mesElRaf = document.querySelector(
-                  `#chat .mes[mesid="${mesIdForWrap}"]`,
-                );
-                if (!mesElRaf) return;
-                const badgeRaf = mesElRaf.querySelector(".ih-chat-model-badge");
-                if (!badgeRaf || badgeRaf.closest(".ih-chat-model-unit")) return;
-                const iconRaf = mesElRaf.querySelector(".timestamp-icon");
-                if (
-                  !iconRaf ||
-                  iconRaf.closest(".ih-chat-model-unit") ||
-                  !iconRaf.parentNode
-                )
-                  return;
-                const unitRaf = document.createElement("span");
-                unitRaf.className = "ih-chat-model-unit";
-                iconRaf.parentNode.insertBefore(unitRaf, iconRaf);
-                unitRaf.appendChild(iconRaf);
-                unitRaf.appendChild(badgeRaf);
-              });
-            }
-          }
         });
       }
     }
@@ -10193,13 +10314,16 @@ function openHideManagerPanel() {
       return;
     if (floor >= total) {
       const toBottom = sharedState.reverseOrder ? 0 : vlistEl.scrollHeight;
-      vlistEl.scrollTo({ top: toBottom, behavior: "smooth" });
+      vlistEl.scrollTo({ top: toBottom, behavior: ihGetScrollBehavior() });
       return;
     }
     const displayIndex = sharedState.reverseOrder ? total - 1 - floor : floor;
     const targetTop =
       displayIndex * ROW_HEIGHT - vlistEl.clientHeight / 2 + ROW_HEIGHT / 2;
-    vlistEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+    vlistEl.scrollTo({
+      top: Math.max(0, targetTop),
+      behavior: ihGetScrollBehavior(),
+    });
   }
 
   function _getActiveSel() {
@@ -10886,14 +11010,15 @@ function openHideManagerPanel() {
       sharedState.manageTarget === "lower"
         ? content.find("#ih_mgr_transfer_target_list")[0]
         : vlistEl;
-    if (el) el.scrollTo({ top: 0, behavior: "smooth" });
+    if (el) el.scrollTo({ top: 0, behavior: ihGetScrollBehavior() });
   });
   content.find("#ih_mgr_scroll_bottom").on("click", () => {
     const el =
       sharedState.manageTarget === "lower"
         ? content.find("#ih_mgr_transfer_target_list")[0]
         : vlistEl;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    if (el)
+      el.scrollTo({ top: el.scrollHeight, behavior: ihGetScrollBehavior() });
   });
   const _doMgrJumpFloor = () => {
     const v = content.find("#ih_mgr_jump_floor").val();
@@ -11433,7 +11558,7 @@ function openHideManagerPanel() {
           scrollChatToElement(mesEl, "smooth", false);
           setTimeout(() => {
             const editBtn = $(mesEl).find(".mes_edit").first();
-            if (editBtn.length && editBtn.is(":visible")) {
+            if (editBtn.length) {
               editBtn.trigger("click");
             }
           }, 400);
@@ -11743,7 +11868,10 @@ function openHideManagerPanel() {
       : floor;
     const targetTop =
       displayIndex * ROW_HEIGHT - listEl.clientHeight / 2 + ROW_HEIGHT / 2;
-    listEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+    listEl.scrollTo({
+      top: Math.max(0, targetTop),
+      behavior: ihGetScrollBehavior(),
+    });
   }
 
   async function loadTransferTarget(fileNameWithExt) {
@@ -13880,7 +14008,10 @@ function openHideManagerPanel() {
       .querySelectorAll(".ih-search-item.ih-search-locate-hl")
       .forEach((el) => el.classList.remove("ih-search-locate-hl"));
     if (target) {
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.scrollIntoView({
+        block: "center",
+        behavior: ihGetScrollBehavior(),
+      });
       target.classList.add("ih-search-locate-hl");
       const _hlEl = target;
       setTimeout(function () {
@@ -15011,6 +15142,8 @@ function openHideManagerPanel() {
         mt.positions[hlIdx],
         mt.kwLen,
       );
+      const jumpSwipeAttr =
+        mt.swipeIdx >= 0 ? ' data-swipe="' + mt.swipeIdx + '"' : "";
       html +=
         '<div class="ih-search-item" data-floor="' +
         mt.floor +
@@ -15039,6 +15172,7 @@ function openHideManagerPanel() {
         mt.floor +
         '" data-file="' +
         fileAttr +
+        jumpSwipeAttr +
         '" title="跳转到此消息"><i class="fa-solid fa-location-arrow"></i></button>' +
         "</span></div>";
       html += '<div class="ih-search-item-snippet">' + snippetHtml + "</div>";
@@ -15284,7 +15418,10 @@ function openHideManagerPanel() {
         if (el.getAttribute("data-name") === name) target = el;
       });
       if (!target) return;
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.scrollIntoView({
+        block: "center",
+        behavior: ihGetScrollBehavior(),
+      });
       target.classList.add("ih-br-locate-hl");
       setTimeout(function () {
         target.classList.remove("ih-br-locate-hl");
@@ -15968,7 +16105,10 @@ function openHideManagerPanel() {
         toastr.info("这个聊天档不在当前搜索结果里", "", { timeOut: 1500 });
         return;
       }
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.scrollIntoView({
+        block: "center",
+        behavior: ihGetScrollBehavior(),
+      });
       target.classList.add("ih-search-group-hl");
       setTimeout(function () {
         target.classList.remove("ih-search-group-hl");
@@ -16135,12 +16275,7 @@ function openHideManagerPanel() {
           tapToDismiss: false,
           onclick: async () => {
             try {
-              chat.length = 0;
-              snapChat.forEach((m) => chat.push(m));
-              await ihSaveCurrentChat();
-              await executeSlashCommandsWithOptions(`/renamechat ${snapName}`);
-              await executeSlashCommandsWithOptions("/chat-reload");
-              _ihInvalidateBranchCache();
+              await ihRestoreDeletedChat(snapName, snapChat);
               toastr.success(`已恢复聊天档「${snapName}」`, "", {
                 timeOut: 1500,
               });
@@ -16390,10 +16525,18 @@ function openHideManagerPanel() {
 
     const floor = parseInt($(this).attr("data-floor"));
     const fileName = $(this).attr("data-file");
+    const swipeIdx = parseInt($(this).attr("data-swipe"));
     if (isNaN(floor)) return;
     const nameNoExt = fileName ? String(fileName).replace(/\.jsonl$/i, "") : "";
     _mgrFoldForJump();
-    if (!nameNoExt) {
+    const _jump = async () => {
+      if (!isNaN(swipeIdx) && swipeIdx >= 0) {
+        try {
+          await ihSwitchHistorySwipeTo(floor, swipeIdx);
+        } catch (err) {
+          console.warn("快捷工具栏: 搜索结果切换备选失败", err);
+        }
+      }
       const chatEl = document.getElementById("chat");
       if (!chatEl) return;
       const mesEl = chatEl.querySelector(`.mes[mesid="${floor}"]`);
@@ -16404,6 +16547,9 @@ function openHideManagerPanel() {
       } else {
         executeSlashCommandsWithOptions(`/chat-jump ${floor}`);
       }
+    };
+    if (!nameNoExt) {
+      await _jump();
       toastr.info(`已跳转到楼层 ${floor}`, "", { timeOut: 1000 });
       return;
     }
@@ -16419,18 +16565,7 @@ function openHideManagerPanel() {
         info.character.chat = nameNoExt;
         await executeSlashCommandsWithOptions("/chat-reload");
       }
-      setTimeout(() => {
-        const chatEl = document.getElementById("chat");
-        if (!chatEl) return;
-        const mesEl = chatEl.querySelector(`.mes[mesid="${floor}"]`);
-        if (mesEl) {
-          const r = mesEl.getBoundingClientRect();
-          const useCenter = r.height < chatEl.clientHeight - 40;
-          scrollChatToElement(mesEl, "smooth", useCenter);
-        } else {
-          executeSlashCommandsWithOptions(`/chat-jump ${floor}`);
-        }
-      }, 600);
+      setTimeout(_jump, 600);
     } catch (e2) {
       console.error("快捷工具栏: 打开聊天档跳转失败", e2);
       toastr.warning("打开聊天档失败，请手动切换聊天", "", { timeOut: 2000 });
@@ -16562,7 +16697,10 @@ function openHideManagerPanel() {
     const target = marks[p.hlIndex];
     target.classList.add("ih-search-hl-active");
     try {
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.scrollIntoView({
+        block: "center",
+        behavior: ihGetScrollBehavior(),
+      });
     } catch (e) {}
     content
       .find("#ih_sp_count")
@@ -17277,7 +17415,7 @@ function openHideManagerPanel() {
       ? msgs.length - 1 - floor
       : floor;
     const t = di * ROW_HEIGHT - listEl.clientHeight / 2 + ROW_HEIGHT / 2;
-    listEl.scrollTo({ top: Math.max(0, t), behavior: "smooth" });
+    listEl.scrollTo({ top: Math.max(0, t), behavior: ihGetScrollBehavior() });
   }
 
   function _bpBuildRow(msgs, floor, file) {
@@ -18501,7 +18639,10 @@ function openHideManagerPanel() {
     const target = marks[ev.hlIndex];
     target.classList.add("ih-search-hl-active");
     try {
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.scrollIntoView({
+        block: "center",
+        behavior: ihGetScrollBehavior(),
+      });
     } catch (e) {}
     $(this)
       .find(".ih-search-locate-count")
@@ -18909,12 +19050,13 @@ function openHideManagerPanel() {
 
   content.on("click", "#ih_bp_top", function () {
     const el = content.find("#ih_bp_list")[0];
-    if (el) el.scrollTo({ top: 0, behavior: "smooth" });
+    if (el) el.scrollTo({ top: 0, behavior: ihGetScrollBehavior() });
   });
 
   content.on("click", "#ih_bp_bottom", function () {
     const el = content.find("#ih_bp_list")[0];
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    if (el)
+      el.scrollTo({ top: el.scrollHeight, behavior: ihGetScrollBehavior() });
   });
 
   function _bpDoJump() {
@@ -19051,9 +19193,18 @@ function doChatClose() {
     toastr.info("当前没有打开的聊天", "", { timeOut: 1200 });
     return;
   }
-  const btn = document.getElementById("option_close_chat");
-  if (btn && $(btn).is(":visible")) {
-    btn.click();
+  const candidates = document.querySelectorAll("#options #option_close_chat");
+  let btn = null;
+  for (let i = 0; i < candidates.length; i++) {
+    if (!candidates[i].classList.contains("displayNone")) {
+      btn = candidates[i];
+      break;
+    }
+  }
+  if (!btn) btn = candidates[0] || null;
+  if (btn) {
+    _ihInvalidateBranchCache();
+    $(btn).trigger("click");
   } else {
     toastr.warning("找不到关闭聊天入口", "", { timeOut: 1200 });
   }
@@ -19244,14 +19395,7 @@ async function doChatDelete() {
         tapToDismiss: false,
         onclick: async () => {
           try {
-            chat.length = 0;
-            snapshot.messages.forEach((m) => chat.push(m));
-            await ihSaveCurrentChat();
-            await executeSlashCommandsWithOptions(
-              `/renamechat ${snapshot.name}`,
-            );
-            await executeSlashCommandsWithOptions("/chat-reload");
-            _ihInvalidateBranchCache();
+            await ihRestoreDeletedChat(snapshot.name, snapshot.messages);
             toastr.success(`已恢复聊天"${snapshot.name}"`, "", {
               timeOut: 1500,
             });
@@ -22527,6 +22671,7 @@ function makeSettingsRow(key, opts) {
       const btns = getSettings().folders[fi].buttons;
       const idx = btns.indexOf(bKey);
       if (idx > -1) btns.splice(idx, 1);
+      ihRestoreButtonsToOrder(bKey);
       saveSettingsDebounced();
       renderSettingsPanel();
       buildToolbar();
@@ -23855,6 +24000,7 @@ function renderFolderSettings() {
         danger: true,
       });
       if (!_okDelFolder) return;
+      const _delFolderButtons = [...((_delFolder && _delFolder.buttons) || [])];
       const oldFolderKey = `folder_${fi}`;
       const oldOrder = [...getSettings().buttonOrder];
       const oldButtons = { ...getSettings().buttons };
@@ -23894,6 +24040,7 @@ function renderFolderSettings() {
       getSettings().buttons = newButtons;
       getSettings().shortcuts = newShortcuts;
       getSettings().buttonOrder = newOrder;
+      ihRestoreButtonsToOrder(_delFolderButtons);
       saveSettingsDebounced();
       renderFolderSettings();
       renderSettingsPanel();
@@ -23907,6 +24054,7 @@ function renderFolderSettings() {
       const btns = getSettings().folders[fi].buttons;
       const idx = btns.indexOf(bKey);
       if (idx > -1) btns.splice(idx, 1);
+      ihRestoreButtonsToOrder(bKey);
       saveSettingsDebounced();
       renderFolderSettings();
       renderSettingsPanel();
@@ -23943,6 +24091,7 @@ function renderFolderSettings() {
         danger: true,
       });
       if (!_okClearFolder) return;
+      ihRestoreButtonsToOrder(folder.buttons || []);
       folder.buttons = [];
       saveSettingsDebounced();
       renderFolderSettings();
@@ -24690,7 +24839,8 @@ function onEnableInputChange() {
     chatUndoManager.updateButton();
     sendStopController._update();
     if (getSettings().showModelInChat) ihUpdateAllChatModelBadges();
-    if (power_user && power_user.timestamp_model_icon) ihFixAllCustomModelIcons();
+    if (power_user && power_user.timestamp_model_icon)
+      ihFixAllCustomModelIcons();
   } else {
     $("#input_helper_toolbar").addClass("input-helper-hidden");
     if (shiftMode.active) shiftMode.deactivate();
@@ -24702,17 +24852,13 @@ function onEnableInputChange() {
     closeAllFolderDropdowns();
     chatUndoManager.stopWatcher();
     quickHideController.reset();
-    document
-      .querySelectorAll("#chat .mes")
-      .forEach(function (mesEl) {
-        _ihClearModelBadge(mesEl);
-      });
-    document
-      .querySelectorAll(".ih-color-picker-portal")
-      .forEach(function (el) {
-        if (typeof el._ihClose === "function") el._ihClose();
-        else el.remove();
-      });
+    document.querySelectorAll("#chat .mes").forEach(function (mesEl) {
+      _ihClearModelBadge(mesEl);
+    });
+    document.querySelectorAll(".ih-color-picker-portal").forEach(function (el) {
+      if (typeof el._ihClose === "function") el._ihClose();
+      else el.remove();
+    });
   }
 }
 
@@ -25063,6 +25209,7 @@ async function loadSettings() {
   if (s.searchTreeView === undefined) s.searchTreeView = true;
   if (!IH_MGR_TAB_KEYS.includes(s.lastMgrTab)) s.lastMgrTab = "hide";
   if (s.showModelInChat === undefined) s.showModelInChat = false;
+  if (s.disableSmoothScroll === undefined) s.disableSmoothScroll = false;
   if (s.enabled === undefined) s.enabled = true;
   if (s.confirmDangerousActions === undefined)
     s.confirmDangerousActions = false;
@@ -25195,6 +25342,8 @@ async function loadSettings() {
   $("#ih_two_row_order").val(s.twoRowOrder || "input-first");
   $("#ih_two_row_order_row").toggle(!!s.twoRowMode);
   $("#enable_show_model_in_chat").prop("checked", !!s.showModelInChat);
+  $("#enable_disable_smooth_scroll").prop("checked", !!s.disableSmoothScroll);
+  document.body.classList.toggle("ih-no-anim", !!s.disableSmoothScroll);
   $("#enable_floating_panel").prop("checked", s.floatingPanel.enabled);
   loadCustomSymbolButtons();
   renderFolderSettings();
@@ -26065,6 +26214,12 @@ jQuery(async () => {
     saveSettingsDebounced();
     ihUpdateAllChatModelBadges();
   });
+  $(document).on("change", "#enable_disable_smooth_scroll", function () {
+    const val = $(this).prop("checked");
+    getSettings().disableSmoothScroll = val;
+    document.body.classList.toggle("ih-no-anim", val);
+    saveSettingsDebounced();
+  });
 
   if (!$("#ih_two_row_order_row").length) {
     const orderRow = $(`
@@ -26571,14 +26726,16 @@ jQuery(async () => {
         scrollLockController.onGenerationStart(type);
         sendStopController.setGenerating();
         try {
-          _ihStreamingApi =
+          const generatingApi =
             typeof SillyTavernScript.getGeneratingApi === "function"
-              ? String(SillyTavernScript.getGeneratingApi())
+              ? SillyTavernScript.getGeneratingApi()
               : "";
-          _ihStreamingModel =
+          const generatingModel =
             typeof SillyTavernScript.getGeneratingModel === "function"
-              ? String(SillyTavernScript.getGeneratingModel())
+              ? SillyTavernScript.getGeneratingModel()
               : "";
+          _ihStreamingApi = generatingApi ? String(generatingApi) : "";
+          _ihStreamingModel = generatingModel ? String(generatingModel) : "";
         } catch (e) {
           _ihStreamingApi = "";
           _ihStreamingModel = "";
@@ -26611,14 +26768,27 @@ jQuery(async () => {
     if (event_types.STREAM_TOKEN_RECEIVED) {
       eventSource.on(event_types.STREAM_TOKEN_RECEIVED, function () {
         streamScrollController.onStreamToken();
+        try {
+          if (
+            !_ihStreamingApi &&
+            typeof SillyTavernScript.getGeneratingApi === "function"
+          ) {
+            const api = SillyTavernScript.getGeneratingApi();
+            if (api) _ihStreamingApi = String(api);
+          }
+          if (
+            !_ihStreamingModel &&
+            typeof SillyTavernScript.getGeneratingModel === "function"
+          ) {
+            const model = SillyTavernScript.getGeneratingModel();
+            if (model) _ihStreamingModel = String(model);
+          }
+        } catch (e) {}
+        ihApplyStreamingBadges();
       });
     }
-    [
-      event_types.CHARACTER_MESSAGE_RENDERED,
-      event_types.MESSAGE_SWIPED,
-    ].forEach(function (ev) {
-      if (!ev) return;
-      eventSource.on(ev, function (mesId) {
+    if (event_types.CHARACTER_MESSAGE_RENDERED) {
+      eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, function (mesId) {
         try {
           const id = typeof mesId === "number" ? mesId : chat.length - 1;
           ihUpdateChatModelBadge(id);
@@ -26626,7 +26796,21 @@ jQuery(async () => {
           if (mesEl) ihFixCustomModelIconForMsg(mesEl, id);
         } catch (e) {}
       });
-    });
+    }
+    if (event_types.MESSAGE_SWIPED) {
+      eventSource.on(event_types.MESSAGE_SWIPED, function (mesId) {
+        try {
+          const id = typeof mesId === "number" ? mesId : chat.length - 1;
+          ihUpdateChatModelBadge(id);
+          setTimeout(function () {
+            try {
+              const mesEl = document.querySelector(`#chat .mes[mesid="${id}"]`);
+              if (mesEl) ihFixCustomModelIconForMsg(mesEl, id);
+            } catch (e) {}
+          }, 450);
+        } catch (e) {}
+      });
+    }
   } catch (e) {
     console.warn("快捷工具栏: 无法监听事件", e);
   }

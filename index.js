@@ -6615,7 +6615,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.2.8";
+const EXTENSION_VERSION = "3.2.9";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -6810,6 +6810,24 @@ async function ihReloadForUpdate() {
   } catch (e) {
     window.location.href = window.location.href;
   }
+}
+function ihScheduleReloadOnPanelClose(onClose) {
+  const panel = document.querySelector(".extensions_info");
+  if (!panel) return false;
+  const observer = new MutationObserver(() => {
+    if (!document.body.contains(panel)) {
+      observer.disconnect();
+      onClose();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  setTimeout(() => {
+    if (document.body.contains(panel)) {
+      observer.disconnect();
+      onClose();
+    }
+  }, 60000);
+  return true;
 }
 
 function ihComputeUpdateStatus() {
@@ -7087,6 +7105,7 @@ function openUpdatePanel(options) {
   let doneInfo = null;
   let countdown = 0;
   let countdownTimer = null;
+  let deferredToPanel = false;
 
   const stopCountdown = () => {
     if (countdownTimer) {
@@ -7144,8 +7163,11 @@ function openUpdatePanel(options) {
         doneInfo && doneInfo.isUpToDate
           ? "文件已是最新，无需拉取"
           : `更新完成${hash ? `（${hash}）` : ""}`;
-      const tail =
-        countdown > 0 ? `　·　${countdown} 秒后自动刷新` : "　·　刷新后生效";
+      const tail = deferredToPanel
+        ? "　·　关闭扩展面板后将自动刷新"
+        : countdown > 0
+        ? `　·　${countdown} 秒后自动刷新`
+        : "　·　刷新后生效";
       return { tone: "ok", icon: "check", text: base + tail };
     }
     if (phase === "failed") {
@@ -7303,6 +7325,16 @@ function openUpdatePanel(options) {
 
   const startCountdown = () => {
     if (getSettings().autoReloadAfterUpdate === false) return;
+    if (
+      ihScheduleReloadOnPanelClose(() => {
+        stopCountdown();
+        ihReloadForUpdate();
+      })
+    ) {
+      deferredToPanel = true;
+      render();
+      return;
+    }
     countdown = 3;
     render();
     countdownTimer = setInterval(() => {
@@ -7417,16 +7449,10 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.8</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.2.9</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>新增「禁用所有动效」开关</b>：滚动与界面动画全部改为瞬时，适合墨水屏和低刷新率设备。</li>
-  <li><b>修复关闭聊天按钮失效</b>：此前点击总是提示「找不到关闭聊天入口」。</li>
-  <li><b>修复编辑最后一条消息偶尔无反应</b>：生成回复中或刚切换备选时点击会提示找不到编辑按钮。</li>
-  <li><b>修复撤回删除聊天档会覆盖其他聊天档</b>：删除当前聊天后酒馆会自动切到另一个已有聊天，此时点撤回会把那个聊天的内容覆盖并改名；现在改为新建聊天档来恢复，不再破坏已有数据。</li>
-  <li><b>修复按钮移出分组后消失</b>：从分组移出、清空或删除分组时，按钮会正确回到主工具栏，不再需要重启酒馆才能找回。</li>
-  <li><b>修复跳到底部后「下一条 AI 消息」反而往回跳一条</b>：现在会停在最后一条。</li>
-  <li><b>修复插入空白消息后不会自动进入编辑状态</b>。</li>
-  <li><b>模型名与图标显示修正</b>：调整模型名徽章位置，修复自定义端点图标（含 3.2.7.1~3.2.7.3 的累积修复）。</li>
+  <li><b>修复深色文字主题下弹窗背景色判断异常</b>：当酒馆主题使用深色文字且弹窗背景色同样偏深时，弹窗背景现在会自动切换为浅色，避免深底深字不可读。</li>
+  <li><b>新增「关闭扩展面板后自动刷新」</b>：在插件更新成功后，若酒馆扩展管理面板处于开启状态，页面刷新将延迟至该面板关闭时执行，便于在同一次打开中连续更新多个扩展；若面板未开启，维持原有 3 秒倒计时自动刷新逻辑。</li>
 </ul>
 `;
 
@@ -21350,6 +21376,14 @@ function _getThemeSample() {
       if (m) {
         const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
         result.tintColor = `rgba(${m[1]},${m[2]},${m[3]},${Math.max(a, 0.82)})`;
+        const _tRgb = result.color && result.color.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/);
+        if (_tRgb) {
+          const _bgL = 0.299 * parseInt(m[1]) + 0.587 * parseInt(m[2]) + 0.114 * parseInt(m[3]);
+          const _fgL = 0.299 * parseInt(_tRgb[1]) + 0.587 * parseInt(_tRgb[2]) + 0.114 * parseInt(_tRgb[3]);
+          if (_fgL < 128 && _bgL < 128) {
+            result.tintColor = `rgba(255, 255, 255, 0.88)`;
+          }
+        }
       }
     }
     const probeInput = rootDoc.createElement("input");

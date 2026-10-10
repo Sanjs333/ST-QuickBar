@@ -404,6 +404,13 @@ function writeCodeMirror(info, before, change, options) {
   const view = info.view;
   const spec = { changes: { from: change.from, to: change.to, insert: change.insert } };
   if (options.userEvent) spec.userEvent = options.userEvent;
+  if (options.addToHistory === false) {
+    // Get the public Transaction annotation from this view's own CM bundle.
+    // Importing another @codemirror/state copy would create an incompatible type.
+    // A session-history fallback must never add its inverse edit to a native stack.
+    const Transaction = view.state.update({ filter: false }).constructor;
+    spec.annotations = Transaction.addToHistory.of(false);
+  }
   // Default: do not move the selection or scroll the editor into view. Only
   // honor an explicitly requested selection; otherwise CM maps the existing one.
   if (options.selection) {
@@ -458,21 +465,32 @@ function performHistory(source, direction) {
   const mac = /Mac|iPhone|iPad|iPod/.test(win.navigator.platform);
   const redo = direction === "redo";
   const key = redo && !mac ? "y" : "z";
+  const event = new win.KeyboardEvent("keydown", {
+    key, code: key === "y" ? "KeyY" : "KeyZ", keyCode: key === "y" ? 89 : 90,
+    which: key === "y" ? 89 : 90, ctrlKey: !mac, metaKey: mac,
+    shiftKey: mac && redo, bubbles: true, cancelable: true,
+  });
+  let reachedEditor = false;
+  const markReached = () => { reachedEditor = true; };
   const stop = event => event.stopPropagation();
   notifyCodeMirrorChange(info, before, () => {
     // Registered after CM's handlers on this DOM element: let its keymap run,
     // then prevent unrelated document-level shortcuts from processing the event.
+    view.contentDOM.addEventListener("keydown", markReached);
     view.dom.addEventListener("keydown", stop);
     try {
-      view.contentDOM.dispatchEvent(new win.KeyboardEvent("keydown", {
-        key, code: key === "y" ? "KeyY" : "KeyZ", keyCode: key === "y" ? 89 : 90,
-        which: key === "y" ? 89 : 90, ctrlKey: !mac, metaKey: mac,
-        shiftKey: mac && redo, bubbles: true, cancelable: true,
-      }));
-    } finally { view.dom.removeEventListener("keydown", stop); }
+      view.contentDOM.dispatchEvent(event);
+    } finally {
+      view.contentDOM.removeEventListener("keydown", markReached);
+      view.dom.removeEventListener("keydown", stop);
+    }
   });
   const value = readValue(info);
-  return { changed: value !== before, value };
+  // CM's standard history bindings preventDefault even when the stack is empty.
+  // BaiBai omits history AND its keymap for large documents; distinguish that
+  // unhandled command from an exhausted/blocked native history. A command that
+  // never reached the editor is not permission to fall back to an inverse edit.
+  return { changed: value !== before, value, unhandled: reachedEditor && !event.defaultPrevented };
 }
 
 /* --------------------------- Public adapter ------------------------ */
@@ -521,7 +539,9 @@ function performWrite(source, text, options) {
  *                           "contenteditable" | "unsupported"
  *   read()                  current text (CM doc / value / textContent)
  *   write(text, options={}) -> { changed, value }; options may carry
- *                           `userEvent` and `selection` ({from,to}). By default
+ *                           `userEvent`, `selection` ({from,to}), and
+ *                           `addToHistory: false` (CM session-history fallback).
+ *                           By default
  *                           native/CM selection is mapped over the edit, with no
  *                           floating-side selection imposed. No focus or CM scroll
  *                           request; history stays in the existing CM state. Throws
@@ -532,6 +552,9 @@ function performWrite(source, text, options) {
  *                           Native IME and cross-editor conflicts are caller-owned;
  *                           plain contenteditable is text-only, not rich-text or
  *                           selection/history preserving.
+ *   history(direction)      Invoke CM's native undo/redo. Returns {changed,value}
+ *                           plus `unhandled` only after probing its keymap; an
+ *                           unhandled no-op permits session-history fallback.
  *   getRevision()           CM state.doc object, or the native string value
  *   getSelection()          { from, to } in UTF-16 offsets, or null
  *   isReadOnly()            boolean
@@ -2253,7 +2276,9 @@ export function createFloatingEditorController({
     }
     try {
       s.writing = true;
-      const result = s.adapter.write(value, { userEvent: options.userEvent || "input.type" });
+      const result = s.adapter.write(value, {
+        userEvent: options.userEvent || "input.type", addToHistory: options.addToHistory,
+      });
       if (!valid(s)) return;
       const valueChanged = result.value !== s.lastValue;
       if (options.historyDirection) s.history.accept(result.value, options.historyDirection);
@@ -2351,7 +2376,19 @@ export function createFloatingEditorController({
       s.writing = true;
       const result = s.adapter.history(direction);
       if (!valid(s)) return false;
-      if (!result.changed) { s.history.block(direction); return false; }
+      if (!result.changed) {
+        if (result.unhandled) {
+          // No native history binding (e.g. BaiBai CSS over 12,000 characters).
+          // Reuse the bounded session history and the normal, conflict-checked CM
+          // transaction/save path. Do not record this inverse edit in native history.
+          s.writing = false;
+          return applyEdit(s, candidate, {
+            historyDirection: direction, userEvent: direction, addToHistory: false,
+          });
+        }
+        s.history.block(direction);
+        return false;
+      }
       valueChanged = result.value !== s.lastValue;
       s.history.accept(result.value, direction);
       s.window.setValue(result.value);

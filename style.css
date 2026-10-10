@@ -1585,7 +1585,10 @@ textarea.ih-replace-input::-webkit-scrollbar {
 }
 .ih-floating-ball {
   position: fixed;
-  z-index: 10003;
+  /* Must stay above the whole floating-editor stack: the window itself
+     (floating-editor.js MAX_LAYER = 10032), its targeted color picker (owner+1,
+     up to 10033) and its find bar (index.js, 10034). */
+  z-index: 10040;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -1695,7 +1698,9 @@ textarea.ih-replace-input::-webkit-scrollbar {
 }
 .ih-floating-panel {
   position: fixed;
-  z-index: 10005;
+  /* Above the full floating-editor stack (window 10032 / color picker ≤10033 /
+     find bar 10034) and above the ball, keeping its old +2 lead over it. */
+  z-index: 10042;
   background-color: var(--SmartThemeBlurTintColor);
   border: 1px solid var(--SmartThemeBorderColor);
   border-radius: 10px;

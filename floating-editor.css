@@ -1,0 +1,568 @@
+/* Standalone floating editor; loaded separately from QuickBar's main styles. */
+.ih-floating-editor-window {
+    --ih-fe-surface: var(--SmartThemeBlurTintColor, Canvas);
+    --ih-fe-foreground: var(--SmartThemeBodyColor, CanvasText);
+    --ih-fe-outline: var(--SmartThemeBorderColor, GrayText);
+    --ih-fe-accent: var(--SmartThemeQuoteColor, Highlight);
+    --ih-fe-button-size: 28px;
+    position: fixed;
+    z-index: 10030;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    max-width: none;
+    max-height: none;
+    padding: 0;
+    overflow: hidden;
+    isolation: isolate;
+    border: 1px solid var(--ih-fe-outline);
+    border-radius: 10px;
+    background: var(--ih-fe-surface);
+    color: var(--ih-fe-foreground);
+    box-shadow: 0 8px 28px var(--SmartThemeShadowColor, color-mix(in srgb, CanvasText 25%, transparent));
+    font-family: var(--mainFontFamily, inherit);
+    font-size: 14px;
+    line-height: 1.35;
+    text-align: start;
+    text-shadow: none;
+    pointer-events: auto;
+    resize: none;
+    overscroll-behavior: contain;
+}
+
+/* Inactive windows retain the full theme/text contrast; only the outline changes. */
+.ih-floating-editor-window.is-active {
+    border-color: var(--ih-fe-accent);
+    outline: 1px solid var(--ih-fe-accent);
+    outline-offset: -1px;
+}
+
+/* With several windows open, dim inactive ones slightly so the writable
+ * (active) window is obvious. The active window keeps full opacity. */
+.ih-floating-editor-window:not(.is-active) {
+    opacity: 0.94;
+}
+
+
+.ih-floating-editor-window > .ih-floating-editor-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 44px;
+    margin: 0;
+    padding: 5px 7px;
+    border: 0;
+    border-bottom: 1px solid var(--ih-fe-outline);
+    background: color-mix(in srgb, var(--ih-fe-foreground) 4%, transparent);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.ih-floating-editor-window .ih-floating-editor-grip {
+    flex: 0 0 auto;
+    font-size: 12px;
+    opacity: 0.5;
+}
+
+.ih-floating-editor-window .ih-floating-editor-heading {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    gap: 1px;
+    overflow: hidden;
+}
+
+.ih-floating-editor-window .ih-floating-editor-title,
+.ih-floating-editor-window .ih-floating-editor-status {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.ih-floating-editor-window .ih-floating-editor-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.ih-floating-editor-window .ih-floating-editor-status {
+    color: var(--SmartThemeEmColor, var(--ih-fe-foreground));
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.ih-floating-editor-window .ih-floating-editor-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0;
+}
+
+.ih-floating-editor-window .ih-floating-editor-button {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: var(--ih-fe-button-size);
+    height: var(--ih-fe-button-size);
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--ih-fe-foreground);
+    opacity: 0.6;
+    transition: opacity 0.15s ease, color 0.15s ease;
+    box-shadow: none;
+    font: inherit;
+    font-size: 13px;
+    line-height: 1;
+    text-shadow: none;
+    cursor: pointer;
+    touch-action: manipulation;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.ih-floating-editor-window .ih-floating-editor-button > i {
+    pointer-events: none;
+}
+
+.ih-floating-editor-window .ih-floating-editor-button:not(:disabled):hover {
+    opacity: 1;
+    background: transparent;
+    box-shadow: none;
+}
+
+.ih-floating-editor-window .ih-floating-editor-button[aria-pressed="true"] {
+    color: var(--ih-fe-accent);
+    opacity: 1;
+    background: transparent;
+    box-shadow: none;
+}
+
+.ih-floating-editor-window .ih-floating-editor-button:disabled {
+    opacity: 0.28;
+    cursor: default;
+}
+
+.ih-floating-editor-window .ih-floating-editor-button:focus-visible,
+.ih-floating-editor-window .ih-floating-editor-header:focus-visible {
+    outline: 2px solid var(--ih-fe-accent);
+    outline-offset: -2px;
+}
+
+.ih-floating-editor-window > .ih-floating-editor-body {
+    display: flex;
+    flex: 1 1 auto;
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 6px;
+    overflow: hidden;
+}
+
+.ih-floating-editor-window .ih-floating-editor-textarea.text_pole {
+    position: static;
+    display: block;
+    flex: 1 1 auto;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 9px 10px 26px;
+    padding-inline-end: 26px;
+    overflow: auto;
+    border: 1px solid var(--ih-fe-editor-border, var(--ih-fe-outline));
+    border-radius: 6px;
+    outline: none;
+    background: var(--ih-fe-editor-background, var(--SmartThemeChatTintColor, transparent));
+    color: var(--ih-fe-editor-color, var(--ih-fe-foreground));
+    caret-color: var(--ih-fe-editor-caret, currentColor);
+    box-shadow: none;
+    font-family: var(--ih-fe-editor-font-family, var(--mainFontFamily, inherit));
+    font-size: var(--ih-fe-editor-font-size, 1em);
+    font-weight: var(--ih-fe-editor-font-weight, 400);
+    font-style: var(--ih-fe-editor-font-style, normal);
+    line-height: var(--ih-fe-editor-line-height, 1.5);
+    letter-spacing: var(--ih-fe-editor-letter-spacing, normal);
+    word-spacing: var(--ih-fe-editor-word-spacing, normal);
+    text-align: var(--ih-fe-editor-text-align, start);
+    text-transform: var(--ih-fe-editor-text-transform, none);
+    text-shadow: var(--ih-fe-editor-text-shadow, none);
+    direction: var(--ih-fe-editor-direction, inherit);
+    tab-size: var(--ih-fe-editor-tab-size, 4);
+    resize: none !important;
+    touch-action: auto;
+    user-select: text;
+    -webkit-user-select: text;
+    overscroll-behavior: contain;
+}
+
+.ih-floating-editor-window .ih-floating-editor-textarea:focus {
+    border-color: var(--ih-fe-accent);
+    outline: 1px solid var(--ih-fe-accent);
+    outline-offset: -1px;
+}
+
+.ih-floating-editor-window.is-readonly .ih-floating-editor-textarea {
+    cursor: text;
+}
+
+.ih-floating-editor-window > .ih-floating-editor-resize {
+    position: absolute;
+    inset-inline-end: 6px;
+    bottom: 2px;
+    z-index: 1;
+    width: var(--ih-fe-button-size);
+    height: var(--ih-fe-button-size);
+    border-radius: 0;
+    background: transparent;
+    color: var(--SmartThemeEmColor, var(--ih-fe-foreground));
+    cursor: nwse-resize;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.ih-floating-editor-window > .ih-floating-editor-resize > i {
+    transform: rotate(90deg);
+    font-size: 13px;
+}
+
+.ih-floating-editor-window:dir(rtl) > .ih-floating-editor-resize {
+    cursor: nesw-resize;
+}
+
+.ih-floating-editor-window:dir(rtl) > .ih-floating-editor-resize > i {
+    transform: none;
+}
+
+.ih-floating-editor-window.is-pinned > .ih-floating-editor-header {
+    /* Pinned, yet a deliberate header drag still moves the window (it re-locks
+       on release), so keep the grab affordance rather than a default cursor. */
+    cursor: grab;
+}
+
+.ih-floating-editor-window.is-pinned .ih-floating-editor-grip {
+    opacity: 0.2;
+}
+
+.ih-floating-editor-window.is-pinned > .ih-floating-editor-resize {
+    cursor: default;
+    pointer-events: none;
+}
+
+.ih-floating-editor-window.is-dragging > .ih-floating-editor-header {
+    cursor: grabbing;
+}
+
+.ih-floating-editor-window.is-dragging .ih-floating-editor-textarea,
+.ih-floating-editor-window.is-resizing .ih-floating-editor-textarea {
+    pointer-events: none;
+}
+
+.ih-floating-editor-window.is-collapsed > .ih-floating-editor-header {
+    border-bottom: 0;
+}
+
+.ih-floating-editor-window [hidden] {
+    display: none !important;
+}
+
+/* Keep the launch icon immediately LEFT of the untouched native maximize.
+   A single flex item also prevents title_restorable's space-between from
+   distributing the two controls to different parts of the heading. */
+.ih-floating-editor-actions-pair {
+    display: inline-flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    direction: ltr;
+    vertical-align: middle;
+}
+
+/* Same native <i>/FA/right_menu_button appearance: no menu_button frame,
+   no custom accent/background on hover. Shared theme selectors keep working. */
+.ih-floating-editor-launch {
+    cursor: pointer;
+}
+
+.ih-floating-editor-launch:not(.right_menu_button) {
+    padding: 2px;
+}
+
+/* These are the host's editor_maximize-specific rules; deliberately do not
+   attach editor_maximize itself, which would invoke the native popup handler. */
+#character_popup .ih-floating-editor-launch {
+    margin: 3px;
+    opacity: 0.75;
+    filter: grayscale(1);
+    transition: all var(--animation-duration-2x) ease-in-out;
+}
+
+#character_popup .ih-floating-editor-launch:hover {
+    opacity: 1;
+}
+
+.ih-floating-editor-launch:focus-visible {
+    outline: 1px solid currentColor;
+    outline-offset: 2px;
+}
+
+@media (any-pointer: coarse) {
+    .ih-floating-editor-window {
+        --ih-fe-button-size: 36px;
+    }
+
+    .ih-floating-editor-window .ih-floating-editor-textarea.text_pole {
+        padding-bottom: 36px;
+        padding-inline-end: 36px;
+    }
+}
+
+/* UI-only footer: one quiet row below the editor, never in the title bar. */
+.ih-floating-editor-window.has-edit-tools > .ih-floating-editor-body {
+    padding-bottom: 0;
+}
+
+/* The resize control now sits beside the footer, not over the text. */
+.ih-floating-editor-window.has-edit-tools .ih-floating-editor-textarea.text_pole {
+    padding: 9px 10px;
+}
+
+.ih-floating-editor-window > .ih-floating-editor-footer {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    /* History stays at the start; search/color stay beside the resize icon. */
+    justify-content: space-between;
+    gap: 4px;
+    box-sizing: border-box;
+    min-width: 0;
+    margin: 0;
+    padding-block: 2px;
+    /* Reserve exactly one same-size target; centers match at every viewport. */
+    padding-inline: 6px calc(var(--ih-fe-button-size) + 6px);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.ih-floating-editor-window .ih-floating-editor-tool-group {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0;
+}
+
+.ih-floating-editor-window .ih-floating-editor-footer .ih-floating-editor-button {
+    width: var(--ih-fe-button-size);
+    height: var(--ih-fe-button-size);
+    border: 0;
+    border-radius: 0;
+    color: var(--ih-fe-foreground);
+}
+
+.ih-floating-editor-window .ih-floating-editor-footer .ih-floating-editor-button[aria-pressed="true"] {
+    color: var(--ih-fe-accent);
+    background: transparent;
+}
+
+.ih-floating-editor-window.is-collapsed > .ih-floating-editor-footer {
+    display: none !important;
+}
+
+/* ── Change-history drill-down ── */
+/* Replaces the editor inside the window body (not an overlay): opening it hides
+ * the textarea and this panel takes its place, so nothing shows through. */
+.ih-floating-editor-window .ih-floating-editor-history {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    gap: 6px;
+    overflow: hidden;
+    border: 1px solid var(--ih-fe-editor-border, var(--ih-fe-outline));
+    border-radius: 6px;
+    background: var(--ih-fe-surface);
+    color: var(--ih-fe-foreground);
+}
+
+.ih-floating-editor-window .ih-floating-editor-history[hidden] {
+    display: none;
+}
+
+/* While history is open, the editor and its edit toolbar step aside. */
+.ih-floating-editor-window.is-history-open > .ih-floating-editor-body > .ih-floating-editor-textarea {
+    display: none;
+}
+
+.ih-floating-editor-window.is-history-open > .ih-floating-editor-footer {
+    display: none !important;
+}
+
+
+.ih-floating-editor-window .ih-floating-editor-history-list {
+    flex: 1 1 40%;
+    box-sizing: border-box;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    box-sizing: border-box;
+    padding: 6px 10px;
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--ih-fe-foreground) 7%, transparent);
+    cursor: pointer;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-item:hover {
+    background: color-mix(in srgb, var(--ih-fe-foreground) 6%, transparent);
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-item.is-selected {
+    background: color-mix(in srgb, var(--ih-fe-accent) 16%, transparent);
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-item:focus-visible {
+    outline: 2px solid var(--ih-fe-accent);
+    outline-offset: -2px;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-dot {
+    flex: 0 0 auto;
+    align-self: center;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--ih-fe-foreground) 35%, transparent);
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-item.is-current .ih-floating-editor-history-dot {
+    background: var(--ih-fe-accent);
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-label {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    min-width: 0;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 13px;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-meta {
+    flex: 0 0 auto;
+    color: var(--SmartThemeEmColor, var(--ih-fe-foreground));
+    font-size: 11px;
+    opacity: 0.75;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-empty {
+    padding: 12px 10px;
+    color: var(--SmartThemeEmColor, var(--ih-fe-foreground));
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-preview {
+    display: flex;
+    flex: 1 1 60%;
+    flex-direction: column;
+    box-sizing: border-box;
+    min-height: 0;
+    gap: 6px;
+    padding: 0 6px 6px;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-preview-text {
+    flex: 1 1 auto;
+    box-sizing: border-box;
+    min-height: 48px;
+    margin: 0;
+    padding: 8px 10px;
+    overflow: auto;
+    border: 1px solid color-mix(in srgb, var(--ih-fe-foreground) 12%, transparent);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--ih-fe-foreground) 3%, transparent);
+    font-family: var(--ih-fe-editor-font-family, var(--monoFontFamily, monospace));
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-revert {
+    flex: 0 0 auto;
+    align-self: flex-end;
+    box-sizing: border-box;
+    padding: 5px 14px;
+    border: 1px solid var(--ih-fe-accent);
+    border-radius: 6px;
+    background: var(--ih-fe-accent);
+    color: var(--SmartThemeBlurTintColor, Canvas);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-revert:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-revert:disabled {
+    border-color: color-mix(in srgb, var(--ih-fe-foreground) 24%, transparent);
+    background: transparent;
+    color: var(--ih-fe-foreground);
+    opacity: 0.4;
+    cursor: default;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-revert:focus-visible {
+    outline: 2px solid var(--ih-fe-accent);
+    outline-offset: 2px;
+}
+
+/* Collapsing hides the whole body, history panel included. */
+.ih-floating-editor-window.is-collapsed .ih-floating-editor-history {
+    display: none !important;
+}
+

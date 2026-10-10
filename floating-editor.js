@@ -378,8 +378,14 @@ function writeNative(info, after, change, options) {
   try {
     dispatchNativeInput(el);
   } finally {
-    el.scrollTop = scrollTop;
-    el.scrollLeft = scrollLeft;
+    // An unfocused native textarea at its origin stays there after a range
+    // edit. Even assigning scrollTop=0 forces Chromium to lay out every line
+    // synchronously, making long source fields stall the floating editor.
+    // Still preserve nonzero scroll positions and explicitly focused writes.
+    if (scrollTop || scrollLeft || impose || el.ownerDocument.activeElement === el) {
+      el.scrollTop = scrollTop;
+      el.scrollLeft = scrollLeft;
+    }
   }
 }
 
@@ -693,11 +699,131 @@ export function createFloatingEditorHistory(initial, { maxEntries = 50, maxChars
     }
     return { entries: rows, position: pointer };
   }
-  return { record, accept, peek, block, textAt, list,
+  // The actual diff that produced state `index` (1..entries.length), for diff
+  // highlighting in the preview. Returns {from, remove, insert} strings, or null
+  // for the baseline (index 0) and out-of-range indices.
+  function changeAt(index) {
+    index = Math.trunc(index);
+    if (!Number.isFinite(index) || index <= 0 || index > entries.length) return null;
+    const e = entries[index - 1];
+    return { from: e.from, remove: e.remove, insert: e.insert };
+  }
+  return { record, accept, peek, block, textAt, list, changeAt,
     get canUndo() { return pointer > 0; }, get canRedo() { return pointer < entries.length; },
     get position() { return pointer; },
     get value() { return current; }, get length() { return entries.length; },
     get retainedChars() { return entries.reduce((sum, e) => sum + e.remove.length + e.insert.length, 0); } };
+}
+
+/** Debounced inspection history, separate from the editor's undo stack.
+ * Only the latest pending string is retained; diffing happens once at commit.
+ * A long uninterrupted edit gets a checkpoint every 30s, not every keystroke.
+ */
+export function createFloatingEditorTimeline(initial, {
+  delay = 3000, maxWait = 30000, clock = globalThis, onCommit,
+  Diff = globalThis.diff_match_patch, ...limits
+} = {}) {
+  const history = createFloatingEditorHistory(initial, limits);
+  const summaries = [];
+  let pending = null, idleTimer = null, maxTimer = null, disposed = false, revision = 0, trimmed = false;
+  function cancel() {
+    if (idleTimer !== null) clock.clearTimeout(idleTimer);
+    if (maxTimer !== null) clock.clearTimeout(maxTimer);
+    idleTimer = maxTimer = null;
+  }
+  function flush() {
+    cancel();
+    const next = pending;
+    pending = null;
+    if (disposed || !next || !history.record(next.value, { at: next.at })) return false;
+    // Count actual inserted/deleted text, not the unchanged middle of a
+    // coalesced patch. This bounded diff runs at commit, never per keystroke.
+    const regions = floatingEditorChangeRegions(history.changeAt(history.position), Diff);
+    summaries.push(regions.reduce((sum, region) => ({
+      insert: sum.insert + region.insert.length, remove: sum.remove + region.remove.length,
+    }), { insert: 0, remove: 0 }));
+    if (summaries.length > history.length) {
+      summaries.splice(0, summaries.length - history.length);
+      trimmed = true;
+    }
+    revision++;
+    onCommit?.();
+    return true;
+  }
+  function queue(value, { at = Date.now() } = {}) {
+    if (disposed) return;
+    value = String(value);
+    if (value === history.value) { cancel(); pending = null; return; }
+    pending = { value, at };
+    if (idleTimer !== null) clock.clearTimeout(idleTimer);
+    idleTimer = clock.setTimeout(flush, delay);
+    if (maxTimer === null) maxTimer = clock.setTimeout(flush, maxWait);
+  }
+  return {
+    queue, flush,
+    dispose() { cancel(); pending = null; disposed = true; },
+    list() {
+      const snapshot = history.list();
+      snapshot.entries = snapshot.entries.map(row => row.index
+        ? { ...row, ...summaries[row.index - 1] } : { ...row, trimmed });
+      return { ...snapshot, revision };
+    },
+    textAt: index => history.textAt(index),
+    changeAt: index => history.changeAt(index),
+    get value() { return history.value; },
+  };
+}
+
+/** Split a retained patch into independent visual change locations on demand.
+ * SillyTavern supplies diff_match_patch; no extra module/download is required.
+ * Bound expensive comparisons and fall back to a valid coarse replacement.
+ */
+export function floatingEditorChangeRegions(change, Diff = globalThis.diff_match_patch) {
+  if (!change || !Number.isInteger(change.from) || change.from < 0 ||
+      typeof change.remove !== 'string' || typeof change.insert !== 'string') return [];
+  const { from, remove, insert } = change;
+  if (remove === insert) return [];
+  const fallback = () => [{ from, remove, insert }];
+  if (!remove || !insert || remove.length + insert.length > 200000 || typeof Diff !== 'function') return fallback();
+  try {
+    const differ = new Diff();
+    differ.Diff_Timeout = 0.025;
+    const parts = differ.diff_main(remove, insert);
+    if (parts.length > 4000) return fallback();
+    differ.diff_cleanupSemantic(parts);
+    let oldPos = 0, newPos = 0, region = null;
+    const ranges = [];
+    for (const [op, text] of parts) {
+      if (op === 0) {
+        region = null;
+        oldPos += text.length;
+        newPos += text.length;
+      } else {
+        if (!region) { region = { oldFrom: oldPos, from: newPos, oldTo: oldPos, to: newPos }; ranges.push(region); }
+        if (op === -1) oldPos += text.length;
+        else newPos += text.length;
+        region.oldTo = oldPos;
+        region.to = newPos;
+      }
+    }
+    // DMP compares UTF-16 units. Expand/merge boundaries that bisect emoji.
+    const normalized = [];
+    for (const range of ranges) {
+      if (splitsSurrogatePair(remove, range.oldFrom) || splitsSurrogatePair(insert, range.from)) {
+        range.oldFrom--; range.from--;
+      }
+      if (splitsSurrogatePair(remove, range.oldTo) || splitsSurrogatePair(insert, range.to)) {
+        range.oldTo++; range.to++;
+      }
+      const previous = normalized[normalized.length - 1];
+      if (previous && range.from <= previous.to) {
+        previous.to = Math.max(previous.to, range.to);
+        previous.oldTo = Math.max(previous.oldTo, range.oldTo);
+      } else normalized.push(range);
+    }
+    return normalized.map(r => ({ from: from + r.from,
+      remove: remove.slice(r.oldFrom, r.oldTo), insert: insert.slice(r.from, r.to) }));
+  } catch { return fallback(); }
 }
 
 // ── Window layout and interaction ──
@@ -833,8 +959,12 @@ const text = value => String(value ?? '');
  * @param {function(): ({entries: Array, position: number}|null)} [options.requestHistory]
  *   Snapshot of reachable states for the change-history panel. Null means the
  *   session can no longer report history (locked/invalid); the panel stays closed.
+ * @param {function(): void} [options.onHistoryOpen] Flush pending edits before opening history.
  * @param {function(number): (string|null)} [options.previewHistory] Full text at a state
  *   index, for read-only preview. Null means that state is no longer reconstructable.
+ * @param {function(number): ({from: number, remove: string, insert: string}|null)} [options.changeHistory]
+ *   The diff that produced a state, for highlighting the changed region in the
+ *   preview. Null for the baseline/out-of-range (nothing to highlight).
  * @param {function(number): boolean} [options.revertHistory] Write the editor back to the
  *   given state index. Returns whether the revert was accepted.
  * @param {object|null} [options.geometry] Last expanded viewport position and preferred size.
@@ -851,7 +981,9 @@ export function createFloatingEditorWindow({
     onCompositionEnd,
     onClose,
     requestHistory,
+    onHistoryOpen,
     previewHistory,
+    changeHistory,
     revertHistory,
     geometry = null,
     onGeometryChange,
@@ -878,12 +1010,13 @@ export function createFloatingEditorWindow({
     let historyOpen = false;
     let historySelected = null;
     let baseTitle = '悬浮编辑';
-    // Memoize the last rendered list structure and preview so the 250ms sync
-    // poll does not rebuild the DOM or reconstruct text on every unchanged tick.
+    // Memoize list structure and preview so repeated refresh requests do not
+    // rebuild DOM or reconstruct unchanged text. Polling never renders history.
     let historySignature = null;
     let lastPreviewIndex = null;
     let lastPreviewKey = null;
     let previewValueKey = null;
+    let previewText = '', previewRegions = [], previewRegionIndex = -1;
     // Keep the preferred size across keyboard/viewport shrinkage and collapsing.
     const preferred = { x: null, y: null, width: 640, height: 440 };
     const finite = value => typeof value === "number" && Number.isFinite(value);
@@ -991,13 +1124,37 @@ export function createFloatingEditorWindow({
     historyPreview.className = 'ih-floating-editor-history-preview';
     const historyPreviewText = document.createElement('pre');
     historyPreviewText.className = 'ih-floating-editor-history-preview-text';
-    historyPreviewText.setAttribute('aria-live', 'polite');
+    historyPreviewText.tabIndex = 0;
+    historyPreviewText.setAttribute('aria-label', '变更预览：新增为绿色，删除为红色删除线');
+    const historyActions = document.createElement('div');
+    historyActions.className = 'ih-floating-editor-history-actions';
+    const historyLegend = document.createElement('div');
+    historyLegend.className = 'ih-floating-editor-history-legend';
+    for (const [cls, label] of [['added', '+ 新增'], ['removed', '− 删除']]) {
+        const hint = document.createElement('span');
+        hint.className = `ih-floating-editor-history-${cls}`;
+        hint.textContent = label;
+        historyLegend.append(hint);
+    }
+    const historyNavigation = document.createElement('div');
+    historyNavigation.className = 'ih-floating-editor-history-navigation';
+    historyNavigation.setAttribute('role', 'group');
+    historyNavigation.setAttribute('aria-label', '变动位置定位');
+    const previousChange = makeButton('history-prev-change', '上一处变动', 'fa-chevron-up', historyNavigation);
+    const changePosition = document.createElement('span');
+    changePosition.className = 'ih-floating-editor-history-position';
+    changePosition.setAttribute('role', 'status');
+    historyNavigation.append(changePosition);
+    const nextChange = makeButton('history-next-change', '下一处变动', 'fa-chevron-down', historyNavigation);
+    previousChange.disabled = nextChange.disabled = true;
+    changePosition.textContent = '0 / 0';
     const historyRevert = document.createElement('button');
     historyRevert.type = 'button';
     historyRevert.className = 'ih-floating-editor-history-revert';
     historyRevert.textContent = '回到此状态';
     historyRevert.disabled = true;
-    historyPreview.append(historyPreviewText, historyRevert);
+    historyActions.append(historyNavigation, historyRevert);
+    historyPreview.append(historyLegend, historyPreviewText, historyActions);
     historyPanel.append(historyList, historyPreview);
     body.append(historyPanel);
 
@@ -1135,12 +1292,80 @@ export function createFloatingEditorWindow({
         return `${Math.round(hr / 24)} 天前`;
     };
     const changeSummary = row => {
-        if (row.index === 0) return '打开时的内容';
+        if (row.index === 0) return row.trimmed ? '保留的最早状态' : '打开时的内容';
         const parts = [];
         if (row.insert) parts.push(`+${row.insert}`);
         if (row.remove) parts.push(`-${row.remove}`);
         return parts.length ? `修改（${parts.join(' / ')} 字）` : '修改';
     };
+
+    // Show a bounded excerpt at the selected change, including deleted text
+    // (display only: restore always uses the untouched historical snapshot).
+    const CAP = 4000;
+    function resetPreview() {
+        previewText = '';
+        previewRegions = [];
+        previewRegionIndex = -1;
+        changePosition.textContent = '0 / 0';
+        previousChange.disabled = nextChange.disabled = true;
+        historyPreviewText.classList.remove('has-highlight');
+    }
+    function renderChangeLocation(index) {
+        const count = previewRegions.length;
+        previewRegionIndex = count ? clamp(index, 0, count - 1) : -1;
+        previousChange.disabled = previewRegionIndex <= 0;
+        nextChange.disabled = previewRegionIndex < 0 || previewRegionIndex >= count - 1;
+        changePosition.textContent = `${count ? previewRegionIndex + 1 : 0} / ${count}`;
+        changePosition.title = count ? `第 ${previewRegionIndex + 1} 处变动，共 ${count} 处` : '此状态没有变动';
+        historyPreviewText.textContent = '';
+        historyPreviewText.classList.toggle('has-highlight', count > 0);
+        if (!count) {
+            historyPreviewText.textContent = previewText.length > CAP ? `${previewText.slice(0, CAP)}…` : previewText || '（空）';
+            historyPreviewText.scrollTop = 0;
+            return;
+        }
+        const change = previewRegions[previewRegionIndex];
+        const end = change.from + change.insert.length;
+        const previousEnd = previewRegionIndex > 0
+            ? previewRegions[previewRegionIndex - 1].from + previewRegions[previewRegionIndex - 1].insert.length : 0;
+        const nextStart = previewRegions[previewRegionIndex + 1]?.from ?? previewText.length;
+        let start = Math.max(previousEnd, change.from - 400);
+        let stop = Math.min(nextStart, end + 400);
+        if (splitsSurrogatePair(previewText, start)) start--;
+        if (splitsSurrogatePair(previewText, stop)) stop++;
+        const append = value => historyPreviewText.append(document.createTextNode(value));
+        if (start > 0) append('…\n');
+        append(previewText.slice(start, change.from));
+        const location = document.createElement('span');
+        location.className = 'ih-floating-editor-history-change';
+        for (const [tag, kind, value, label] of [
+            ['del', 'removed', change.remove, '删除'], ['ins', 'added', change.insert, '新增'],
+        ]) {
+            if (!value) continue;
+            const mark = document.createElement(tag);
+            mark.className = `ih-floating-editor-history-${kind}`;
+            mark.title = `${label} ${value.length} 字`;
+            // Split the budget between old/new text. Huge pastes must not bypass
+            // the preview cap (nor create a giant layout just to show one mark).
+            const limit = 1400;
+            let edge = limit;
+            if (splitsSurrogatePair(value, edge)) edge--;
+            mark.textContent = value.length > limit ? `${value.slice(0, edge)}…（省略 ${value.length - edge} 字）` : value;
+            location.append(mark);
+        }
+        historyPreviewText.append(location);
+        append(previewText.slice(end, stop));
+        if (stop < previewText.length) append('\n…');
+        historyPreviewText.scrollTop = 0;
+        // Scroll only this preview, never the page or the underlying editor.
+        const top = location.getBoundingClientRect().top - historyPreviewText.getBoundingClientRect().top;
+        historyPreviewText.scrollTop = Math.max(0, top - historyPreviewText.clientHeight / 3);
+    }
+    function renderPreview(fullText, change) {
+        previewText = fullText;
+        previewRegions = floatingEditorChangeRegions(change, view.diff_match_patch);
+        renderChangeLocation(0);
+    }
 
     function previewHistoryAt(index, force = false) {
         if (destroyed) return;
@@ -1157,17 +1382,26 @@ export function createFloatingEditorWindow({
             const active = Number(item.dataset.index) === index;
             if (item.classList.contains('is-selected') !== active) {
                 item.classList.toggle('is-selected', active);
-                item.setAttribute('aria-selected', String(active));
             }
+            item.setAttribute('aria-selected', String(active));
+            item.tabIndex = active ? 0 : -1;
         }
         lastPreviewIndex = index;
         lastPreviewKey = previewValueKey;
         if (text === null) {
+            resetPreview();
             historyPreviewText.textContent = '（此状态已无法预览）';
             historyRevert.disabled = true;
         } else {
-            // Cap the rendered preview; the full text is still written on revert.
-            historyPreviewText.textContent = text.length > 4000 ? `${text.slice(0, 4000)}…` : text || '（空）';
+            let change = null;
+            try { change = typeof changeHistory === 'function' ? changeHistory(index) : null; }
+            catch { change = null; }
+            // Validate the inserted slice before overlaying removed/added text.
+            if (change && typeof change.remove === 'string' &&
+                text.slice(change.from, change.from + change.insert.length) !== change.insert) {
+                change = null;
+            }
+            renderPreview(text, change);
             // A locked/read-only session can inspect history but not revert.
             historyRevert.disabled = !!readOnly || !!textarea.readOnly;
         }
@@ -1186,6 +1420,7 @@ export function createFloatingEditorWindow({
                 empty.className = 'ih-floating-editor-history-empty';
                 empty.textContent = '暂无变更记录。';
                 historyList.append(empty);
+                resetPreview();
                 historyPreviewText.textContent = '';
                 historyRevert.disabled = true;
                 historySelected = null;
@@ -1193,12 +1428,11 @@ export function createFloatingEditorWindow({
             }
             return;
         }
-        // Cheap structural signature: skip the full list rebuild unless the set
-        // of states, their sizes, or the current position actually changed. The
-        // 250ms poll calls this constantly, so this guard is the main perf win.
+        // Include the timeline revision: retention can replace states without
+        // changing their indices, lengths or even millisecond timestamps.
         const last = snapshot.entries[snapshot.entries.length - 1];
-        const signature = `${snapshot.entries.length}:${snapshot.position}:${last.index}:${last.at}:${last.insert}:${last.remove}`;
-        previewValueKey = `${snapshot.position}`;
+        const signature = `${snapshot.revision ?? ""}:${snapshot.entries.length}:${snapshot.position}:${last.index}:${last.at}:${last.insert}:${last.remove}`;
+        previewValueKey = signature;
         if (signature === historySignature) {
             // Structure unchanged: at most refresh the preview for the live state.
             if (historySelected !== null) previewHistoryAt(historySelected);
@@ -1243,6 +1477,7 @@ export function createFloatingEditorWindow({
         next = !!next;
         if (destroyed || historyOpen === next) return;
         if (next && typeof requestHistory !== 'function') return;
+        if (next) onHistoryOpen?.();
         historyOpen = next;
         historySelected = null;
         historySignature = null;
@@ -1263,6 +1498,7 @@ export function createFloatingEditorWindow({
             historyButton.focus({ preventScroll: true });
         } else {
             historyList.textContent = '';
+            resetPreview();
             historyPreviewText.textContent = '';
             historyRevert.disabled = true;
             historySignature = null;
@@ -1462,7 +1698,7 @@ export function createFloatingEditorWindow({
         // A locked session cannot revert; the panel still opens for read-only
         // inspection, but refresh it so the revert button reflects the new state.
         if (!!next) historyRevert.disabled = true;
-        if (historyOpen) renderHistory();
+        if (historyOpen && historySelected !== null) previewHistoryAt(historySelected, true);
     }
 
     /** Refresh computed styling/capabilities; move into the source's top layer. */
@@ -1519,6 +1755,7 @@ export function createFloatingEditorWindow({
         endGesture();
         if (geometryTimer) persistGeometry();
         destroyed = true;
+        resetPreview();
         layoutRegistration?.unregister();
         layoutRegistration = null;
         observer?.disconnect();
@@ -1566,6 +1803,8 @@ export function createFloatingEditorWindow({
             historyRevert.click();
         }
     });
+    listen(previousChange, 'click', () => renderChangeLocation(previewRegionIndex - 1));
+    listen(nextChange, 'click', () => renderChangeLocation(previewRegionIndex + 1));
     listen(historyRevert, 'click', () => {
         if (historyRevert.disabled || historySelected === null) return;
         let accepted = false;
@@ -1935,6 +2174,7 @@ export function createFloatingEditorController({
 
   function invalidate(s, message = "编辑对象已切换；此窗口已锁定，可复制内容后重新打开。") {
     if (!s || s.invalid) return;
+    s.timeline.flush();
     s.invalid = true;
     const dialog = s.identity.dialog;
     // Preserve a recoverable, visible copy even after a native modal closes or
@@ -1975,21 +2215,21 @@ export function createFloatingEditorController({
   function sync(s) {
     if (!s || s.writing || !valid(s)) return;
     s.window.setReadOnly(s.adapter.isReadOnly());
-    updateTools(s);
-    if (s.composing || s.sourceComposing || resolveCodeMirrorForSource(s.source)?.composing) return;
+    if (s.composing || s.sourceComposing || resolveCodeMirrorForSource(s.source)?.composing) { updateTools(s); return; }
     try {
       const revision = s.adapter.getRevision();
       if (revision !== s.revision) {
-        const value = s.adapter.read();
+        const value = typeof revision === "string" ? revision : s.adapter.read();
         const valueChanged = value !== s.lastValue;
         s.history.accept(value);
         s.window.setValue(value);
         s.lastValue = value;
+        if (valueChanged) s.timeline.queue(value);
         s.revision = revision;
         s.lastSelection = selectedRange(s);
         s.tools?.refresh();
         updateTools(s, valueChanged);
-      }
+      } else updateTools(s);
     } catch (error) {
       console.warn("[ST-QuickBar] 悬浮编辑同步失败", error);
       invalidate(s, "源编辑器已不可用；窗口已锁定，可复制内容。 ");
@@ -1998,7 +2238,11 @@ export function createFloatingEditorController({
 
   function write(s, value, options = {}) {
     if (!s || s.writing || !valid(s) || s.composing) return false;
-    if (s.sourceComposing || resolveCodeMirrorForSource(s.source)?.composing || s.adapter.read() !== s.lastValue) {
+    // CM revisions are immutable document identities. Avoid converting the
+    // entire source document to a string again when beforeinput just synced it.
+    const revision = s.adapter.getRevision();
+    if (s.sourceComposing || resolveCodeMirrorForSource(s.source)?.composing ||
+        (revision !== s.revision && s.adapter.read() !== s.lastValue)) {
       invalidate(s, "原框同时发生了修改；已暂停同步，保留两边内容以避免覆盖。 ");
       return;
     }
@@ -2018,6 +2262,10 @@ export function createFloatingEditorController({
         afterSelection: selectedRange(s), group: options.group === true,
       });
       s.lastValue = result.value;
+      if (valueChanged) {
+        s.timeline.queue(result.value);
+        if (options.historyDirection || options.userEvent === "input.restore") s.timeline.flush();
+      }
       s.revision = s.adapter.getRevision();
       if (result.value !== value) s.window.setValue(result.value);
       s.lastSelection = selectedRange(s);
@@ -2062,8 +2310,8 @@ export function createFloatingEditorController({
     const state = getHistoryState(s, false);
     if (state.readOnly) releaseColorOwner(s);
     s.tools?.update({ ...state, searchOpen: !!s.findOwner });
-    // Keep the open change-history drill-down in step with the live history.
-    s.window?.refreshHistory?.();
+    // The inspection timeline refreshes only when a debounced entry commits;
+    // polling/typing must not reconstruct preview text or rebuild its DOM.
     const key = `${state.canUndo}/${state.canRedo}/${state.readOnly}`;
     if (typeof onHistoryChange !== "function" || s.notifyingHistory || (!forceHistory && s.historyStateKey === key)) return;
     s.historyStateKey = key;
@@ -2081,6 +2329,7 @@ export function createFloatingEditorController({
     if (s.adapter.read() !== s.lastValue || s.window.textarea.value !== s.lastValue) {
       sync(s); s.tools?.refresh(); return false;
     }
+    s.timeline.flush();
     s.beforeSelection = selectedRange(s);
     s.window.setValue(value);
     if (selection) s.window.textarea.setSelectionRange(selection.from, selection.to);
@@ -2093,6 +2342,7 @@ export function createFloatingEditorController({
     if ((direction !== "undo" && direction !== "redo") || !canEdit(s) || s.writing) return false;
     sync(s);
     if (!canEdit(s)) return false;
+    s.timeline.flush();
     const candidate = s.history.peek(direction);
     if (!candidate) { updateTools(s); return false; }
     if (s.adapter.kind !== "codemirror") return applyEdit(s, candidate, { historyDirection: direction, userEvent: direction });
@@ -2108,6 +2358,7 @@ export function createFloatingEditorController({
       const selection = s.adapter.getSelection();
       if (selection) s.window.textarea.setSelectionRange(selection.from, selection.to);
       s.lastValue = result.value;
+      if (valueChanged) { s.timeline.queue(result.value); s.timeline.flush(); }
       s.revision = s.adapter.getRevision();
       s.lastSelection = selectedRange(s);
       s.beforeSelection = null;
@@ -2232,6 +2483,7 @@ export function createFloatingEditorController({
     if (!valid(s)) return;
     sync(s);
     if (!valid(s)) return;
+    s.timeline.flush();
     s.window.setValue(s.initialValue);
     write(s, s.initialValue, { userEvent: "input.restore" });
     s.window.setThemeSource(s.source);
@@ -2243,29 +2495,38 @@ export function createFloatingEditorController({
   // longer report history, so the UI keeps the drill-down closed/empty.
   function historySnapshot(s) {
     if (!s || s.invalid || sessions.get(s.id) !== s || !s.window?.textarea.isConnected) return null;
-    try { return s.history.list(); }
+    try { return s.timeline.list(); }
     catch (error) { console.warn("[ST-QuickBar] 变更历史读取失败", error); return null; }
   }
 
-  // Full text at a state index, for read-only preview. Reads the live source
-  // first so the preview reflects any out-of-band edits before reconstruction.
+  // Preview reads one committed snapshot. Never sync/commit here: doing so can
+  // shift trimmed indices or recursively render while selecting a history row.
   function historyPreview(s, index) {
     if (!s || sessions.get(s.id) !== s) return null;
-    if (valid(s)) sync(s);
-    try { return s.history.textAt(index); }
+    try { return s.timeline.textAt(index); }
     catch (error) { console.warn("[ST-QuickBar] 变更历史预览失败", error); return null; }
+  }
+
+  // The diff that produced state `index`, for highlighting the changed region
+  // in the preview. Null for the baseline/out-of-range (nothing to highlight).
+  function historyChange(s, index) {
+    if (!s || sessions.get(s.id) !== s) return null;
+    try { return s.timeline.changeAt(index); }
+    catch (error) { console.warn("[ST-QuickBar] 变更历史差异读取失败", error); return null; }
   }
 
   // Write the editor back to a chosen historical state. This is a normal edit:
   // it records a new history entry, so a revert is itself undoable.
   function historyRevert(s, index) {
     if (!valid(s) || !canEdit(s) || s.writing) return false;
-    sync(s);
-    if (!valid(s) || !canEdit(s)) return false;
+    // Capture before syncing/flushing: trimming must not change the chosen row.
     let target = null;
-    try { target = s.history.textAt(index); }
+    try { target = s.timeline.textAt(index); }
     catch (error) { console.warn("[ST-QuickBar] 变更历史回退失败", error); return false; }
     if (target === null) return false;
+    sync(s);
+    if (!valid(s) || !canEdit(s)) return false;
+    s.timeline.flush();
     if (target === s.lastValue) return true;
     s.beforeSelection = selectedRange(s);
     s.window.setValue(target);
@@ -2275,6 +2536,7 @@ export function createFloatingEditorController({
   // Release session-specific bridges on lock/close. Document listeners and
   // observers are shared; queued source syncs also check session membership.
   function stopSessionSource(s) {
+    s.timeline.dispose();
     win.jQuery?.(s.window.textarea).off(".ihFloatingEditor");
     s.stopSource?.();
     s.stopSource = null;
@@ -2317,6 +2579,7 @@ export function createFloatingEditorController({
       s.composing = false;
       write(s, s.window.textarea.value);
     }
+    s.timeline.flush();
     sessions.delete(s.id);
     s.generation++;
     releaseColorOwner(s);
@@ -2466,6 +2729,9 @@ export function createFloatingEditorController({
       historyStateKey: null, notifyingHistory: false,
       history: createFloatingEditorHistory(value), beforeSelection: null, lastSelection: null,
     };
+    s.timeline = createFloatingEditorTimeline(value, {
+      clock: win, onCommit: () => s.window?.refreshHistory(),
+    });
     sessions.set(s.id, s);
     // Assign a geometry slot before building the window so restore uses it.
     s.slot = pickSlot(s);
@@ -2488,8 +2754,10 @@ export function createFloatingEditorController({
         updateTools(s);
       },
       onClose: () => closeSession(s),
+      onHistoryOpen: () => { sync(s); s.timeline.flush(); },
       requestHistory: () => historySnapshot(s),
       previewHistory: index => historyPreview(s, index),
+      changeHistory: index => historyChange(s, index),
       revertHistory: index => historyRevert(s, index),
     });
     // Never delete this entry on retirement: callers holding an old textarea
@@ -2538,6 +2806,9 @@ export function createFloatingEditorController({
       jqSource.on("input.ihFloatingEditor change.ihFloatingEditor", onInput);
       s.stopSource = () => jqSource.off("input.ihFloatingEditor change.ihFloatingEditor", onInput);
     }
+    s.window.textarea.addEventListener("blur", () => {
+      if (sessions.get(s.id) === s && !s.composing) s.timeline.flush();
+    });
     s.window.textarea.addEventListener("beforeinput", () => {
       if (sessions.get(s.id) === s && !s.composing) { sync(s); s.beforeSelection = selectedRange(s); }
     });

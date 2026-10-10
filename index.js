@@ -48,7 +48,7 @@ const floatingEditorController = createFloatingEditorController({
     // Keep the one shared find UI current for local, toolbar and keyboard edits.
     if (findReplaceController.active && !findReplaceController._isReplacing &&
         findReplaceController._targetTextarea?.[0] === target) {
-      findReplaceController._rebuildMatchesWithoutHighlight();
+      findReplaceController._scheduleFloatingInputRefresh();
     }
   },
   getGeometry: () => getSettings().floatingEditorGeometry,
@@ -1992,6 +1992,8 @@ const findReplaceController = {
   },
 
   close() {
+    clearTimeout(this._floatingInputTimer);
+    this._floatingInputTimer = null;
     const onClose = this._onClose;
     this._onClose = null;
     this._ownerToken = null;
@@ -2444,9 +2446,29 @@ const findReplaceController = {
     document.addEventListener("focusin", this._focusStealGuard, true);
   },
 
+  _scheduleFloatingInputRefresh() {
+    if (!this.active || this._isReplacing) return;
+    clearTimeout(this._floatingInputTimer);
+    const owner = this._ownerToken;
+    const target = this._targetTextarea?.[0];
+    this._floatingInputTimer = setTimeout(() => {
+      this._floatingInputTimer = null;
+      if (this.active && this._ownerToken === owner && this._targetTextarea?.[0] === target) {
+        this._makeLiveInputHandler()(true);
+      }
+    }, 120);
+  },
+
   _makeLiveInputHandler() {
     const self = this;
-    return function () {
+    return function (immediate = false) {
+      // Native proxy input and controller notifications describe the same edit.
+      // Batch them; ordinary non-floating search keeps its existing behavior.
+      if (self._floatingTarget && immediate !== true) {
+        if (immediate?.isComposing) return;
+        self._scheduleFloatingInputRefresh();
+        return;
+      }
       if (!self.active) return;
       if (self._isReplacing) return;
       const oldPos = self._lastHighlightPos;
@@ -2494,6 +2516,12 @@ const findReplaceController = {
 
   _flushPendingSearch() {
     if (!this.active || !this._barEl || this._composingInput) return false;
+    // Navigation/replacement must see the newest text even inside the debounce.
+    if (this._floatingInputTimer) {
+      clearTimeout(this._floatingInputTimer);
+      this._floatingInputTimer = null;
+      this._makeLiveInputHandler()(true);
+    }
     if (this._searchDebounceTimer || this._searchTerm !== this._barEl.find(".ih-find-input").val()) {
       clearTimeout(this._searchDebounceTimer);
       this._searchDebounceTimer = null;

@@ -516,7 +516,7 @@
 .ih-floating-editor-window .ih-floating-editor-history-preview-text {
     flex: 1 1 auto;
     box-sizing: border-box;
-    min-height: 48px;
+    min-height: 0;
     margin: 0;
     padding: 8px 10px;
     overflow: auto;
@@ -530,11 +530,73 @@
     word-break: break-word;
 }
 
+/* Both sides of a change remain visible. Deleted text is a preview overlay,
+ * not part of the state that will be restored. Symbols/strike-through also
+ * distinguish the two without relying solely on color. */
+.ih-floating-editor-window .ih-floating-editor-history-added,
+.ih-floating-editor-window .ih-floating-editor-history-removed {
+    border-radius: 2px;
+    color: inherit;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-added {
+    background: color-mix(in srgb, #35b86b 27%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, #35b86b 55%, transparent);
+    text-decoration: none;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-removed {
+    background: color-mix(in srgb, #ec6565 24%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, #ec6565 50%, transparent);
+    text-decoration: line-through;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-legend {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 4px;
+    font-size: 11px;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-legend > span {
+    padding: 1px 4px;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px 8px;
+    /* Reserve the resize handle's width at every theme/touch size and in RTL. */
+    padding-inline-end: calc(var(--ih-fe-button-size) + 8px);
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-navigation {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 2px;
+}
+
+.ih-floating-editor-window .ih-floating-editor-history-position {
+    min-width: 4ch;
+    text-align: center;
+    white-space: nowrap;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
 .ih-floating-editor-window .ih-floating-editor-history-revert {
     flex: 0 0 auto;
-    align-self: flex-end;
     box-sizing: border-box;
-    padding: 5px 14px;
+    padding: 5px 10px;
+    white-space: nowrap;
     border: 1px solid var(--ih-fe-accent);
     border-radius: 6px;
     background: var(--ih-fe-accent);

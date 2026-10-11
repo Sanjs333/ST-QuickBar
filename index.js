@@ -8060,7 +8060,7 @@ function openHelpPanel() {
 <p>在设置中开启此选项后，所有涉及删除的操作（删除最后消息、删除备选、批量删除、删除聊天等）执行前将弹出二次确认弹窗，避免误操作。</p>
 
 <div class="ih-help-h4"><i class="fa-solid fa-ghost"></i> 消息管理面板</div>
-<p>统一的消息管理面板，包含七个标签页，按用途分为两组：<b>本档整理</b>（隐藏 / 删除 / 移动 / 插入）与<b>跨档搬迁</b>（搜索 / 分支 / 转存）。点击标签栏最左侧的切换按钮即可在两组之间切换，切换后自动打开该组的第一个标签。</p>
+<p>统一的消息管理面板，包含七个标签页：<b>隐藏 / 删除 / 移动 / 插入</b>（本档整理）与<b>搜索 / 分支 / 转存</b>（跨档搬迁）。标签平铺在标签栏中，桌面端显示图标 + 文字，移动端只显示图标（悬停可查看名称）。即使当前聊天没有消息也可打开，用于搜索、分支等不依赖本档消息的功能。</p>
 
 <div class="ih-help-group">本档整理</div>
 
@@ -9946,10 +9946,6 @@ const IH_MGR_TAB_KEYS = [
 let _ihMgrInstance = null;
 let _ihMgrFoldBallPos = { x: null, y: null };
 function openHideManagerPanel() {
-  if (chat.length === 0) {
-    toastr.warning("当前没有聊天消息", "", { timeOut: 1000 });
-    return;
-  }
   if (_ihMgrInstance) {
     _ihMgrInstance.expand();
     return;
@@ -9961,7 +9957,6 @@ function openHideManagerPanel() {
     selected: new Set(),
     rangeStart: null,
     rangeMode: false,
-    activeGroup: "local",
     activeTab: "hide",
     scrollTop: 0,
     reverseOrder: false,
@@ -10046,31 +10041,26 @@ function openHideManagerPanel() {
       </div>
 
       <div class="ih-mgr-tabbar">
-        <button class="ih-mgr-group-switch" id="ih_mgr_group_switch" title="切换到：搜索 / 分支 / 转存">
-          <i class="fa-solid fa-repeat"></i>
-        </button>
-        <div class="ih-mgr-tabs" data-group="local">
-          <button class="ih-mgr-tab ih-mgr-tab-active" data-tab="hide">
+        <div class="ih-mgr-tabs">
+          <button class="ih-mgr-tab ih-mgr-tab-active" data-tab="hide" title="隐藏">
             <i class="fa-solid fa-eye-slash"></i><span>隐藏</span>
           </button>
-          <button class="ih-mgr-tab" data-tab="delete">
+          <button class="ih-mgr-tab" data-tab="delete" title="删除">
             <i class="fa-solid fa-trash"></i><span>删除</span>
           </button>
-          <button class="ih-mgr-tab" data-tab="move">
+          <button class="ih-mgr-tab" data-tab="move" title="移动">
             <i class="fa-solid fa-arrows-up-down"></i><span>移动</span>
           </button>
-          <button class="ih-mgr-tab" data-tab="insert">
+          <button class="ih-mgr-tab" data-tab="insert" title="插入">
             <i class="fa-solid fa-plus-circle"></i><span>插入</span>
           </button>
-        </div>
-        <div class="ih-mgr-tabs" data-group="cross" style="display:none;">
-          <button class="ih-mgr-tab" data-tab="search">
+          <button class="ih-mgr-tab" data-tab="search" title="搜索">
             <i class="fa-solid fa-magnifying-glass"></i><span>搜索</span>
           </button>
-          <button class="ih-mgr-tab" data-tab="branch">
+          <button class="ih-mgr-tab" data-tab="branch" title="分支">
             <i class="fa-solid fa-sitemap"></i><span>分支</span>
           </button>
-          <button class="ih-mgr-tab" data-tab="transfer">
+          <button class="ih-mgr-tab" data-tab="transfer" title="转存">
             <i class="fa-solid fa-right-left"></i><span>转存</span>
           </button>
         </div>
@@ -11302,32 +11292,6 @@ function openHideManagerPanel() {
         }
       });
   });
-  const IH_GROUP_TABS = {
-    local: "隐藏 / 删除 / 移动 / 插入",
-    cross: "搜索 / 分支 / 转存",
-  };
-
-  function _syncGroupSwitchUI() {
-    const grp = sharedState.activeGroup;
-    const other = grp === "local" ? "cross" : "local";
-    content
-      .find("#ih_mgr_group_switch")
-      .attr("title", `切换到：${IH_GROUP_TABS[other]}`);
-    content.find(".ih-mgr-tabs").hide();
-    content.find(`.ih-mgr-tabs[data-group="${grp}"]`).css("display", "flex");
-  }
-
-  content.on("click", "#ih_mgr_group_switch", function () {
-    const grp = sharedState.activeGroup === "local" ? "cross" : "local";
-    sharedState.activeGroup = grp;
-    _syncGroupSwitchUI();
-    const firstTab = content
-      .find(`.ih-mgr-tabs[data-group="${grp}"] .ih-mgr-tab`)
-      .first();
-    if (firstTab.length) firstTab.trigger("click");
-  });
-  _syncGroupSwitchUI();
-
   content.on("click", ".ih-mgr-tab", function () {
     const tab = $(this).data("tab");
     sharedState.scrollTop = vlistEl.scrollTop;
@@ -11341,11 +11305,6 @@ function openHideManagerPanel() {
     sharedState.rangeMode = false;
     content.find(".ih-mgr-tab").removeClass("ih-mgr-tab-active");
     $(this).addClass("ih-mgr-tab-active");
-    const _grpOfTab = $(this).closest(".ih-mgr-tabs").attr("data-group");
-    if (_grpOfTab && _grpOfTab !== sharedState.activeGroup) {
-      sharedState.activeGroup = _grpOfTab;
-      _syncGroupSwitchUI();
-    }
     content
       .find(".ih-mgr-shared-list-area")
       .toggleClass("ih-mgr-insert-mode", tab === "insert");

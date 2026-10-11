@@ -968,6 +968,10 @@ export function bindFloatingEditorInteractionBoundary(element) {
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
 const text = value => String(value ?? '');
+// Escape text for safe insertion when no sanitizer/converter is available.
+const escapeHtml = value => text(value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 /**
  * @param {object} options Window options; all callbacks are optional.
@@ -1008,6 +1012,7 @@ export function createFloatingEditorWindow({
     previewHistory,
     changeHistory,
     revertHistory,
+    canPreview = false,
     geometry = null,
     onGeometryChange,
 } = {}) {
@@ -1032,6 +1037,10 @@ export function createFloatingEditorWindow({
     // + the revert button. baseTitle is restored to the title bar on close.
     let historyOpen = false;
     let historySelected = null;
+    // Markdown preview is a read-only overlay toggled from the header. Like the
+    // history drill-down it replaces the textarea inside the body; it never
+    // writes text back and is only offered when the controller sets canPreview.
+    let previewOpen = false;
     let baseTitle = '悬浮编辑';
     // Memoize list structure and preview so repeated refresh requests do not
     // rebuild DOM or reconstruct unchanged text. Polling never renders history.
@@ -1104,13 +1113,22 @@ export function createFloatingEditorWindow({
         return button;
     }
 
+    const previewButton = makeButton('preview', 'Markdown 预览', 'fa-eye');
+    previewButton.setAttribute('aria-pressed', 'false');
+    previewButton.setAttribute('aria-expanded', 'false');
+    previewButton.setAttribute('aria-controls', `${id}-preview`);
+    previewButton.hidden = !canPreview;
+    previewButton.disabled = !canPreview;
     const pinButton = makeButton('pin', '固定位置和大小', 'fa-thumbtack');
     pinButton.setAttribute('aria-pressed', 'false');
     const collapseButton = makeButton('collapse', '折叠编辑器', 'fa-chevron-up');
     collapseButton.setAttribute('aria-pressed', 'false');
     collapseButton.setAttribute('aria-expanded', 'true');
     collapseButton.setAttribute('aria-controls', `${id}-body`);
-    const historyButton = makeButton('history', '变更历史', 'fa-clock-rotate-left');
+    // The change-history toggle lives in the footer (mounted by the tools
+    // module as its first control), not the header. It is created detached here
+    // so setHistoryOpen keeps owning its glyph/pressed/back-label state.
+    const historyButton = makeButton('history', '变更历史', 'fa-clock-rotate-left', document.createElement('div'));
     historyButton.setAttribute('aria-pressed', 'false');
     historyButton.setAttribute('aria-expanded', 'false');
     historyButton.setAttribute('aria-controls', `${id}-history`);
@@ -1128,11 +1146,23 @@ export function createFloatingEditorWindow({
     textarea.value = text(value);
     body.append(textarea);
 
+    // Markdown preview surface. Read-only, sanitized, and hidden until toggled.
+    // Opening it hides the textarea (via is-preview-open) the same way history
+    // does; it only renders — it never feeds text back into the editor.
+    const previewPanel = document.createElement('div');
+    previewPanel.className = 'ih-floating-editor-preview';
+    previewPanel.id = `${id}-preview`;
+    previewPanel.hidden = true;
+    previewPanel.setAttribute('role', 'document');
+    previewPanel.setAttribute('aria-label', 'Markdown 预览');
+    previewPanel.tabIndex = 0;
+    body.append(previewPanel);
     // Change-history drill-down. Lives inside the body and replaces the editor
-    // when open (the textarea/footer hide via is-history-open); it never leaves
-    // the window. The header's history button doubles as the back control, so
-    // the panel has no bar of its own. UI only — the controller owns the text,
-    // snapshots, preview reconstruction and the actual revert.
+    // when open (the textarea/edit tools hide via is-history-open); it never
+    // leaves the window. The footer's history button (its first control)
+    // doubles as the back control, so the panel has no bar of its own. UI only
+    // — the controller owns the text, snapshots, preview reconstruction and the
+    // actual revert.
     const historyPanel = document.createElement('div');
     historyPanel.className = 'ih-floating-editor-history';
     historyPanel.id = `${id}-history`;
@@ -1281,9 +1311,10 @@ export function createFloatingEditorWindow({
     function setCollapsed(next) {
         if (destroyed || collapsed === next) return;
         endGesture();
-        // Collapsing hides the body; close the history panel so reopening the
-        // window lands back on the editor, not a stale drill-down.
+        // Collapsing hides the body; close the history panel or preview so
+        // reopening the window lands back on the editor, not a stale overlay.
         if (next && historyOpen) setHistoryOpen(false);
+        if (next && previewOpen) setPreviewOpen(false);
         const hidingFocus = next && body.contains(document.activeElement);
         collapsed = next;
         element.classList.toggle('is-collapsed', collapsed);
@@ -1500,7 +1531,11 @@ export function createFloatingEditorWindow({
         next = !!next;
         if (destroyed || historyOpen === next) return;
         if (next && typeof requestHistory !== 'function') return;
-        if (next) onHistoryOpen?.();
+        if (next) {
+            // History and preview are mutually exclusive body overlays.
+            if (previewOpen) setPreviewOpen(false);
+            onHistoryOpen?.();
+        }
         historyOpen = next;
         historySelected = null;
         historySignature = null;
@@ -1527,6 +1562,61 @@ export function createFloatingEditorWindow({
             historySignature = null;
             focusTextarea();
         }
+    }
+
+    // Render the current text as sanitized Markdown into the preview surface.
+    // Uses SillyTavern's own showdown converter when present so the output
+    // matches chat rendering; always runs through DOMPurify. Falls back to
+    // escaped plain text if neither global is available.
+    function renderPreview() {
+        const value = textarea.value;
+        const win = document.defaultView;
+        let html;
+        try {
+            const showdown = win?.showdown;
+            if (showdown?.Converter) {
+                const converter = new showdown.Converter({
+                    emoji: true,
+                    literalMidWordUnderscores: true,
+                    parseImgDimensions: true,
+                    tables: true,
+                    underline: true,
+                    simpleLineBreaks: true,
+                    strikethrough: true,
+                    disableForced4SpacesIndentedSublists: true,
+                });
+                html = converter.makeHtml(value);
+            } else {
+                html = `<pre>${escapeHtml(value)}</pre>`;
+            }
+        } catch (error) {
+            console.warn('[ST-QuickBar] Markdown 预览渲染失败', error);
+            html = `<pre>${escapeHtml(value)}</pre>`;
+        }
+        const purify = win?.DOMPurify;
+        previewPanel.innerHTML = purify ? purify.sanitize(html) : `<pre>${escapeHtml(value)}</pre>`;
+    }
+
+    function setPreviewOpen(next) {
+        next = !!next;
+        if (destroyed || previewOpen === next) return;
+        if (next && !canPreview) return;
+        if (next) {
+            // History and preview are mutually exclusive body overlays.
+            if (historyOpen) setHistoryOpen(false);
+            renderPreview();
+        }
+        previewOpen = next;
+        element.classList.toggle('is-preview-open', previewOpen);
+        previewPanel.hidden = !previewOpen;
+        previewButton.setAttribute('aria-pressed', String(previewOpen));
+        previewButton.setAttribute('aria-expanded', String(previewOpen));
+        const label = previewOpen ? '返回编辑' : 'Markdown 预览';
+        previewButton.title = label;
+        previewButton.setAttribute('aria-label', label);
+        previewButton.firstElementChild.className = `fa-solid ${previewOpen ? 'fa-pen' : 'fa-eye'}`;
+        if (previewOpen) previewPanel.focus({ preventScroll: true });
+        else { previewPanel.innerHTML = ''; focusTextarea(); }
     }
 
     function setPinned(next) {
@@ -1669,6 +1759,8 @@ export function createFloatingEditorWindow({
         textarea.setSelectionRange(textarea.selectionStart, textarea.selectionEnd, direction);
         textarea.scrollTop = scrollTop;
         textarea.scrollLeft = scrollLeft;
+        // Keep an open preview in sync with external/host-driven text changes.
+        if (previewOpen) renderPreview();
     }
 
     function setTitle(next) {
@@ -1708,6 +1800,16 @@ export function createFloatingEditorWindow({
         if (destroyed) return;
         element.dataset.capacity = `${count}/${max}`;
         element.classList.toggle('is-at-capacity', !!full);
+    }
+
+    /** Enable/disable the Markdown preview button; closes an open preview when disabled. */
+    function setCanPreview(next) {
+        next = !!next;
+        if (destroyed || next === canPreview) return;
+        canPreview = next;
+        previewButton.hidden = !canPreview;
+        previewButton.disabled = !canPreview;
+        if (!canPreview && previewOpen) setPreviewOpen(false);
     }
 
     function setReadOnly(next) {
@@ -1807,6 +1909,9 @@ export function createFloatingEditorWindow({
     listen(historyButton, 'click', () => {
         if (!historyButton.disabled) setHistoryOpen(!historyOpen);
     });
+    listen(previewButton, 'click', () => {
+        if (!previewButton.disabled) setPreviewOpen(!previewOpen);
+    });
     listen(historyList, 'click', event => {
         const item = event.target.closest?.('.ih-floating-editor-history-item');
         if (item && historyList.contains(item)) previewHistoryAt(Number(item.dataset.index));
@@ -1853,8 +1958,10 @@ export function createFloatingEditorWindow({
         event.stopPropagation();
         if (composing || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
         event.preventDefault();
-        // Escape first backs out of the history drill-down, then closes the window.
+        // Escape first backs out of an open body overlay (history or preview),
+        // then closes the window.
         if (historyOpen) setHistoryOpen(false);
+        else if (previewOpen) setPreviewOpen(false);
         else requestClose();
     });
     layoutRegistration = registerLayoutPanel(document, { element, layout, flushGeometry });
@@ -1879,7 +1986,7 @@ export function createFloatingEditorWindow({
     // drill-down is open, so the list/preview reflect the new state.
     function refreshHistory() { if (historyOpen) renderHistory(); }
 
-    return { element, textarea, setValue, setTitle, setActive, setLayer, setStatus, setCapacity, setReadOnly, setThemeSource, focus, getGeometry, refreshHistory, destroy };
+    return { element, textarea, historyButton, setValue, setTitle, setActive, setLayer, setStatus, setCapacity, setCanPreview, setReadOnly, setThemeSource, focus, getGeometry, refreshHistory, destroy };
 }
 
 // ── Footer controls ──
@@ -1916,7 +2023,7 @@ export function createFloatingEditorTools({
     onColor,
     canEdit = () => true,
 } = {}) {
-    const { element, textarea } = panel || {};
+    const { element, textarea, historyButton } = panel || {};
     const document = element?.ownerDocument;
     if (!document || !textarea || !element.contains(textarea)) {
         throw new Error('Floating editor tools require a panel and its local textarea.');
@@ -1957,6 +2064,9 @@ export function createFloatingEditorTools({
     footer.setAttribute('aria-label', '编辑工具');
     const historyActions = node('div', 'ih-floating-editor-tool-group', footer);
     const contextActions = node('div', 'ih-floating-editor-tool-group', footer);
+    // The change-history toggle is created by the window (so it keeps owning its
+    // open/back state) and mounted here as the first footer control.
+    if (historyButton) historyActions.append(historyButton);
     const undo = button(historyActions, 'undo', '撤销', 'fa-rotate-left');
     const redo = button(historyActions, 'redo', '重做', 'fa-rotate-right');
     const find = button(contextActions, 'find', '查找 / 替换（Ctrl/⌘+F）', 'fa-magnifying-glass');
@@ -2775,6 +2885,10 @@ export function createFloatingEditorController({
     s.window = createFloatingEditorWindow({
       document: doc, source, title: editorTitle(source, maximize), value,
       geometry: getSlotGeometry(s.slot),
+      // Markdown preview is offered for every source except CSS, where rendering
+      // stylesheet text as Markdown is meaningless. The button only renders a
+      // read-only, sanitized view; it never writes text back to the editor.
+      canPreview: identity.kind !== "css" && source.id !== "customCSS",
       onGeometryChange: geometry => {
         try { saveSlotGeometry(s, geometry); } catch (error) { console.warn("[ST-QuickBar] 窗口位置保存失败", error); }
       },

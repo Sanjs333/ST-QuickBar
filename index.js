@@ -38,7 +38,8 @@ const floatingEditorController = createFloatingEditorController({
     editorEpoch: floatingEditorEpoch,
     presetEpoch: floatingPresetEpoch,
   }),
-  isEnabled: () => getSettings().enabled && getSettings().floatingEditorEnabled !== false,
+  isEnabled: () =>
+    getSettings().enabled && getSettings().floatingEditorEnabled !== false,
   notify: (message) => toastr.warning(message, "悬浮编辑", { timeOut: 4500 }),
   openColorPicker: (options) => openColorPicker(options),
   openFindReplace: (options) => findReplaceController.toggleForTarget(options),
@@ -46,8 +47,11 @@ const floatingEditorController = createFloatingEditorController({
     historyManager.updateButtons();
     // Controller writes do not synthesize a second input event on the proxy.
     // Keep the one shared find UI current for local, toolbar and keyboard edits.
-    if (findReplaceController.active && !findReplaceController._isReplacing &&
-        findReplaceController._targetTextarea?.[0] === target) {
+    if (
+      findReplaceController.active &&
+      !findReplaceController._isReplacing &&
+      findReplaceController._targetTextarea?.[0] === target
+    ) {
       findReplaceController._scheduleFloatingInputRefresh();
     }
   },
@@ -347,7 +351,8 @@ function shouldIgnoreFocusedElement(el) {
 function getInsertionTarget() {
   // A focused floating editor is explicit intent, even while a chat floor is
   // being edited. Retain retired ownership so commands cannot fall back to chat.
-  if (getFloatingEditorToolTarget(_lastFocusedEditable)) return _lastFocusedEditable;
+  if (getFloatingEditorToolTarget(_lastFocusedEditable))
+    return _lastFocusedEditable;
   const editingTextarea = $("#chat .mes textarea:visible").first();
   if (editingTextarea.length) return editingTextarea[0];
 
@@ -1919,9 +1924,14 @@ const findReplaceController = {
     if (this.active && this._targetTextarea?.[0] === options.target) {
       if (options.keepOpen) {
         const ownerToken = this._ownerToken;
-        const selector = options.focusInput === "replacement" ? ".ih-replace-input" : ".ih-find-input";
+        const selector =
+          options.focusInput === "replacement"
+            ? ".ih-replace-input"
+            : ".ih-find-input";
         this._barEl?.find(selector).focus();
-        return () => { if (this._ownerToken === ownerToken) this.close(); };
+        return () => {
+          if (this._ownerToken === ownerToken) this.close();
+        };
       }
       this.close();
       return null;
@@ -1929,10 +1939,17 @@ const findReplaceController = {
     return this.open(options);
   },
 
-  open({ target = null, anchor = null, onClose = null, focusInput = null } = {}) {
+  open({
+    target = null,
+    anchor = null,
+    onClose = null,
+    focusInput = null,
+  } = {}) {
     if (this.active || this._barEl) this.close();
     this._cmView = null;
-    this._floatingTarget = getFloatingEditorToolTarget(target || _lastFocusedEditable);
+    this._floatingTarget = getFloatingEditorToolTarget(
+      target || _lastFocusedEditable,
+    );
     const editTextarea = $("#chat .mes textarea:visible").first();
     if (this._floatingTarget) {
       if (!this._floatingTarget.isValid()) return null;
@@ -1983,12 +2000,20 @@ const findReplaceController = {
     setTimeout(() => {
       try {
         if (this._ownerToken === ownerToken && this._barEl) {
-          this._barEl.find(focusInput === "replacement" ? ".ih-replace-input" : ".ih-find-input").focus();
+          this._barEl
+            .find(
+              focusInput === "replacement"
+                ? ".ih-replace-input"
+                : ".ih-find-input",
+            )
+            .focus();
         }
       } catch (e) {}
     }, 50);
     // Closing a former owner must not close a newer window's search.
-    return () => { if (this._ownerToken === ownerToken) this.close(); };
+    return () => {
+      if (this._ownerToken === ownerToken) this.close();
+    };
   },
 
   close() {
@@ -2154,7 +2179,9 @@ const findReplaceController = {
         `);
     const openDialogs = document.querySelectorAll("dialog[open]");
     const ownedDialog = this._floatingTarget?.target.closest("dialog[open]");
-    const dialogHost = ownedDialog || (this._floatingTarget ? null : openDialogs[openDialogs.length - 1]);
+    const dialogHost =
+      ownedDialog ||
+      (this._floatingTarget ? null : openDialogs[openDialogs.length - 1]);
     $(dialogHost || document.body).append(bar);
     if (dialogHost) {
       this._dialogHost = dialogHost;
@@ -2276,7 +2303,8 @@ const findReplaceController = {
         _syncClearButton(this);
       });
 
-    bar.find(".ih-find-input, .ih-replace-input")
+    bar
+      .find(".ih-find-input, .ih-replace-input")
       .on("compositionstart", (event) => {
         this._composingInput = event.target;
         clearTimeout(this._searchDebounceTimer);
@@ -2307,7 +2335,7 @@ const findReplaceController = {
         .toggleClass("input-helper-btn-active", this._caseSensitive);
       this._doSearch();
     });
-    bar.find('[data-action="close"]').on("click", event => {
+    bar.find('[data-action="close"]').on("click", (event) => {
       // jQuery.remove() tears down the root handler before this click bubbles.
       event.stopPropagation();
       this.close();
@@ -2320,7 +2348,14 @@ const findReplaceController = {
       .find('[data-action="replaceAll"]')
       .on("click", () => this._doReplaceAll());
     bar.on("keydown", (e) => {
-      if (this._composingInput || e.isComposing || e.originalEvent?.isComposing || e.keyCode === 229 || e.which === 229) return;
+      if (
+        this._composingInput ||
+        e.isComposing ||
+        e.originalEvent?.isComposing ||
+        e.keyCode === 229 ||
+        e.which === 229
+      )
+        return;
       const _isMobile = ihIsMobileDevice();
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -2348,7 +2383,10 @@ const findReplaceController = {
         e.preventDefault();
       }
     });
-    bar.on("click dblclick auxclick contextmenu mouseup pointercancel touchcancel", (e) => e.stopPropagation());
+    bar.on(
+      "click dblclick auxclick contextmenu mouseup pointercancel touchcancel",
+      (e) => e.stopPropagation(),
+    );
     bar.on("touchstart", (e) => e.stopPropagation());
     bar.on("touchend", (e) => e.stopPropagation());
     bar.on("pointerdown", (e) => e.stopPropagation());
@@ -2453,7 +2491,11 @@ const findReplaceController = {
     const target = this._targetTextarea?.[0];
     this._floatingInputTimer = setTimeout(() => {
       this._floatingInputTimer = null;
-      if (this.active && this._ownerToken === owner && this._targetTextarea?.[0] === target) {
+      if (
+        this.active &&
+        this._ownerToken === owner &&
+        this._targetTextarea?.[0] === target
+      ) {
         this._makeLiveInputHandler()(true);
       }
     }, 120);
@@ -2503,7 +2545,8 @@ const findReplaceController = {
     const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const regex = new RegExp(escaped, this._caseSensitive ? "g" : "gi");
     const MAX_MATCHES = 10000;
-    let match, truncated = false;
+    let match,
+      truncated = false;
     while ((match = regex.exec(text))) {
       matches.push(match.index);
       if (matches.length >= MAX_MATCHES) {
@@ -2522,7 +2565,10 @@ const findReplaceController = {
       this._floatingInputTimer = null;
       this._makeLiveInputHandler()(true);
     }
-    if (this._searchDebounceTimer || this._searchTerm !== this._barEl.find(".ih-find-input").val()) {
+    if (
+      this._searchDebounceTimer ||
+      this._searchTerm !== this._barEl.find(".ih-find-input").val()
+    ) {
       clearTimeout(this._searchDebounceTimer);
       this._searchDebounceTimer = null;
       this._doSearch();
@@ -2532,15 +2578,26 @@ const findReplaceController = {
 
   _updateReplaceControls() {
     const field = this._targetTextarea?.[0];
-    const writable = !this._composingInput && !field?.readOnly && !field?.disabled &&
+    const writable =
+      !this._composingInput &&
+      !field?.readOnly &&
+      !field?.disabled &&
       (!this._floatingTarget || this._floatingTarget.canEdit());
-    for (const button of this._barEl?.[0]?.querySelectorAll?.('[data-action="replace"], [data-action="replaceAll"]') || []) {
+    for (const button of this._barEl?.[0]?.querySelectorAll?.(
+      '[data-action="replace"], [data-action="replaceAll"]',
+    ) || []) {
       button.disabled = !writable;
     }
   },
 
   _doSearch() {
-    if (this._isReplacing || !this.active || !this._barEl || this._composingInput) return;
+    if (
+      this._isReplacing ||
+      !this.active ||
+      !this._barEl ||
+      this._composingInput
+    )
+      return;
     clearTimeout(this._searchDebounceTimer);
     this._searchDebounceTimer = null;
     if (this._floatingTarget && !this._checkTarget()) return;
@@ -2577,7 +2634,11 @@ const findReplaceController = {
                 );
               } catch (e) {}
             }
-            if (this._cmInputHandler && this._cmView && this._cmView.contentDOM) {
+            if (
+              this._cmInputHandler &&
+              this._cmView &&
+              this._cmView.contentDOM
+            ) {
               try {
                 this._cmView.contentDOM.removeEventListener(
                   "input",
@@ -2864,7 +2925,11 @@ const findReplaceController = {
     const scroll = ta.scrollTop;
     this._isReplacing = true;
     if (this._floatingTarget) {
-      const accepted = this._floatingTarget.replace({ value, selection, expectedValue });
+      const accepted = this._floatingTarget.replace({
+        value,
+        selection,
+        expectedValue,
+      });
       ta.scrollTop = scroll;
       if (!accepted) this._isReplacing = false;
       return accepted === true;
@@ -2913,7 +2978,14 @@ const findReplaceController = {
     const text = ta.value;
     const newText =
       text.substring(0, pos) + replaceWith + text.substring(pos + termLen);
-    if (!this._applyTextareaReplacement(newText, { from: pos, to: pos + replaceWith.length }, text)) return;
+    if (
+      !this._applyTextareaReplacement(
+        newText,
+        { from: pos, to: pos + replaceWith.length },
+        text,
+      )
+    )
+      return;
     toastr.info("已替换 1 处", "", { timeOut: 300 });
 
     const _oldPos = pos;
@@ -2962,7 +3034,10 @@ const findReplaceController = {
     const regex = new RegExp(escaped, this._caseSensitive ? "g" : "gi");
     // Function replacements insert dollar signs literally without interpolation.
     const newText = text.replace(regex, () => replaceWith);
-    const selection = { from: Math.min(ta.selectionStart, newText.length), to: Math.min(ta.selectionEnd, newText.length) };
+    const selection = {
+      from: Math.min(ta.selectionStart, newText.length),
+      to: Math.min(ta.selectionEnd, newText.length),
+    };
     if (!this._applyTextareaReplacement(newText, selection, text)) return;
     toastr.success(`已替换 ${count} 处`, "", { timeOut: 800 });
     this._rebuildMatchesWithoutHighlight();
@@ -3100,11 +3175,16 @@ function openColorPicker(options = {}) {
   let target = options.target || null;
   const _cpActive = document.activeElement;
   if (!target) {
-    if (isEditableElement(_cpActive) && !shouldIgnoreFocusedElement(_cpActive)) target = _cpActive;
+    if (isEditableElement(_cpActive) && !shouldIgnoreFocusedElement(_cpActive))
+      target = _cpActive;
     else target = getInsertionTarget();
   }
-  const validTarget = () => !closed && !!target?.isConnected &&
-    !target.readOnly && !target.disabled && (!options.isValid || options.isValid());
+  const validTarget = () =>
+    !closed &&
+    !!target?.isConnected &&
+    !target.readOnly &&
+    !target.disabled &&
+    (!options.isValid || options.isValid());
   if (options.target && !validTarget()) return;
   if (!target) {
     toastr.warning("没有找到可编辑的输入框", "", { timeOut: 1200 });
@@ -3201,7 +3281,8 @@ function openColorPicker(options = {}) {
 
   const replaceRange = (start, end, newStr) => {
     if (options.target && !validTarget()) return false;
-    if (typeof options.replaceRange === "function") return options.replaceRange(start, end, newStr);
+    if (typeof options.replaceRange === "function")
+      return options.replaceRange(start, end, newStr);
     if (cmView) {
       cmView.dispatch({
         changes: { from: start, to: end, insert: newStr },
@@ -3328,7 +3409,10 @@ function openColorPicker(options = {}) {
     const parsed = ihParseColorToRgba(hex) || { r: 0, g: 0, b: 0 };
     const rgba = { r: parsed.r, g: parsed.g, b: parsed.b, a: alpha };
     const newStr = rgbaToStr(rgba);
-    if (replaceRange(c.start, c.end, newStr) === false) { closePortal(); return; }
+    if (replaceRange(c.start, c.end, newStr) === false) {
+      closePortal();
+      return;
+    }
     const txt = rowEl.querySelector(".ih-cp-text");
     if (txt) txt.textContent = newStr;
     cachedList = scan();
@@ -3408,10 +3492,11 @@ function openColorPicker(options = {}) {
   });
 
   const _cpOpenDialogs = document.querySelectorAll("dialog[open]");
-  const _cpHost =
-    options.target
-      ? (target.closest("dialog[open]") || document.body)
-      : _cpOpenDialogs.length > 0 ? _cpOpenDialogs[_cpOpenDialogs.length - 1] : document.body;
+  const _cpHost = options.target
+    ? target.closest("dialog[open]") || document.body
+    : _cpOpenDialogs.length > 0
+      ? _cpOpenDialogs[_cpOpenDialogs.length - 1]
+      : document.body;
   $(_cpHost).append(portal);
   if (options.target) {
     const owner = target.closest(".ih-floating-editor");
@@ -3421,7 +3506,13 @@ function openColorPicker(options = {}) {
       // MIN/MAX_LAYER = 10030–10032), not just this one owner window: a picker
       // pinned to owner+1 could tie the active window's layer and get covered.
       // Floor at 10033 keeps it above every window, below the find bar (10034).
-      portal.css("z-index", Math.max(10033, (Number.parseInt(getComputedStyle(owner).zIndex, 10) || 10030) + 1));
+      portal.css(
+        "z-index",
+        Math.max(
+          10033,
+          (Number.parseInt(getComputedStyle(owner).zIndex, 10) || 10030) + 1,
+        ),
+      );
     }
   }
   render();
@@ -3543,9 +3634,10 @@ function openColorPicker(options = {}) {
     ".ih-folder-dropdown-portal [data-button-key='colorPicker'], " +
     ".ih-floating-panel [data-button-key='colorPicker']";
   let anchorBtn = options.anchor || null;
-  if (!anchorBtn) document.querySelectorAll(btnSel).forEach((el) => {
-    if (el.offsetParent !== null) anchorBtn = el;
-  });
+  if (!anchorBtn)
+    document.querySelectorAll(btnSel).forEach((el) => {
+      if (el.offsetParent !== null) anchorBtn = el;
+    });
 
   requestAnimationFrame(() => {
     const ddW = portal.outerWidth();
@@ -6909,7 +7001,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.3.0";
+const EXTENSION_VERSION = "3.3.1";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -7460,8 +7552,8 @@ function openUpdatePanel(options) {
       const tail = deferredToPanel
         ? "　·　关闭扩展面板后将自动刷新"
         : countdown > 0
-        ? `　·　${countdown} 秒后自动刷新`
-        : "　·　刷新后生效";
+          ? `　·　${countdown} 秒后自动刷新`
+          : "　·　刷新后生效";
       return { tone: "ok", icon: "check", text: base + tail };
     }
     if (phase === "failed") {
@@ -7743,14 +7835,9 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.0</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.1</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>新增悬浮编辑窗</b>：在角色描述、世界书条目、自定义 CSS 等编辑框的原生放大按钮旁新增入口，最多同时打开 3 个独立窗口，修改实时同步；可在设置中单独关闭。</li>
-  <li><b>窗口操作</b>：支持拖拽、固定、折叠和缩放，记忆位置与尺寸，跟随酒馆主题；操作窗口不会误收起酒馆的未固定面板。</li>
-  <li><b>快捷编辑</b>：底栏左侧为撤销、重做，右侧为查找和 CSS 取色。查找复用现有面板；底栏、工具栏与正文快捷键共用撤销重做处理，各窗口历史独立。</li>
-  <li><b>编辑保护</b>：切换编辑对象或原编辑器被移除后，旧窗口自动锁定并保留可复制内容。锁定后仍可查看变更历史，但不可回退。</li>
-  <li><b>查找替换</b>：兼容新版 CodeMirror，修复上 / 下一处跳转后选中项丢失、特殊字符定位偏移，以及输入法确认文字时误触跳转或替换的问题。</li>
-  <li><b>工具栏显示</b>：修复非固定模式下刷新页面后，工具栏因自动聚焦而自行展开的问题。</li>
+  <li><b>新增 Markdown 预览功能</b>：悬浮编辑窗现可一键切换「编辑 / 预览」，实时渲染 Markdown 内容。预览为只读视图，支持标题、列表、代码块、表格、引用等常见语法。</li>
 </ul>
 `;
 
@@ -9783,7 +9870,9 @@ async function ihAskDeleteDuplicates(dupList) {
           `聊天档 <b>${ihEscapeHtml(d.shortName)}</b>（${d.shortCount} 条）的内容<b>完整包含于</b> <b>${ihEscapeHtml(d.longName)}</b>（${d.longCount} 条）的前半部分。`,
           `<span class="ih-cf-dim">该档为残留的旧分支，其内容在另一聊天档中完整保留，删除不会丢失内容。</span>`,
         ];
-    lines.push(`<span class="ih-cf-warn">删除后 5 分钟内可通过「撤回删除」按钮恢复。</span>`);
+    lines.push(
+      `<span class="ih-cf-warn">删除后 5 分钟内可通过「撤回删除」按钮恢复。</span>`,
+    );
     const ok = await ihConfirmDialog({
       title: "发现重复的聊天档",
       icon: "fa-clone",
@@ -19166,7 +19255,9 @@ function openHideManagerPanel() {
         `<span class="ih-cf-warn">该档为当前正在使用的聊天档，删除后酒馆会自动切换到其他聊天。</span>`,
       );
     }
-    lines.push(`<span class="ih-cf-dim">删除后 5 分钟内可用「撤回删除」按钮恢复。</span>`);
+    lines.push(
+      `<span class="ih-cf-dim">删除后 5 分钟内可用「撤回删除」按钮恢复。</span>`,
+    );
     const ok = await ihConfirmDialog({
       title: "删除聊天档",
       icon: "fa-trash",
@@ -21688,10 +21779,18 @@ function _getThemeSample() {
       if (m) {
         const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
         result.tintColor = `rgba(${m[1]},${m[2]},${m[3]},${Math.max(a, 0.82)})`;
-        const _tRgb = result.color && result.color.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/);
+        const _tRgb =
+          result.color &&
+          result.color.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/);
         if (_tRgb) {
-          const _bgL = 0.299 * parseInt(m[1]) + 0.587 * parseInt(m[2]) + 0.114 * parseInt(m[3]);
-          const _fgL = 0.299 * parseInt(_tRgb[1]) + 0.587 * parseInt(_tRgb[2]) + 0.114 * parseInt(_tRgb[3]);
+          const _bgL =
+            0.299 * parseInt(m[1]) +
+            0.587 * parseInt(m[2]) +
+            0.114 * parseInt(m[3]);
+          const _fgL =
+            0.299 * parseInt(_tRgb[1]) +
+            0.587 * parseInt(_tRgb[2]) +
+            0.114 * parseInt(_tRgb[3]);
           if (_fgL < 128 && _bgL < 128) {
             result.tintColor = `rgba(255, 255, 255, 0.88)`;
           }
@@ -25592,7 +25691,10 @@ async function loadSettings() {
   $("#enable_confirm_dangerous").prop("checked", s.confirmDangerousActions);
   $("#enable_unlock_swipes").prop("checked", !!s.unlockSwipes);
   $("#enable_toolbar_pinned").prop("checked", s.toolbarPinned);
-  $("#enable_floating_editor").prop("checked", s.floatingEditorEnabled !== false);
+  $("#enable_floating_editor").prop(
+    "checked",
+    s.floatingEditorEnabled !== false,
+  );
   $("#toolbar_btn_size").val(s.toolbarBtnSize);
   $("#toolbar_btn_size_input").val(s.toolbarBtnSize);
   $("#auto_scroll_speed").val(s.autoScrollSpeed || 50);
@@ -25703,10 +25805,9 @@ const toolbarStartupGuard = {
     if (!doc || this._documents.has(doc)) return;
     this._documents.add(doc);
     if (doc === document && !this.canExpand()) {
-      document.getElementById("send_form")?.classList.remove(
-        "textarea-focused",
-        "ih-external-focused",
-      );
+      document
+        .getElementById("send_form")
+        ?.classList.remove("textarea-focused", "ih-external-focused");
     }
     const onInteraction = (event) => {
       if (!event.isTrusted) return;
@@ -25721,10 +25822,14 @@ const toolbarStartupGuard = {
       if (!sendForm) return;
       const isSend = el === document.getElementById("send_textarea");
       const className = isSend ? "textarea-focused" : "ih-external-focused";
-      if (!sendForm.classList.contains(className)) sendForm.classList.add(className);
+      if (!sendForm.classList.contains(className))
+        sendForm.classList.add(className);
     };
     for (const type of ["pointerdown", "mousedown", "touchstart", "keydown"]) {
-      doc.addEventListener(type, onInteraction, { capture: true, passive: true });
+      doc.addEventListener(type, onInteraction, {
+        capture: true,
+        passive: true,
+      });
     }
   },
 };
@@ -26734,18 +26839,34 @@ jQuery(async () => {
       floatingEditorEpoch++;
       refreshFloatingEditor();
     };
-    $(document).on("click.ihFloatingEditorContext", "#rm_button_create", switchEditorContext);
-    for (const name of ["CHARACTER_EDITOR_OPENED", "CHARACTER_DELETED", "CHARACTER_FIRST_MESSAGE_SELECTED"]) {
-      if (event_types[name]) eventSource.on(event_types[name], switchEditorContext);
+    $(document).on(
+      "click.ihFloatingEditorContext",
+      "#rm_button_create",
+      switchEditorContext,
+    );
+    for (const name of [
+      "CHARACTER_EDITOR_OPENED",
+      "CHARACTER_DELETED",
+      "CHARACTER_FIRST_MESSAGE_SELECTED",
+    ]) {
+      if (event_types[name])
+        eventSource.on(event_types[name], switchEditorContext);
     }
     for (const name of ["PRESET_CHANGED", "OAI_PRESET_CHANGED_BEFORE"]) {
-      if (event_types[name]) eventSource.on(event_types[name], () => {
-        floatingPresetEpoch++;
-        refreshFloatingEditor();
-      });
+      if (event_types[name])
+        eventSource.on(event_types[name], () => {
+          floatingPresetEpoch++;
+          refreshFloatingEditor();
+        });
     }
-    for (const name of ["CHAT_CHANGED", "CHARACTER_PAGE_LOADED", "PERSONA_CHANGED", "WORLDINFO_ENTRIES_LOADED"]) {
-      if (event_types[name]) eventSource.on(event_types[name], refreshFloatingEditor);
+    for (const name of [
+      "CHAT_CHANGED",
+      "CHARACTER_PAGE_LOADED",
+      "PERSONA_CHANGED",
+      "WORLDINFO_ENTRIES_LOADED",
+    ]) {
+      if (event_types[name])
+        eventSource.on(event_types[name], refreshFloatingEditor);
     }
   } catch (error) {
     console.error("快捷工具栏: 悬浮编辑窗初始化失败", error);

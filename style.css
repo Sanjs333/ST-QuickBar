@@ -8843,29 +8843,77 @@ body.ih-cp-selecting input::-moz-selection {
   }
 }
 
-.ih-me-model-badge {
+.ih-me-generation-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   flex-shrink: 0;
-  font-size: 10px;
-  font-family: var(--monoFontFamily);
-  padding: 2px 8px;
-  border-radius: 9px;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.75;
-  background-color: color-mix(
-    in srgb,
-    var(--SmartThemeQuoteColor, cornflowerblue) 14%,
-    transparent
-  );
+  padding: 6px 9px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent) transparent;
+  color: var(--SmartThemeBodyColor);
+  border-radius: 8px;
   border: 1px solid
-    color-mix(
-      in srgb,
-      var(--SmartThemeQuoteColor, cornflowerblue) 28%,
-      transparent
-    );
-  cursor: default;
+    color-mix(in srgb, var(--SmartThemeQuoteColor, var(--SmartThemeBodyColor)) 22%, transparent);
+  background-color: color-mix(
+    in srgb, var(--SmartThemeQuoteColor, var(--SmartThemeBodyColor)) 6%, transparent
+  );
+}
+.ih-me-generation-info::-webkit-scrollbar {
+  height: 3px;
+}
+.ih-me-generation-info::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent);
+}
+.ih-me-generation-info:focus-visible {
+  outline: 1px solid var(--SmartThemeQuoteColor, var(--SmartThemeBodyColor));
+  outline-offset: 2px;
+}
+.ih-me-generation-item {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
+}
+.ih-me-generation-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+  opacity: 0.6;
+}
+.ih-me-generation-label i {
+  font-size: 9px;
+}
+.ih-me-generation-value {
+  color: var(--SmartThemeBodyColor);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.ih-me-generation-item:last-child .ih-me-generation-value {
+  font-family: var(--monoFontFamily);
+}
+.ih-me-generation-missing .ih-me-generation-value {
+  font-weight: 400;
+  opacity: 0.5;
+}
+@media (max-width: 480px) {
+  .ih-me-generation-info {
+    padding: 5px 8px;
+  }
 }
 
 .ih-chat-model-badge {

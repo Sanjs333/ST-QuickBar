@@ -15,6 +15,7 @@ import * as STExtensions from "../../../extensions.js";
 import { power_user } from "../../../power-user.js";
 import * as SlashCommands from "../../../slash-commands.js";
 import { createFloatingEditorController } from "./floating-editor.js";
+import { getPresetManager } from "../../../preset-manager.js";
 
 const openCharacterChat = SillyTavernScript.openCharacterChat;
 const executeSlashCommandsWithOptions = (...args) => {
@@ -7001,7 +7002,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.3.1";
+const EXTENSION_VERSION = "3.3.2";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -7835,9 +7836,11 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.1</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.2</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>新增 Markdown 预览功能</b>：悬浮编辑窗现可一键切换「编辑 / 预览」，实时渲染 Markdown 内容。预览为只读视图，支持标题、列表、代码块、表格、引用等常见语法。</li>
+  <li><b>新增消息生成配置信息栏</b>：消息详情中的模型信息移至备选栏下方，独立显示生成时使用的API 档案、预设与模型。切换备选时同步更新，搜索结果中的消息预览也可查看。</li>
+  <li><b>优化信息栏样式</b>：标签与名称保持单行排列，间距随宽度自动舒展或收紧，内容过长时可左右滚动。</li>
+  <li><b>生成信息随聊天保存</b>：新生成的 AI 回复按备选保存名称快照，之后切换配置或修改名称不会影响已保存的记录。旧消息缺少的信息将显示「未记录」。</li>
 </ul>
 `;
 
@@ -8129,6 +8132,7 @@ function openHelpPanel() {
 
 <p class="ih-help-sub">消息编辑子页面</p>
 <p>列表中每条消息的眼睛按钮都会在面板内原地翻页打开编辑子页面，不再弹出遮罩窗口。子页面集成预览与编辑切换、上一条/下一条跳转、加入转存篮；若该楼有多个备选回复，可切换查看并分别编辑，当前显示的那条带勾选标记。</p>
+<p><b>生成配置</b>：备选栏下方独立显示该条备选生成时的 API 档案、预设与模型，切换备选时同步更新。新生成的消息会保存名称快照；旧消息缺少的档案或预设显示「未记录」，不会使用当前设置补填。</p>
 <p><b>追加备选</b>：备选行最右侧的加号按钮会给这一楼追加一条空白备选，追加后自动切到它并进入编辑。</p>
 <p><b>删除备选</b>：该楼存在多个备选时，底部会出现<q>「删除备选」</q>按钮，可删除当前查看的这条，删除后自动切换至相邻备选。若该消息属于当前聊天档，5 分钟内可通过<q>「撤回删除」</q>还原。</p>
 <p><b>多选删除备选</b>：点击备选行右侧的多选按钮进入多选模式。此模式下点击某条备选会同时完成勾选与预览，可在确认内容后再决定是否删除。工具条提供全选、退出多选与删除，按钮上会实时显示已选条数。搜索结果预览页的<q>「多选删除备选」</q>按钮可携带当前查看的备选直接进入该模式。</p>
@@ -8654,6 +8658,139 @@ function ihEnsureSwipeArrays(msg) {
     msg.swipe_info.length = msg.swipes.length;
   }
 }
+const IH_GENERATION_INFO_KEY = "ih_generation_info";
+const IH_MESSAGE_GENERATION_TYPES = new Set([
+  "normal", "regenerate", "swipe", "continue", "append", "appendFinal",
+]);
+const ihNormalizeGenerationName = (value) => typeof value === "string" ? value.trim() : "";
+
+function ihGetSwipeGenerationInfo(message, swipeIndex) {
+  const current = Number.isInteger(message?.swipe_id) ? message.swipe_id : 0;
+  const index = Number.isInteger(swipeIndex) && swipeIndex >= 0 ? swipeIndex : current;
+  const swipeExtra = message?.swipe_info?.[index]?.extra;
+  const currentExtra = index === current ? message?.extra : null;
+  const saved = swipeExtra?.[IH_GENERATION_INFO_KEY] ?? currentExtra?.[IH_GENERATION_INFO_KEY];
+  return {
+    profileName: typeof saved?.profileName === "string" ? saved.profileName : null,
+    presetName: typeof saved?.presetName === "string" ? saved.presetName : null,
+    modelName: ihNormalizeGenerationName(saved?.modelName) || ihNormalizeGenerationName(swipeExtra?.model) || ihNormalizeGenerationName(currentExtra?.model),
+  };
+}
+
+function ihRenderGenerationInfo(message, swipeIndex) {
+  if (!message || message.is_user) return "";
+  const info = ihGetSwipeGenerationInfo(message, swipeIndex);
+  const fields = [
+    ["API 档案", "fa-server", info.profileName, "未使用档案", "未记录档案"],
+    ["预设", "fa-sliders", info.presetName, "未选择预设", "未记录预设"],
+    ["模型", "fa-microchip", info.modelName, "未记录模型", "未记录模型"],
+  ];
+  const parts = fields.map(([label, icon, value, empty, unknown]) => {
+    const text = value === null ? unknown : value || empty;
+    const title = `${label}：${text}${value === null ? "（这条备选没有保存生成时的名称）" : ""}`;
+    return `<div class="ih-me-generation-item${value ? "" : " ih-me-generation-missing"}" title="${ihEscapeAttr(title)}">` +
+      `<span class="ih-me-generation-label"><i class="fa-solid ${icon}" aria-hidden="true"></i>${label}：</span>` +
+      `<span class="ih-me-generation-value">${ihEscapeHtml(text)}</span></div>`;
+  });
+  return `<div class="ih-me-generation-info" role="group" tabindex="0" aria-label="生成时使用的 API 档案、预设和模型，可左右滚动">${parts.join("")}</div>`;
+}
+
+function ihCaptureGenerationInfo(settings, presetName, modelName) {
+  const manager = settings?.connectionManager;
+  const profile = Array.isArray(manager?.profiles)
+    ? manager.profiles.find((entry) => entry?.id === manager.selectedProfile) : null;
+  return {
+    version: 1,
+    profileName: profile ? ihNormalizeGenerationName(profile.name) : manager?.selectedProfile ? null : "",
+    presetName: typeof presetName === "string" ? ihNormalizeGenerationName(presetName) : null,
+    modelName: ihNormalizeGenerationName(modelName),
+  };
+}
+
+function ihInstallGenerationInfoTracking({
+  eventSource, eventTypes, getContext, capture,
+}) {
+  let pending = null;
+  const on = (type, listener) => {
+    if (type) eventSource.on(type, (...args) => {
+      try {
+        listener(...args);
+      } catch (error) {
+        console.warn("快捷工具栏: 记录消息生成配置失败", error);
+      }
+    });
+  };
+  const sameChat = (context) => pending && context.chat === pending.chat &&
+    context.getCurrentChatId?.() === pending.chatId;
+  const begin = (type, options, dryRun) => {
+    if (dryRun) return;
+    pending = null;
+    if (type && !IH_MESSAGE_GENERATION_TYPES.has(type) && !options?.quietToLoud) return;
+    const context = getContext();
+    const last = context.chat?.at(-1);
+    pending = {
+      chat: context.chat,
+      chatId: context.getCurrentChatId?.(),
+      last,
+      started: last?.gen_started,
+      swipeIndex: last?.swipe_id ?? 0,
+      swipeCount: last?.swipes?.length ?? (last ? 1 : 0),
+      streamRecorded: false,
+      info: capture(),
+    };
+  };
+  const writeExtra = (extra) => {
+    const old = extra[IH_GENERATION_INFO_KEY];
+    const info = pending.info;
+    if (!old || Object.keys(info).some((key) => old[key] !== info[key])) {
+      extra[IH_GENERATION_INFO_KEY] = { ...info };
+    }
+  };
+  const record = (messageId) => {
+    if (!pending) return false;
+    const context = getContext();
+    if (!sameChat(context)) {
+      pending = null;
+      return false;
+    }
+    const message = context.chat[messageId];
+    if (!message || message.is_user || !message.gen_started) return false;
+    const index = Number.isInteger(message.swipe_id) ? message.swipe_id : 0;
+    if (message === pending.last && message.gen_started === pending.started &&
+        index === pending.swipeIndex) return false;
+    if (!message.extra || typeof message.extra !== "object") message.extra = {};
+    writeExtra(message.extra);
+    const firstNew = message === pending.last ? pending.swipeCount : 0;
+    if (Array.isArray(message.swipe_info)) message.swipe_info.forEach((swipe, i) => {
+      if (!swipe || (i !== index && i < firstNew)) return;
+      if (!swipe.extra || typeof swipe.extra !== "object") swipe.extra = {};
+      writeExtra(swipe.extra);
+    });
+    return true;
+  };
+  on(eventTypes.GENERATION_AFTER_COMMANDS || eventTypes.GENERATION_STARTED, begin);
+  on(eventTypes.GENERATE_AFTER_DATA, (_data, dryRun) => {
+    if (dryRun || !pending) return;
+    if (sameChat(getContext())) pending.info = capture();
+  });
+  on(eventTypes.STREAM_TOKEN_RECEIVED, () => {
+    if (pending && !pending.streamRecorded) {
+      pending.streamRecorded = record(pending.chat.length - 1);
+    }
+  });
+  on(eventTypes.MESSAGE_RECEIVED, (messageId, type) => {
+    if (!IH_MESSAGE_GENERATION_TYPES.has(type)) return;
+    if (record(Number(messageId))) pending = null;
+  });
+  on(eventTypes.GENERATION_ENDED, () => {
+    // 续写失败也可能改变计时，只在收到流式内容后保存。
+    if (pending?.streamRecorded) record(pending.chat.length - 1);
+    else pending = null;
+    // 流式结束事件早于消息接收事件，快照需保留到后者。
+  });
+  on(eventTypes.CHAT_CHANGED, () => { pending = null; });
+}
+
 function ihGetSwipeModelName(msg, swipeIdx) {
   if (!msg) return "";
   const curIdx = typeof msg.swipe_id === "number" ? msg.swipe_id : 0;
@@ -14104,21 +14241,12 @@ function openHideManagerPanel() {
           '<button class="ih-me-swipe" id="ih_me_swipe_add" title="给这一楼追加一条空白备选，追加后自动切到它并进入编辑"><i class="fa-solid fa-plus"></i></button>';
       }
       html += "</div>";
-      const _curSwipeIdx =
-        ev.swipeIdx >= 0
-          ? ev.swipeIdx
-          : typeof m.swipe_id === "number"
-            ? m.swipe_id
-            : 0;
-      const _curModel = ihGetSwipeModelName(m, _curSwipeIdx);
-      if (_curModel) {
-        html += `<span class="ih-me-model-badge" title="${ihEscapeAttr(_curModel)}">${ihEscapeHtml(_curModel)}</span>`;
-      }
       if (_meMulti) {
         html += `<button class="ih-me-swipe ih-me-sel-toggle${ev.selMode ? " ih-me-swipe-on" : ""}" id="ih_me_sel_toggle" title="${ev.selMode ? "退出多选" : "多选备选，可一次删掉多条"}"><i class="fa-solid fa-list-check"></i></button>`;
       }
       html += "</div>";
     }
+    html += ihRenderGenerationInfo(m, ev.swipeIdx);
     let _mePosCount = 0;
     if (ev.mode === "edit") {
       html +=
@@ -15212,6 +15340,7 @@ function openHideManagerPanel() {
       });
       html += `</div></div>`;
     }
+    html += ihRenderGenerationInfo(msg, curSwipe);
     html += `<div class="ih-search-preview-box"><div class="ih-search-preview-text">${text ? _searchBuildFullHtml(text, positions, mt.kwLen) : '<span class="ih-me-empty">（空消息）</span>'}</div></div>`;
     html += `<div class="ih-search-preview-actions"><button class="ih-mgr-btn ih-mgr-btn-ok" id="ih_sp_locate"${positions.length === 0 ? " disabled" : ""}><i class="fa-solid fa-crosshairs"></i> 定位高亮</button>${swipes ? `<button class="ih-mgr-btn ih-mgr-btn-warn" id="ih_sp_del_swipe"><i class="fa-solid fa-list-check"></i> 多选删除备选</button>` : ""}<button class="ih-mgr-btn" id="ih_sp_to_edit"><i class="fa-solid fa-pen"></i> 编辑此消息</button></div>`;
     host.innerHTML = html;
@@ -27158,6 +27287,17 @@ jQuery(async () => {
         });
       } catch (e) {}
     }
+    ihInstallGenerationInfoTracking({
+      eventSource,
+      eventTypes: event_types,
+      getContext: () => STExtensions.getContext(),
+      capture: () =>
+        ihCaptureGenerationInfo(
+          extension_settings,
+          getPresetManager()?.getSelectedPresetName(),
+          SillyTavernScript.getGeneratingModel?.(),
+        ),
+    });
     eventSource.on(
       event_types.GENERATION_STARTED,
       function (type, _params, dryRun) {

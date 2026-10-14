@@ -15,6 +15,7 @@ import * as STExtensions from "../../../extensions.js";
 import { power_user } from "../../../power-user.js";
 import * as SlashCommands from "../../../slash-commands.js";
 import { createFloatingEditorController } from "./floating-editor.js";
+import { createCharacterFieldStore } from "./character-description-store.js";
 import { getPresetManager } from "../../../preset-manager.js";
 
 const openCharacterChat = SillyTavernScript.openCharacterChat;
@@ -32,7 +33,40 @@ const extensionName = "ST-QuickBar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 let floatingEditorEpoch = 0;
 let floatingPresetEpoch = 0;
+const characterFieldStore = createCharacterFieldStore({ getRequestHeaders });
+
+// Patch only the saved scalar field in cached/raw data. Do not reload another
+// character or replace the whole form: it may contain unrelated unsaved edits.
+function acceptSavedCharacterField({ avatar, field, value }) {
+  if (!["description", "personality", "scenario", "first_mes"].includes(field) || typeof value !== "string") {
+    throw new Error("已保存字段的标识或内容无效，未同步到本地角色数据。");
+  }
+  const patchRaw = (raw) => {
+    if (typeof raw !== "string" || !raw) return raw;
+    try {
+      const card = JSON.parse(raw);
+      if (!card || typeof card !== "object" || Array.isArray(card)) return raw;
+      card[field] = value;
+      if (card.data && typeof card.data === "object") card.data[field] = value;
+      return JSON.stringify(card);
+    } catch { return raw; }
+  };
+  const character = characters.find(item => item.avatar === avatar);
+  if (character) {
+    character[field] = value;
+    if (character.data) character.data[field] = value;
+    character.json_data = patchRaw(character.json_data);
+  }
+  if (document.getElementById("avatar_url_pole")?.value === avatar &&
+      document.getElementById("form_create")?.getAttribute("actiontype") === "editcharacter") {
+    const raw = document.getElementById("character_json_data");
+    if (raw) raw.value = patchRaw(raw.value);
+  }
+}
+
 const floatingEditorController = createFloatingEditorController({
+  characterFieldStore,
+  onCharacterFieldSaved: acceptSavedCharacterField,
   getContext: () => ({
     ...STExtensions.getContext(),
     userAvatar: SillyTavernScript.user_avatar,
@@ -7002,7 +7036,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.3.2";
+const EXTENSION_VERSION = "3.3.3";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -7836,11 +7870,12 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.2</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.3</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>新增消息生成配置信息栏</b>：消息详情中的模型信息移至备选栏下方，独立显示生成时使用的API 档案、预设与模型。切换备选时同步更新，搜索结果中的消息预览也可查看。</li>
-  <li><b>优化信息栏样式</b>：标签与名称保持单行排列，间距随宽度自动舒展或收紧，内容过长时可左右滚动。</li>
-  <li><b>生成信息随聊天保存</b>：新生成的 AI 回复按备选保存名称快照，之后切换配置或修改名称不会影响已保存的记录。旧消息缺少的信息将显示「未记录」。</li>
+  <li><b>适配打字指示器</b>：配合打字指示器 4.6.3，预设、主题、播放器和气泡样式的多行编辑框均可使用悬浮编辑，原放大及 JSON 格式化按钮保留。</li>
+  <li><b>扩展第三方插件兼容</b>：使用酒馆标准放大按钮的文本框继续自动支持；自制放大按钮可由插件作者添加对应标记进行适配，不改变原按钮功能。</li>
+  <li><b>防止切换后误改内容</b>：在打字指示器及已适配切换保护的编辑框中，更换主题、方案或重新加载后，旧窗口会锁定并保留文字供复制，不会将旧内容或撤销记录写入新对象。</li>
+  <li><b>完善按钮清理</b>：原编辑框或放大按钮移除、更换后，悬浮入口同步更新，避免留下无效按钮。</li>
 </ul>
 `;
 
@@ -7931,13 +7966,15 @@ function openHelpPanel() {
 <p>滚动类功能（跳转顶部/底部、翻页等）会自动作用于光标所在的可滚动容器，而非默认的聊天区。</p>
 
 <div class="ih-help-h4"><i class="fa-solid fa-up-right-from-square"></i> 悬浮编辑窗</div>
-<p>点击原生放大图标左侧的悬浮编辑图标，可独立编辑角色描述、世界书条目、自定义 CSS 等带放大按钮的文本框。默认启用，可在设置中的<q>「悬浮编辑窗」</q>关闭；与下文的悬浮球 / 按钮面板是不同功能。</p>
+<p>点击放大图标左侧的悬浮编辑图标，可独立编辑角色描述、性格、场景、主开场白、世界书条目、自定义 CSS，以及打字指示器等已适配插件的文本框。默认启用，可在设置中的<q>「悬浮编辑窗」</q>关闭；与下文的悬浮球 / 按钮面板是不同功能。</p><p>使用酒馆标准放大按钮的插件会自动显示悬浮入口；自制按钮需要插件作者适配。打字指示器及已适配切换保护的编辑框，在更换主题或方案后会锁定旧窗口，原内容仍可复制。修改仍需按原插件的方式保存。</p>
 <ul>
-    <li><b>多窗与布局</b>：最多同时打开 3 个不同字段；再次打开同一字段会聚焦已有窗口。支持拖拽、折叠、缩放及位置尺寸记忆；图钉固定位置和大小，窗口外观跟随酒馆主题。</li>
-    <li><b>实时同步</b>：修改立即写回原编辑框，关闭窗口不撤销修改。标题栏的<q>「变更历史」</q>可下钻查看本次编辑的各个历史状态，预览后点<q>「回到此状态」</q>即可写回，回退本身也可撤销。</li>
-    <li><b>底部工具</b>：左侧为撤销、重做，右侧为查找和 CSS 专属取色器，与缩放图标水平对齐。底栏、工具栏和正文快捷键共用撤销重做处理，每个窗口的历史独立。</li>
+    <li><b>多窗与布局</b>：最多同时打开 3 个字段 / 角色草稿窗口；再次打开同一目标会聚焦已有窗口。支持拖拽、折叠、缩放及位置尺寸记忆；图钉固定位置和大小，窗口外观跟随酒馆主题。</li>
+    <li><b>多角色多字段</b>：已保存角色的描述、性格、场景、主开场白按角色与字段独立绑定，标题标明编辑目标。切换 A/B 后仍可编辑；同一角色的不同字段也能分别开窗，重复打开同一角色同一字段会回到已有草稿，总窗口上限仍为 3 个。停止输入约 700 毫秒后自动保存到对应角色与字段，不需要保存或重新读取按钮，不跟随当前选中的角色，也不覆盖其他字段。主开场白只改角色卡，不改已有聊天消息和备用开场白。未保存内容不会跨刷新保留。</li>
+    <li><b>保存与冲突</b>：保存前检查服务器和原框是否被其他操作修改；发生冲突则暂停同步并保留文字，可复制后关闭并重新打开。临时失败会有限次自动重试。关闭或停用时先完成待保存内容，只有保存未成功时才询问是否放弃；刷新离页也会提示尚未保存的内容。</li>
+    <li><b>其他字段实时同步</b>：未适配的其他角色字段、世界书、CSS、插件文本框及尚未保存的新角色表单，仍立即写回原编辑框，关闭不撤销修改。底部<q>「变更历史」</q>可预览并回到历史状态，回退本身也可撤销；角色字段的撤销、重做和历史恢复也会自动保存。</li>
+    <li><b>底部工具</b>：左侧为变更历史、撤销、重做，右侧为查找和 CSS 专属取色器，与缩放图标水平对齐。角色字段与其他窗口使用相同的底部工具，不再增加保存、重新读取按钮。底栏、工具栏和正文快捷键共用撤销重做处理，每个窗口的历史独立。</li>
     <li><b>查找替换</b>：调用插件现有查找栏，明确绑定当前窗口；聚焦其他输入框不会转移替换目标。通过另一窗口的查找按钮切换目标；折叠、关闭或锁定原窗口会关闭其查找栏。</li>
-    <li><b>对象保护</b>：切换角色、主题、世界书等编辑对象后，旧窗口会锁定并保留可复制内容，需重新打开目标字段。只读或输入法组字期间不执行写入操作。</li>
+    <li><b>对象保护</b>：独立角色字段草稿在切换角色后仍可编辑，其他实时同步字段在绑定对象变化时锁定旧窗，保留可复制内容。只读或输入法组字期间不执行写入操作。</li>
 </ul>
 <p><b>正文快捷键</b>：Ctrl/⌘+F 查找，Ctrl/⌘+H 替换，Ctrl/⌘+Z 撤销，Ctrl+Y 或 Ctrl/⌘+Shift+Z 重做。CSS 可用 Ctrl/⌘+Alt+Backspace 请求恢复；Ctrl/⌘+Alt+Esc 关闭目标窗口。</p>
 
@@ -25278,8 +25315,25 @@ function showCustomSymbolDialog(existingSymbol = null, editIndex = -1) {
   });
 }
 
-function onEnableInputChange() {
+async function closeFloatingEditorsBeforeDisable(control) {
+  control.prop("disabled", true);
+  try {
+    return await floatingEditorController.flushAndCloseAll();
+  } catch (error) {
+    console.error("快捷工具栏: 悬浮窗自动保存未完成", error);
+    toastr.warning("自动保存未完成，已保留编辑窗口，请稍后重试。");
+    return false;
+  } finally {
+    control.prop("disabled", false);
+  }
+}
+
+async function onEnableInputChange() {
   const value = $("#enable_input_helper").prop("checked");
+  if (!value && !await closeFloatingEditorsBeforeDisable($("#enable_input_helper"))) {
+    $("#enable_input_helper").prop("checked", true);
+    return;
+  }
   getSettings().enabled = value;
   floatingEditorController.refresh();
   saveSettingsDebounced();
@@ -26626,8 +26680,13 @@ jQuery(async () => {
   sendStopController._update();
 
   $("#enable_input_helper").on("change", onEnableInputChange);
-  $("#enable_floating_editor").on("change", function () {
-    getSettings().floatingEditorEnabled = $(this).prop("checked");
+  $("#enable_floating_editor").on("change", async function () {
+    const enabled = $(this).prop("checked");
+    if (!enabled && !await closeFloatingEditorsBeforeDisable($(this))) {
+      $(this).prop("checked", true);
+      return;
+    }
+    getSettings().floatingEditorEnabled = enabled;
     saveSettingsDebounced();
     floatingEditorController.refresh();
   });

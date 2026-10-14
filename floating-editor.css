@@ -308,6 +308,14 @@
     cursor: pointer;
 }
 
+/* Explicit third-party integration keeps the host control in its original
+   parent (important for component frameworks); only add a preceding icon. */
+.ih-floating-editor-launch--external {
+    flex: 0 0 auto;
+    margin-inline-end: 4px;
+    vertical-align: middle;
+}
+
 .ih-floating-editor-launch:not(.right_menu_button) {
     padding: 2px;
 }
@@ -792,3 +800,9 @@
     display: none !important;
 }
 
+
+/* Autosave status only; the footer uses the same controls as other editors. */
+.ih-floating-editor-window.is-character-draft[data-save-state="dirty"] .ih-floating-editor-status,
+.ih-floating-editor-window.is-character-draft[data-save-state="error"] .ih-floating-editor-status {
+    color: var(--ih-fe-accent);
+}

@@ -2151,12 +2151,27 @@ export function createFloatingEditorTools({
 
 // ── Session manager and lifecycle ──
 
+// Persisted scalar fields only. Alternate greetings and existing chat messages
+// are different records and deliberately do not use this adapter.
+const CHARACTER_DRAFT_FIELDS = new Map([
+  ["description_textarea", { field: "description", label: "角色描述" }],
+  ["personality_textarea", { field: "personality", label: "角色性格" }],
+  ["scenario_pole", { field: "scenario", label: "场景" }],
+  ["firstmessage_textarea", { field: "first_mes", label: "主开场白" }],
+]);
+
 const CHARACTER_FIELDS = new Set([
   "description_textarea", "firstmessage_textarea", "personality_textarea",
   "scenario_pole", "mes_example_textarea", "system_prompt_textarea",
   "post_history_instructions_textarea", "creator_notes_textarea", "tags_textarea",
   "depth_prompt_prompt",
 ]);
+// Declarative extension integration. These attributes are opt-in, not heuristic
+// matches for arbitrary expand icons. See the plugin-author notes in README.md.
+const EXTENSION_EDITOR_TARGET = "data-quickbar-editor-for";
+const EXTENSION_EDITOR_KEY = "data-quickbar-editor-key";
+const EXTENSION_EDITOR_TITLE = "data-quickbar-editor-title";
+const TEXT_INPUT_TYPES = new Set(["text", "search", "url", "tel", "email"]);
 const PRESET_SELECTORS = [
   "#settings_preset", "#settings_preset_openai", "#context_presets",
   "#sysprompt_select", "#instruct_presets", "#first_message_select",
@@ -2177,6 +2192,13 @@ export function captureEditorIdentity(source, getContext = () => ({})) {
   const character = context.characters?.[characterId];
   const dialog = source.closest("dialog");
   const base = { source, id, dialog, kind: "generic" };
+  const extensionKey = source.getAttribute?.(EXTENSION_EDITOR_KEY);
+  if (extensionKey != null) {
+    // The extension owns this logical context. Unrelated chat/character changes
+    // must not retire an editor for a global extension theme. The key must change
+    // BEFORE replacing the backing value, including a new epoch on A -> B -> A.
+    return { ...base, kind: "extension", extensionKey };
+  }
   if (id === "customCSS") {
     return { ...base, kind: "css", theme: selectionIdentity(doc, "#themes") };
   }
@@ -2224,7 +2246,23 @@ export function editorLogicalKey(identity) {
   return JSON.stringify(Object.entries(logical).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
+// This adapter never reads/writes the reused native character form.
+function createCharacterDraftAdapter(initialValue) {
+  let value = initialValue;
+  return {
+    kind: "character-draft",
+    read: () => value,
+    getRevision: () => value,
+    getSelection: () => null,
+    isConnected: () => true,
+    isReadOnly: () => false,
+    write(next) { value = String(next); return { value }; },
+  };
+}
+
 function editorTitle(source, maximize) {
+  const extensionTitle = source.getAttribute(EXTENSION_EDITOR_TITLE)?.trim();
+  if (extensionTitle) return extensionTitle.slice(0, 100);
   const names = {
     customCSS: "自定义 CSS", description_textarea: "角色描述",
     firstmessage_textarea: "开场白", personality_textarea: "角色性格",
@@ -2262,17 +2300,24 @@ export function createFloatingEditorController({
   openColorPicker = null,
   openFindReplace = null,
   onHistoryChange = null,
+  characterDescriptionStore = null,
+  onCharacterDescriptionSaved = null,
+  characterFieldStore = characterDescriptionStore,
+  onCharacterFieldSaved = onCharacterDescriptionSaved,
 } = {}) {
   const win = doc.defaultView;
   // Bound simultaneous fields, shared resources and window layers.
   const MAX_WINDOWS = 3;
+  const CHARACTER_AUTOSAVE_DELAY = 700;
+  const CHARACTER_AUTOSAVE_RETRIES = 2;
   const buttons = new Map();
   const maximizers = new Set();
   const ownedButtons = new WeakSet();
   const ownedPairs = new WeakSet();
   const pendingRoots = new Set();
   const PAIR = ".ih-floating-editor-actions-pair";
-  const MAXIMIZE = ".editor_maximize[data-for]";
+  const NATIVE_MAXIMIZE = ".editor_maximize[data-for]";
+  const MAXIMIZE = `${NATIVE_MAXIMIZE}, [${EXTENSION_EDITOR_TARGET}]`;
   const LAUNCH = ".ih-floating-editor-launch";
   const EDITABLE = "textarea, input, [contenteditable]";
   // Each window is an independent session with its own write/compose/history
@@ -2298,10 +2343,29 @@ export function createFloatingEditorController({
   let themeObserver = null;
   let themeFrame = 0;
 
+  function resolveSource(maximize) {
+    if (!maximize?.isConnected || !maximize.matches(MAXIMIZE) ||
+        maximize.closest(".ih-floating-editor")) return null;
+    const explicit = maximize.getAttribute(EXTENSION_EDITOR_TARGET);
+    const native = maximize.matches(NATIVE_MAXIMIZE);
+    const id = explicit ?? maximize.getAttribute("data-for");
+    // Conflicting native/custom targets are ambiguous; fail closed. An explicit
+    // empty target suspends integration while a component is changing records.
+    if (!id || (native && explicit !== null && explicit !== maximize.getAttribute("data-for"))) return null;
+    const source = doc.getElementById(id);
+    if (!source || source.closest(".ih-floating-editor") || !source.matches(EDITABLE)) return null;
+    // Do not expose passwords, hidden fields, checkboxes or number/range values
+    // in a general text editor, even if somebody marks a button by mistake.
+    if (source.tagName === "INPUT" && !TEXT_INPUT_TYPES.has(source.type)) return null;
+    const key = source.getAttribute(EXTENSION_EDITOR_KEY);
+    if (key !== null && !key.trim()) return null;
+    return source;
+  }
+
   const sessionList = () => [...sessions.values()];
   const activeSession = () => (activeId != null ? sessions.get(activeId) : null);
   function sessionForSource(source) {
-    for (const s of sessions.values()) if (s.source === source) return s;
+    for (const s of sessions.values()) if (!s.characterDraft && s.source === source) return s;
     return null;
   }
 
@@ -2329,15 +2393,20 @@ export function createFloatingEditorController({
   // not invalidate/notify recursively. Mutating commands use valid() below.
   function sessionIsValid(s) {
     if (!s || s.invalid || sessions.get(s.id) !== s || !s.window?.textarea.isConnected) return false;
+    if (s.characterDraft) return isEnabled();
     const dialog = s.identity.dialog;
-    return isEnabled() && s.adapter.isConnected() && s.adapter.kind !== "unsupported" && s.maximize.isConnected &&
-      s.maximize.dataset.for === s.source.id && doc.getElementById(s.source.id) === s.source &&
+    return isEnabled() && s.adapter.isConnected() && s.adapter.kind !== "unsupported" &&
+      resolveSource(s.maximize) === s.source &&
       (!dialog || (dialog.isConnected && dialog.open)) &&
       sameEditorIdentity(s.identity, captureEditorIdentity(s.source, getContext));
   }
 
   function valid(s) {
     if (!s || s.invalid || sessions.get(s.id) !== s) return false;
+    // Advanced character fields may live in a native popup. Retain the draft
+    // when that popup closes/unmounts; its source is not the persistence target.
+    const host = s.characterDraft && s.window?.element.parentElement;
+    if (host?.tagName === "DIALOG" && (!host.isConnected || !host.open)) s.window.setThemeSource(null);
     if (!sessionIsValid(s)) {
       invalidate(s);
       return false;
@@ -2347,7 +2416,10 @@ export function createFloatingEditorController({
 
   function sync(s) {
     if (!s || s.writing || !valid(s)) return;
+    if (s.characterDraft) { updateCharacterDraft(s); updateTools(s); return; }
     s.window.setReadOnly(s.adapter.isReadOnly());
+    const title = editorTitle(s.source, s.maximize);
+    if (title !== s.title) { s.title = title; s.window.setTitle(title); }
     if (s.composing || s.sourceComposing || resolveCodeMirrorForSource(s.source)?.composing) { updateTools(s); return; }
     try {
       const revision = s.adapter.getRevision();
@@ -2374,7 +2446,7 @@ export function createFloatingEditorController({
     // CM revisions are immutable document identities. Avoid converting the
     // entire source document to a string again when beforeinput just synced it.
     const revision = s.adapter.getRevision();
-    if (s.sourceComposing || resolveCodeMirrorForSource(s.source)?.composing ||
+    if (s.sourceComposing || (!s.characterDraft && resolveCodeMirrorForSource(s.source)?.composing) ||
         (revision !== s.revision && s.adapter.read() !== s.lastValue)) {
       invalidate(s, "原框同时发生了修改；已暂停同步，保留两边内容以避免覆盖。 ");
       return;
@@ -2406,6 +2478,10 @@ export function createFloatingEditorController({
       s.lastSelection = selectedRange(s);
       s.beforeSelection = null;
       s.tools?.refresh();
+      if (s.characterDraft) {
+        if (valueChanged) { s.characterDraft.retryCount = 0; scheduleCharacterSave(s); }
+        updateCharacterDraft(s);
+      }
       updateTools(s, valueChanged);
       return true;
     } catch (error) {
@@ -2422,8 +2498,8 @@ export function createFloatingEditorController({
   }
 
   function editable(s) {
-    const cm = resolveCodeMirrorForSource(s.source);
-    return !s.composing && !s.sourceComposing && !cm?.composing &&
+    const cm = s.characterDraft ? null : resolveCodeMirrorForSource(s.source);
+    return !s.characterDraft?.closing && !s.composing && !s.sourceComposing && !cm?.composing &&
       !cm?.compositionStarted && !s.adapter.isReadOnly();
   }
 
@@ -2626,7 +2702,7 @@ export function createFloatingEditorController({
 
   function restore(s) {
     if (!valid(s)) return;
-    if (!win.confirm("恢复此窗口打开时的内容？这会实时写回原编辑框，不会关闭窗口。")) return;
+    if (!win.confirm(s.characterDraft ? "恢复此窗口打开时的内容？恢复后会自动保存到对应角色。" : "恢复此窗口打开时的内容？这会实时写回原编辑框，不会关闭窗口。")) return;
     if (!valid(s)) return;
     sync(s);
     if (!valid(s)) return;
@@ -2683,6 +2759,7 @@ export function createFloatingEditorController({
   // Release session-specific bridges on lock/close. Document listeners and
   // observers are shared; queued source syncs also check session membership.
   function stopSessionSource(s) {
+    cancelCharacterSave(s);
     s.timeline.dispose();
     win.jQuery?.(s.window.textarea).off(".ihFloatingEditor");
     s.stopSource?.();
@@ -2718,8 +2795,289 @@ export function createFloatingEditorController({
     for (const s of sessions.values()) s.window.setCapacity?.(sessions.size, MAX_WINDOWS, full);
   }
 
-  function closeSession(s) {
-    if (!s || !sessions.has(s.id)) return;
+  function characterDraftDirty(s) {
+    const draft = s.characterDraft;
+    if (!draft) return false;
+    // The conflict baseline is not proof that the current text is persisted:
+    // opening a stale form and an unconfirmed POST both need discard protection.
+    if (draft.confirmedValue === null || draft.uncertain) return true;
+    return s.window.textarea.value !== draft.confirmedValue.replace(/\r\n?/g, "\n");
+  }
+
+  function updateCharacterDraft(s) {
+    const draft = s.characterDraft;
+    if (!draft || s.invalid || sessions.get(s.id) !== s) return;
+    const dirty = characterDraftDirty(s);
+    const state = draft.saving || draft.closing ? "saving" : draft.loading ? "loading" : draft.error ? "error" : dirty ? "dirty" : "saved";
+    const status = draft.closing ? "正在自动保存并关闭…" : draft.saving ? "自动保存中…" : draft.loading ? "正在同步角色内容…" : draft.error ||
+      (dirty ? "自动保存 · 等待输入结束…" : "自动保存 · 已保存");
+    const title = draft.name + " · " + draft.label + (dirty ? " *" : "");
+    if (s.title !== title) { s.title = title; s.window.setTitle(title); }
+    const key = state + status;
+    if (draft.statusKey !== key) {
+      draft.statusKey = key;
+      s.window.element.dataset.saveState = state;
+      s.window.setStatus(status);
+    }
+  }
+
+  function cancelCharacterSave(s) {
+    const draft = s?.characterDraft;
+    if (!draft) return;
+    win.clearTimeout(draft.saveTimer);
+    draft.saveTimer = 0;
+  }
+
+  function scheduleCharacterSave(s, delay = CHARACTER_AUTOSAVE_DELAY) {
+    const draft = s?.characterDraft;
+    if (!draft) return;
+    cancelCharacterSave(s);
+    if (sessions.get(s.id) !== s || s.invalid || draft.closing || !characterDraftDirty(s)) return;
+    draft.saveTimer = win.setTimeout(() => {
+      draft.saveTimer = 0;
+      if (sessions.get(s.id) !== s || s.invalid || draft.closing || !isEnabled()) return;
+      // Composition end and request completion schedule the latest text again.
+      if (s.composing || draft.loading || draft.saving) return;
+      if (draft.baseline === null) loadCharacterDraft(s);
+      else saveCharacterDraft(s);
+    }, delay);
+  }
+
+  function retryCharacterSave(s) {
+    const draft = s.characterDraft;
+    if (!draft || s.invalid || draft.closing || draft.retryCount >= CHARACTER_AUTOSAVE_RETRIES) return;
+    scheduleCharacterSave(s, ++draft.retryCount * 1000);
+  }
+
+  function retryPendingCharacterSaves() {
+    for (const s of sessions.values()) if (s.characterDraft && !s.invalid && characterDraftDirty(s)) {
+      s.characterDraft.retryCount = 0;
+      scheduleCharacterSave(s, 0);
+    }
+  }
+
+  // The form avatar, not this_chid, identifies the actual visible editor.
+  function currentCharacterField(draft) {
+    const { avatar, sourceId, label } = draft;
+    if (doc.querySelector("#form_create")?.getAttribute("actiontype") !== "editcharacter" ||
+        doc.querySelector("#avatar_url_pole")?.value !== avatar) return null;
+    const source = doc.getElementById(sourceId);
+    if (!source?.isConnected) return null;
+    const adapter = createFloatingEditorAdapter(source);
+    if (adapter.kind === "unsupported" || adapter.isReadOnly() || resolveCodeMirrorForSource(source)?.composing) {
+      throw Object.assign(new Error("原" + label + "编辑框暂时不可写或正在组字。"), { code: "source-busy" });
+    }
+    return { source, adapter, value: adapter.read() };
+  }
+
+  function checkCharacterSource(s, desired) {
+    const draft = s.characterDraft;
+    const current = currentCharacterField(draft);
+    if (current && ![draft.nativeValue, draft.baseline, desired].includes(current.value)) {
+      throw Object.assign(new Error("原" + draft.label + "编辑框也发生了修改。"), { code: "conflict" });
+    }
+    return current;
+  }
+
+  function publishCharacterField(s, snapshot, allowedValues) {
+    if (typeof onCharacterFieldSaved === "function") onCharacterFieldSaved(snapshot);
+    const current = currentCharacterField(s.characterDraft);
+    if (!current || current.value === snapshot.value) return;
+    if (!allowedValues.includes(current.value)) {
+      throw Object.assign(new Error("角色文件已保存，但原框又有更新的修改；未覆盖原框。"), { code: "conflict" });
+    }
+    if (current.adapter.kind === "codemirror") {
+      current.adapter.write(snapshot.value, { userEvent: "input.quickbar-save", addToHistory: false });
+    } else {
+      const change = minimalTextChange(current.value, snapshot.value);
+      current.source.setRangeText(change.insert, change.from, change.to, "preserve");
+    }
+    if (current.adapter.read() !== snapshot.value) throw new Error("角色文件已保存，但原编辑器未接受同步。");
+  }
+
+  function pauseCharacterSave(s, error) {
+    const draft = s.characterDraft;
+    const latest = error.latest;
+    if (latest?.avatar === draft.avatar && (latest.field ?? "description") === draft.field && typeof latest.value === "string") {
+      draft.confirmedValue = latest.value;
+      draft.uncertain = false;
+      // Keep this window's text untouched, but let reopening the role's field
+      // start from the known persisted value when the native field is still old.
+      try { publishCharacterField(s, latest, [draft.nativeValue, draft.baseline]); }
+      catch { /* Never replace a newer native edit to repair a conflict. */ }
+    }
+    draft.error = (error.message || "编辑内容发生冲突。") + " 已暂停自动同步，内容保留，可复制后关闭并重新打开。";
+    invalidate(s, draft.error);
+  }
+
+  function loadCharacterDraft(s) {
+    const draft = s.characterDraft;
+    if (!draft || !valid(s)) return Promise.resolve(false);
+    if (draft.loading) return draft.loadPromise;
+    draft.loading = true;
+    draft.error = "";
+    updateCharacterDraft(s);
+    draft.loadPromise = (async () => {
+      let loaded = false, retryable = false;
+      try {
+        let snapshot = await characterFieldStore.load(draft.avatar, draft.field);
+        if (sessions.get(s.id) !== s || s.invalid) return false;
+        if (snapshot.value.replace(/\r\n?/g, "\n") !== s.initialValue) {
+          // A native edit may still be in its own debounce/save path. Allow one
+          // settling read; never silently rebase a draft over different content.
+          await new Promise(resolve => win.setTimeout(resolve, CHARACTER_AUTOSAVE_DELAY));
+          if (sessions.get(s.id) !== s || s.invalid) return false;
+          snapshot = await characterFieldStore.load(draft.avatar, draft.field);
+        }
+        if (sessions.get(s.id) !== s || s.invalid) return false;
+        draft.confirmedValue = snapshot.value;
+        draft.uncertain = false;
+        draft.name = snapshot.name;
+        if (snapshot.value.replace(/\r\n?/g, "\n") !== s.initialValue) {
+          pauseCharacterSave(s, { message: "服务器内容与打开时不同。", latest: snapshot });
+          return false;
+        }
+        draft.baseline = snapshot.value;
+        draft.retryCount = 0;
+        loaded = true;
+        return true;
+      } catch (error) {
+        if (sessions.get(s.id) !== s || s.invalid) return false;
+        retryable = ["network", "busy"].includes(error.code);
+        draft.error = (error.message || "读取失败。") + " 内容已保留，自动保存尚未完成。";
+        notify(draft.error);
+        return false;
+      } finally {
+        draft.loading = false;
+        draft.retryable = retryable;
+        updateCharacterDraft(s);
+        updateTools(s);
+        if (loaded) scheduleCharacterSave(s);
+        else if (retryable) retryCharacterSave(s);
+      }
+    })();
+    return draft.loadPromise;
+  }
+
+  function saveCharacterDraft(s) {
+    const draft = s.characterDraft;
+    if (!draft || !valid(s) || s.composing) return Promise.resolve(false);
+    if (draft.saving) return draft.savePromise;
+    if (draft.loading || draft.baseline === null) return Promise.resolve(false);
+    if (!characterDraftDirty(s)) return Promise.resolve(true);
+    cancelCharacterSave(s);
+    const value = s.lastValue;
+    let writeStarted = false, verified = false, completed = false, retryable = false;
+    draft.saving = true;
+    draft.error = "";
+    updateCharacterDraft(s);
+    draft.savePromise = (async () => {
+      try {
+        let sourceBeforeSave = checkCharacterSource(s, value);
+        const snapshot = await characterFieldStore.save({
+          avatar: draft.avatar, field: draft.field, baseline: draft.baseline, value,
+          beforeWrite: () => {
+            if (!valid(s)) throw new Error("编辑窗口已关闭或停用，未提交保存。");
+            sourceBeforeSave = checkCharacterSource(s, value);
+            writeStarted = true;
+          },
+        });
+        const previousBaseline = draft.baseline;
+        draft.baseline = snapshot.value;
+        draft.confirmedValue = snapshot.value;
+        draft.uncertain = false;
+        verified = true;
+        draft.name = snapshot.name;
+        publishCharacterField(s, snapshot, [sourceBeforeSave?.value, draft.nativeValue, previousBaseline, value]);
+        draft.nativeValue = snapshot.value;
+        draft.retryCount = 0;
+        completed = true;
+        return true;
+      } catch (error) {
+        if (writeStarted && !verified) draft.uncertain = true;
+        if (error.code === "conflict" || error.code === "missing" || error.latest || verified) {
+          pauseCharacterSave(s, error);
+        } else {
+          retryable = ["network", "verify", "busy", "source-busy"].includes(error.code);
+          draft.error = (error.message || "自动保存失败。") + " 内容已保留，保存尚未确认。";
+          notify(draft.error);
+        }
+        return false;
+      } finally {
+        draft.saving = false;
+        draft.retryable = retryable;
+        updateCharacterDraft(s);
+        updateTools(s);
+        // More typing during this request remains dirty and gets its own save.
+        if (completed || (!s.invalid && s.lastValue !== value)) scheduleCharacterSave(s);
+        else if (retryable) retryCharacterSave(s);
+      }
+    })();
+    return draft.savePromise;
+  }
+
+  async function flushCharacterSave(s) {
+    const draft = s.characterDraft;
+    cancelCharacterSave(s);
+    if (draft.loading) await draft.loadPromise;
+    if (draft.saving) await draft.savePromise;
+    if (!characterDraftDirty(s)) return true;
+    if (s.invalid) return false;
+    if (draft.baseline === null && !await loadCharacterDraft(s)) return false;
+    return saveCharacterDraft(s);
+  }
+
+  function closeCharacterSession(s) {
+    const draft = s.characterDraft;
+    if (draft.closePromise) return draft.closePromise;
+    // Commit the visible IME text before making the closing window read-only.
+    if (s.composing && !s.invalid) { s.composing = false; write(s, s.window.textarea.value); }
+    draft.closing = true;
+    cancelCharacterSave(s);
+    s.window.setReadOnly(true);
+    updateCharacterDraft(s);
+    updateTools(s);
+    draft.closePromise = (async () => {
+      try {
+        await flushCharacterSave(s);
+        if (sessions.get(s.id) !== s) return true;
+        if (characterDraftDirty(s) && !win.confirm("「" + draft.name + " · " + draft.label + "」尚未保存成功。内容仍保留在窗口中；确定放弃这些内容并关闭？")) return false;
+        return closeSession(s, true);
+      } finally {
+        if (sessions.get(s.id) === s) {
+          draft.closing = false;
+          draft.closePromise = null;
+          s.window.setReadOnly(s.invalid);
+          updateCharacterDraft(s);
+          updateTools(s);
+          // Cancelling a failed close resumes any still-available retry budget.
+          if (draft.retryable) retryCharacterSave(s);
+        }
+      }
+    })();
+    return draft.closePromise;
+  }
+
+  async function flushAndCloseAll() {
+    for (const s of sessionList()) {
+      if (sessions.get(s.id) === s && !await closeSession(s)) return false;
+    }
+    return true;
+  }
+
+  function canCloseSessions(list) {
+    if (list.some(s => s.characterDraft?.saving || s.characterDraft?.closing)) {
+      notify("角色字段正在保存，请等待结果后再关闭。");
+      return false;
+    }
+    const dirty = list.filter(characterDraftDirty);
+    return !dirty.length || win.confirm("「" + dirty.map(s => s.characterDraft.name + " · " + s.characterDraft.label).join("、") + "」有未保存或尚未确认保存的字段草稿。关闭将丢弃这些内容，确定关闭？");
+  }
+
+  function closeSession(s, confirmed = false) {
+    if (!s || !sessions.has(s.id)) return false;
+    if (!confirmed && s.characterDraft) return closeCharacterSession(s);
+    if (!confirmed && !canCloseSessions([s])) return false;
     // A blur/close can precede compositionend on mobile. Commit only to the same
     // bound context and only if the source has not changed meanwhile.
     if (s.composing && !s.invalid) {
@@ -2751,17 +3109,21 @@ export function createFloatingEditorController({
     restack();
     updateCapacityHints();
     maybeStopPolling();
+    return true;
   }
 
   // Disable/destroy releases every window; close() releases only its target.
   function closeAll() {
-    for (const s of sessionList()) closeSession(s);
+    const list = sessionList();
+    if (!canCloseSessions(list)) return false;
+    for (const s of list) closeSession(s, true);
+    return true;
   }
 
   // Without an explicit target, close only the active window.
   function close() {
     const s = activeSession() || sessionList()[0];
-    if (s) closeSession(s);
+    return s ? closeSession(s) : true;
   }
 
   function maybeStopPolling() {
@@ -2837,8 +3199,8 @@ export function createFloatingEditorController({
 
   function open(maximize) {
     if (!isEnabled() || !maximize?.isConnected) return null;
-    const source = doc.getElementById(maximize.dataset.for);
-    if (!source || source.closest(".ih-floating-editor")) return null;
+    const source = resolveSource(maximize);
+    if (!source) return null;
     // Re-point to the same logical field: focus the existing window instead of
     // creating a second editing copy. Repeated clicks never duplicate a source.
     const existingBySource = sessionForSource(source);
@@ -2848,14 +3210,26 @@ export function createFloatingEditorController({
       return existingBySource;
     }
     const identity = captureEditorIdentity(source, getContext);
-    const key = editorLogicalKey(identity);
+    const definition = CHARACTER_DRAFT_FIELDS.get(source.id);
+    const character = definition && identity.kind === "character" &&
+      identity.mode === "editcharacter" && identity.formAvatar && characterFieldStore
+      ? getContext()?.characters?.find(item => item.avatar === identity.formAvatar) : null;
+    const key = character ? JSON.stringify(["character-field", character.avatar, definition.field]) : editorLogicalKey(identity);
     const existingByKey = sessionList().find(s => !s.invalid && s.logicalKey === key && valid(s));
     if (existingByKey) {
+      if (existingByKey.characterDraft) {
+        // Reopened advanced settings may mount a new source/dialog instance.
+        // Reattach only the theme host; the role/field and draft stay unchanged.
+        existingByKey.source = source;
+        existingByKey.maximize = maximize;
+        existingByKey.button = buttons.get(maximize);
+        syncTheme(existingByKey);
+      }
       setActive(existingByKey.id);
       existingByKey.window.focus();
       return existingByKey;
     }
-    const adapter = createFloatingEditorAdapter(source);
+    let adapter = createFloatingEditorAdapter(source);
     if (adapter.kind === "unsupported") {
       notify("此编辑框由暂不支持的编辑器接管，请使用原生放大按钮。 ");
       return null;
@@ -2865,9 +3239,18 @@ export function createFloatingEditorController({
       return null;
     }
     const value = adapter.read();
+    const characterDraft = character && !adapter.isReadOnly() ? {
+      avatar: character.avatar, name: character.name || character.avatar,
+      field: definition.field, label: definition.label, sourceId: source.id,
+      baseline: null, confirmedValue: null, uncertain: false,
+      nativeValue: value, loading: false, saving: false, error: "",
+      saveTimer: 0, retryCount: 0, retryable: false, closing: false, loadPromise: null, savePromise: null, closePromise: null,
+    } : null;
+    if (characterDraft) adapter = createCharacterDraftAdapter(value);
     const s = {
       id: ++nextSessionId, generation: 0, openedAt: Date.now(),
-      source, maximize, adapter, identity, logicalKey: key,
+      source, maximize, adapter, identity, characterDraft, logicalKey: key,
+      title: characterDraft ? characterDraft.name + " · " + characterDraft.label : editorTitle(source, maximize),
       initialValue: value, lastValue: value, revision: adapter.getRevision(),
       invalid: false, composing: false, sourceComposing: false, writing: false,
       syncQueued: false,
@@ -2883,7 +3266,7 @@ export function createFloatingEditorController({
     // Assign a geometry slot before building the window so restore uses it.
     s.slot = pickSlot(s);
     s.window = createFloatingEditorWindow({
-      document: doc, source, title: editorTitle(source, maximize), value,
+      document: doc, source, title: s.title, value,
       geometry: getSlotGeometry(s.slot),
       // Markdown preview is offered for every source except CSS, where rendering
       // stylesheet text as Markdown is meaningless. The button only renders a
@@ -2902,6 +3285,7 @@ export function createFloatingEditorController({
         if (sessions.get(s.id) !== s) return;
         s.composing = false;
         write(s, text);
+        if (s.characterDraft) scheduleCharacterSave(s);
         updateTools(s);
       },
       onClose: () => closeSession(s),
@@ -2951,14 +3335,17 @@ export function createFloatingEditorController({
     // Native source input/change is observed at document level. jQuery-only
     // host notifications need their own bridge to refresh this session's history
     // promptly; remove exactly this handler, never another session's listeners.
-    const jqSource = win.jQuery?.(s.source);
+    const jqSource = !characterDraft && win.jQuery?.(s.source);
     if (jqSource) {
       const onInput = event => { if (!event.originalEvent) queueSync(s); };
       jqSource.on("input.ihFloatingEditor change.ihFloatingEditor", onInput);
       s.stopSource = () => jqSource.off("input.ihFloatingEditor change.ihFloatingEditor", onInput);
     }
     s.window.textarea.addEventListener("blur", () => {
-      if (sessions.get(s.id) === s && !s.composing) s.timeline.flush();
+      if (sessions.get(s.id) === s && !s.composing) {
+        s.timeline.flush();
+        if (s.characterDraft) scheduleCharacterSave(s, 0);
+      }
     });
     s.window.textarea.addEventListener("beforeinput", () => {
       if (sessions.get(s.id) === s && !s.composing) { sync(s); s.beforeSelection = selectedRange(s); }
@@ -2994,6 +3381,10 @@ export function createFloatingEditorController({
     s.window.setStatus(source.id === "customCSS"
       ? "实时生效 · Ctrl/⌘+Alt+Backspace 恢复打开时内容"
       : "实时同步 · 关闭不撤销修改");
+    if (characterDraft) {
+      s.window.element.classList.add("is-character-draft");
+      loadCharacterDraft(s);
+    }
     s.button?.setAttribute("aria-pressed", "true");
     updateCapacityHints();
     setActive(s.id);
@@ -3009,7 +3400,7 @@ export function createFloatingEditorController({
 
   function detachButton(maximize, button) {
     const pair = button.parentElement;
-    if (pair?.matches(PAIR) && maximize.parentElement === pair && pair.parentNode) {
+    if (ownedPairs.has(pair) && pair?.matches(PAIR) && maximize.parentElement === pair && pair.parentNode) {
       // Restore the original DOM placement; never replace the native control.
       pair.replaceWith(maximize);
     } else {
@@ -3021,9 +3412,15 @@ export function createFloatingEditorController({
   function styleLauncher(maximize, button) {
     // Same FA element and shared native styling classes, not a menu_button.
     // Never copy editor_maximize (host click handler), ids, handlers or data-for.
-    const classes = [...maximize.classList].filter(name =>
-      name !== "editor_maximize" && !name.startsWith("fa-") && name !== "fa" &&
-      name !== "fas" && name !== "far" && !name.startsWith("ih-floating-editor"));
+    const external = maximize.hasAttribute(EXTENSION_EDITOR_TARGET);
+    // Custom classes may be delegated click selectors. Copy only known visual
+    // host classes for an explicit extension button, never its behavior hooks.
+    const classes = external
+      ? ["right_menu_button", "menu_button"].filter(name => maximize.classList.contains(name))
+      : [...maximize.classList].filter(name =>
+          name !== "editor_maximize" && !name.startsWith("fa-") && name !== "fa" &&
+          name !== "fas" && name !== "far" && !name.startsWith("ih-floating-editor"));
+    if (external) classes.push("ih-floating-editor-launch--external");
     for (const name of ["fa-fw", "fa-lg", "fa-sm", "fa-xs", "fa-2xs", "fa-xl", "fa-2xl"]) {
       if (maximize.classList.contains(name)) classes.push(name);
     }
@@ -3034,8 +3431,8 @@ export function createFloatingEditorController({
   function ensureLauncher(maximize) {
     if (!maximize.isConnected || !maximize.matches(MAXIMIZE)) return;
     maximizers.add(maximize);
-    const source = doc.getElementById(maximize.dataset.for);
-    if (!source || source.closest(".ih-floating-editor") || !source.matches(EDITABLE)) return;
+    const source = resolveSource(maximize);
+    if (!source) return;
     let button = buttons.get(maximize);
     if (!button) {
       button = doc.createElement("i");
@@ -3061,6 +3458,14 @@ export function createFloatingEditorController({
       ownedButtons.add(button);
     }
     styleLauncher(maximize, button);
+    if (maximize.hasAttribute(EXTENSION_EDITOR_TARGET)) {
+      // Do not reparent framework-owned custom controls into our wrapper. If a
+      // previously native control opted in dynamically, restore its parent first.
+      const oldPair = maximize.parentElement;
+      if (ownedPairs.has(oldPair) && oldPair.matches(PAIR)) oldPair.replaceWith(maximize);
+      if (maximize.previousElementSibling !== button) maximize.before(button);
+      return;
+    }
     let pair = maximize.parentElement;
     if (!pair.matches(PAIR)) {
       pair = doc.createElement("span");
@@ -3076,8 +3481,8 @@ export function createFloatingEditorController({
 
   function cleanupLaunchers() {
     for (const maximize of maximizers) {
-      const source = doc.getElementById(maximize.dataset.for);
-      if (!maximize.isConnected || !maximize.matches(MAXIMIZE) || !source || !source.matches(EDITABLE)) {
+      const source = resolveSource(maximize);
+      if (!source) {
         const button = buttons.get(maximize);
         if (button) { detachButton(maximize, button); buttons.delete(maximize); }
         if (!maximize.isConnected || !maximize.matches(MAXIMIZE)) maximizers.delete(maximize);
@@ -3123,7 +3528,7 @@ export function createFloatingEditorController({
   }
 
   function isSourceEventFor(s, target) {
-    if (!s || !target?.closest) return false;
+    if (!s || s.characterDraft || !target?.closest) return false;
     const source = s.source;
     if (target === source || source.contains(target)) return true;
     const cm = target.closest(".cm-editor");
@@ -3155,6 +3560,7 @@ export function createFloatingEditorController({
     const target = event.target;
     const cm = target.closest?.(".cm-editor");
     for (const s of sessions.values()) {
+      if (s.characterDraft) continue;
       if (target === s.source ||
         (cm && (cm.previousElementSibling === s.source || cm.nextElementSibling === s.source ||
           cm.parentElement?.previousElementSibling === s.source))) {
@@ -3247,8 +3653,8 @@ export function createFloatingEditorController({
   function refresh() {
     if (!running) return;
     if (!isEnabled()) {
+      if (!closeAll()) return;
       stopObserving();
-      closeAll();
       for (const [maximize, button] of buttons) detachButton(maximize, button);
       buttons.clear();
       maximizers.clear();
@@ -3260,11 +3666,18 @@ export function createFloatingEditorController({
     discover(doc);
     if (!observing) {
       observer.observe(doc.body, { childList: true, subtree: true, attributes: true,
-        attributeFilter: ["data-for", "id", "actiontype", "open", "disabled", "readonly", "uid", "contenteditable"] });
+        attributeFilter: ["data-for", EXTENSION_EDITOR_TARGET, EXTENSION_EDITOR_KEY, EXTENSION_EDITOR_TITLE,
+          "id", "type", "actiontype", "open", "disabled", "readonly", "uid", "contenteditable"] });
       observing = true;
     }
     for (const s of sessionList()) sync(s);
     syncTheme();
+  }
+
+  function onBeforeUnload(event) {
+    if (!sessionList().some(s => s.characterDraft?.saving || characterDraftDirty(s))) return;
+    event.preventDefault();
+    event.returnValue = "";
   }
 
   function start() {
@@ -3277,13 +3690,16 @@ export function createFloatingEditorController({
         if (m.target.closest?.(".ih-floating-editor")) continue;
         if (m.type === "attributes") {
           const target = m.target;
-          if (m.attributeName === "data-for" && target.matches(".editor_maximize")) scheduleDiscovery(target);
-          else if (m.attributeName === "id" && target.matches(EDITABLE)) {
+          if (m.attributeName === EXTENSION_EDITOR_TARGET ||
+              (m.attributeName === "data-for" && (target.matches(".editor_maximize") || maximizers.has(target)))) {
+            scheduleDiscovery(target);
+          } else if (["id", "type", "contenteditable", EXTENSION_EDITOR_KEY].includes(m.attributeName) &&
+              (target.matches(EDITABLE) || m.attributeName === "contenteditable")) {
             retryUnresolved = true;
             scheduleDiscovery();
           }
           for (const s of sessions.values()) {
-            if (target === s.source || target.contains(s.source) ||
+            if (target === s.source || target.contains(s.source) || target === s.maximize ||
                 target === s.identity.entry || target === s.identity.dialog) dirty.add(s);
           }
           continue;
@@ -3292,7 +3708,8 @@ export function createFloatingEditorController({
           if (node.nodeType !== 1 || node.closest?.(".ih-floating-editor")) continue;
           // Ignore the controller's own wrapping, insertion and movement.
           if (ownedButtons.has(node) || ownedPairs.has(node)) continue;
-          if (buttons.has(node) && node.previousElementSibling === buttons.get(node) && node.parentElement.matches(PAIR)) continue;
+          if (buttons.has(node) && node.previousElementSibling === buttons.get(node) &&
+              (node.parentElement.matches(PAIR) || node.hasAttribute(EXTENSION_EDITOR_TARGET))) continue;
           if (node.matches(MAXIMIZE + ", " + LAUNCH + ", " + PAIR) || node.querySelector(MAXIMIZE + ", " + LAUNCH)) scheduleDiscovery(node);
           if (node.matches(EDITABLE) || node.querySelector(EDITABLE)) {
             retryUnresolved = true;
@@ -3304,6 +3721,10 @@ export function createFloatingEditorController({
         }
         for (const node of m.removedNodes) {
           if (node.nodeType !== 1 || node.isConnected) continue;
+          // A framework may remove only the backing field, leaving its toolbar
+          // mounted. Retire that launch icon too; a later source insertion retries
+          // the tracked control without scanning the whole document.
+          if (node.matches(EDITABLE) || node.querySelector(EDITABLE)) scheduleDiscovery();
           for (const s of sessions.values()) {
             if (node === s.source || node.contains(s.source) ||
                 node === s.maximize || node.contains(s.maximize)) dirty.add(s);
@@ -3324,12 +3745,14 @@ export function createFloatingEditorController({
     doc.addEventListener("compositionstart", onComposition, true);
     doc.addEventListener("compositionend", onComposition, true);
     doc.addEventListener("keydown", onKey, true);
+    win.addEventListener("beforeunload", onBeforeUnload);
+    win.addEventListener("online", retryPendingCharacterSaves);
     refresh();
   }
 
   function destroy() {
+    if (!closeAll()) return false;
     running = false;
-    closeAll();
     stopObserving();
     observer = null;
     for (const [maximize, button] of buttons) detachButton(maximize, button);
@@ -3340,10 +3763,13 @@ export function createFloatingEditorController({
     doc.removeEventListener("compositionstart", onComposition, true);
     doc.removeEventListener("compositionend", onComposition, true);
     doc.removeEventListener("keydown", onKey, true);
+    win.removeEventListener("beforeunload", onBeforeUnload);
+    win.removeEventListener("online", retryPendingCharacterSaves);
+    return true;
   }
 
   return {
-    start, refresh, syncTheme, open, close, closeAll, destroy,
+    start, refresh, syncTheme, open, close, closeAll, flushAndCloseAll, destroy,
     getToolTarget: element => toolTargets.get(element) || null,
     // Backwards-compatible: `active` is the active (most recently focused) window.
     get active() { return activeSession(); },

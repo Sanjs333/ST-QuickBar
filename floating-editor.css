@@ -754,19 +754,6 @@
     color: var(--ih-fe-accent);
 }
 
-.ih-floating-editor-window .ih-floating-editor-button.ih-floating-editor-save {
-    width: auto;
-    min-width: var(--ih-fe-button-size);
-    gap: 5px;
-    padding-inline: 8px;
-    flex: 0 0 auto;
-}
-
-.ih-floating-editor-window .ih-floating-editor-save-label {
-    font-size: 12px;
-    white-space: nowrap;
-}
-
 .ih-floating-editor-window.is-preset-draft[data-save-state="dirty"] .ih-floating-editor-status,
 .ih-floating-editor-window.is-preset-draft[data-save-state="error"] .ih-floating-editor-status {
     color: var(--ih-fe-accent);

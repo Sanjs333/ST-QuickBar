@@ -1795,13 +1795,8 @@ export function createFloatingEditorTools({
     const redo = button(historyActions, 'redo', '重做', 'fa-rotate-right');
     const find = button(contextActions, 'find', '查找 / 替换（Ctrl/⌘+F）', 'fa-magnifying-glass');
     const color = isCss ? button(contextActions, 'color', '选择颜色', 'fa-eye-dropper') : null;
-    const save = typeof onSave === 'function' ? button(contextActions, 'save', '保存条目（仍需在酒馆保存预设）', 'fa-floppy-disk') : null;
-    if (save) {
-        const label = node('span', 'ih-floating-editor-save-label', save);
-        label.textContent = '保存条目';
-        save.classList.add('ih-floating-editor-save');
-        listen(save, 'click', () => { if (editable() && state.canSave) onSave(); });
-    }
+    const save = typeof onSave === 'function' ? button(contextActions, 'save', '保存条目，不关闭窗口（Ctrl/⌘+S；整份预设仍需在酒馆保存）', 'fa-floppy-disk') : null;
+    if (save) listen(save, 'click', () => { if (editable() && state.canSave) onSave(); });
     element.insertBefore(footer, element.querySelector(':scope > .ih-floating-editor-resize'));
     element.classList.add('has-edit-tools');
 
@@ -2183,7 +2178,7 @@ export function createFloatingEditorController({
 
   function editable(s) {
     const cm = s.characterDraft || s.presetDraft ? null : resolveCodeMirrorForSource(s.source);
-    return !s.characterDraft?.closing && !s.presetDraft?.saving && !s.composing && !s.sourceComposing && !cm?.composing &&
+    return !s.characterDraft?.closing && !s.presetDraft?.closing && !s.presetDraft?.saving && !s.composing && !s.sourceComposing && !cm?.composing &&
       !cm?.compositionStarted && !s.adapter.isReadOnly();
   }
 
@@ -2204,7 +2199,7 @@ export function createFloatingEditorController({
     const state = getHistoryState(s, false);
     if (state.readOnly) releaseColorOwner(s);
     s.tools?.update({ ...state, searchOpen: !!s.findOwner,
-      canSave: !!s.presetDraft && !s.presetDraft.saving && !s.composing && !s.invalid &&
+      canSave: !!s.presetDraft && !s.presetDraft.closing && !s.presetDraft.saving && !s.composing && !s.invalid &&
         (presetDraftDirty(s) || !!s.presetDraft.error),
     });
     const key = `${state.canUndo}/${state.canRedo}/${state.readOnly}`;
@@ -2677,9 +2672,9 @@ export function createFloatingEditorController({
     if (!draft) return;
     const dirty = presetDraftDirty(s);
     let state = dirty ? "dirty" : "saved";
-    let status = dirty ? "独立草稿 · 请点保存条目（Ctrl/⌘+S）" : "条目已同步 · 仍需保存预设";
+    let status = dirty ? "独立草稿 · 关闭时自动保存" : "条目已同步 · 仍需保存预设";
     if (draft.error) { state = "error"; status = draft.error; }
-    if (draft.saving) { state = "saving"; status = "正在保存条目，请稍候…"; }
+    if (draft.closing || draft.saving) { state = "saving"; status = draft.closing ? "正在保存并关闭…" : "正在保存条目，请稍候…"; }
     else if (!draft.error) {
       try { presetEntryStore.current(draft); }
       catch (error) { state = "dirty"; status = error.message + " 草稿可继续编辑，内容不会清空。"; }
@@ -2773,13 +2768,48 @@ export function createFloatingEditorController({
         draft.saving = false;
         draft.savePromise = null;
         if (sessions.get(s.id) === s) {
-          s.window.setReadOnly(s.invalid);
+          s.window.setReadOnly(s.invalid || draft.closing);
           updatePresetDraft(s);
           updateTools(s);
         }
       }
     })();
     return draft.savePromise;
+  }
+
+  function closePresetSession(s) {
+    const draft = s.presetDraft;
+    if (draft.closePromise) return draft.closePromise;
+    if (s.composing && !s.invalid) { s.composing = false; write(s, s.window.textarea.value); }
+    draft.closing = true;
+    s.window.setReadOnly(true);
+    updatePresetDraft(s);
+    updateTools(s);
+    draft.closePromise = (async () => {
+      try {
+        if (draft.saving) await draft.savePromise;
+        if (sessions.get(s.id) !== s) return true;
+        if (presetDraftDirty(s) || draft.error) await savePresetDraft(s);
+        if (sessions.get(s.id) !== s) return true;
+        if ((presetDraftDirty(s) || draft.error) && !win.confirm(
+          "「" + draft.name + " · " + draft.preset + "」自动保存未完成或发生冲突。取消关闭可保留草稿并重试；确定放弃并关闭？"
+        )) return false;
+        return closeSession(s, true);
+      } catch (error) {
+        draft.error = (error.message || "自动保存未完成。") + " 草稿已保留，请稍后重试。";
+        notify(draft.error);
+        return false;
+      } finally {
+        if (sessions.get(s.id) === s) {
+          draft.closing = false;
+          draft.closePromise = null;
+          s.window.setReadOnly(s.invalid);
+          updatePresetDraft(s);
+          updateTools(s);
+        }
+      }
+    })();
+    return draft.closePromise;
   }
 
   async function flushCharacterSave(s) {
@@ -2830,7 +2860,7 @@ export function createFloatingEditorController({
   }
 
   function canCloseSessions(list) {
-    if (list.some(s => s.characterDraft?.saving || s.characterDraft?.closing || s.presetDraft?.saving)) {
+    if (list.some(s => s.characterDraft?.saving || s.characterDraft?.closing || s.presetDraft?.saving || s.presetDraft?.closing)) {
       notify("编辑内容正在保存，请等待结果后再关闭。");
       return false;
     }
@@ -2841,6 +2871,7 @@ export function createFloatingEditorController({
   function closeSession(s, confirmed = false) {
     if (!s || !sessions.has(s.id)) return false;
     if (!confirmed && s.characterDraft) return closeCharacterSession(s);
+    if (!confirmed && s.presetDraft) return closePresetSession(s);
     if (!confirmed && !canCloseSessions([s])) return false;
     if (s.composing && !s.invalid) {
       s.composing = false;
@@ -2996,7 +3027,7 @@ export function createFloatingEditorController({
     } : null;
     const presetDraft = presetBinding && !adapter.isReadOnly() ? {
       ...presetBinding, sourceId: source.id, nativeValue: value,
-      saving: false, uncertain: false, error: "", savePromise: null, statusKey: "",
+      saving: false, closing: false, uncertain: false, error: "", savePromise: null, closePromise: null, statusKey: "",
     } : null;
     if (presetBinding && !presetDraft) { notify("原条目不可编辑，未创建悬浮草稿。"); return null; }
     if (characterDraft || presetDraft) adapter = createIndependentDraftAdapter(value, presetDraft ? "preset-draft" : "character-draft");

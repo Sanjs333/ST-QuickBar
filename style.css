@@ -1585,9 +1585,6 @@ textarea.ih-replace-input::-webkit-scrollbar {
 }
 .ih-floating-ball {
   position: fixed;
-  /* Must stay above the whole floating-editor stack: the window itself
-     (floating-editor.js MAX_LAYER = 10032), its targeted color picker (owner+1,
-     up to 10033) and its find bar (index.js, 10034). */
   z-index: 10040;
   border-radius: 50%;
   display: flex;
@@ -1698,8 +1695,6 @@ textarea.ih-replace-input::-webkit-scrollbar {
 }
 .ih-floating-panel {
   position: fixed;
-  /* Above the full floating-editor stack (window 10032 / color picker ≤10033 /
-     find bar 10034) and above the ball, keeping its old +2 lead over it. */
   z-index: 10042;
   background-color: var(--SmartThemeBlurTintColor);
   border: 1px solid var(--SmartThemeBorderColor);
@@ -2273,7 +2268,6 @@ body.ih-cp-selecting input::-moz-selection {
 .ih-mgr-tab i {
   font-size: 12px;
 }
-/* PC 显示图标 + 文字；移动端（<=768px）只显示图标 */
 @media (max-width: 768px) {
   .ih-mgr-tab span {
     display: none;
@@ -8537,7 +8531,6 @@ body.ih-cp-selecting input::-moz-selection {
   margin-top: 2px;
 }
 
-/* ===== 更新状态条 / 更新面板 ===== */
 @keyframes ih-update-spin {
   to {
     transform: rotate(360deg);
@@ -8957,4 +8950,9 @@ body.ih-no-anim *::after {
   animation-iteration-count: 1 !important;
   transition-duration: 0.001ms !important;
   transition-delay: 0ms !important;
+}
+.ih-editor-token-counter {
+  white-space: nowrap;
+  margin-inline-start: 0.4em;
+  flex: 0 0 auto;
 }

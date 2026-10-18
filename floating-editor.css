@@ -1,4 +1,3 @@
-/* Standalone floating editor; loaded separately from QuickBar's main styles. */
 .ih-floating-editor-window {
     --ih-fe-surface: var(--SmartThemeBlurTintColor, Canvas);
     --ih-fe-foreground: var(--SmartThemeBodyColor, CanvasText);
@@ -32,15 +31,12 @@
     overscroll-behavior: contain;
 }
 
-/* Inactive windows retain the full theme/text contrast; only the outline changes. */
 .ih-floating-editor-window.is-active {
     border-color: var(--ih-fe-accent);
     outline: 1px solid var(--ih-fe-accent);
     outline-offset: -1px;
 }
 
-/* With several windows open, dim inactive ones slightly so the writable
- * (active) window is obvious. The active window keeps full opacity. */
 .ih-floating-editor-window:not(.is-active) {
     opacity: 0.94;
 }
@@ -256,8 +252,6 @@
 }
 
 .ih-floating-editor-window.is-pinned > .ih-floating-editor-header {
-    /* Pinned, yet a deliberate header drag still moves the window (it re-locks
-       on release), so keep the grab affordance rather than a default cursor. */
     cursor: grab;
 }
 
@@ -287,9 +281,6 @@
     display: none !important;
 }
 
-/* Keep the launch icon immediately LEFT of the untouched native maximize.
-   A single flex item also prevents title_restorable's space-between from
-   distributing the two controls to different parts of the heading. */
 .ih-floating-editor-actions-pair {
     display: inline-flex;
     flex: 0 0 auto;
@@ -302,14 +293,10 @@
     vertical-align: middle;
 }
 
-/* Same native <i>/FA/right_menu_button appearance: no menu_button frame,
-   no custom accent/background on hover. Shared theme selectors keep working. */
 .ih-floating-editor-launch {
     cursor: pointer;
 }
 
-/* Explicit third-party integration keeps the host control in its original
-   parent (important for component frameworks); only add a preceding icon. */
 .ih-floating-editor-launch--external {
     flex: 0 0 auto;
     margin-inline-end: 4px;
@@ -320,8 +307,6 @@
     padding: 2px;
 }
 
-/* These are the host's editor_maximize-specific rules; deliberately do not
-   attach editor_maximize itself, which would invoke the native popup handler. */
 #character_popup .ih-floating-editor-launch {
     margin: 3px;
     opacity: 0.75;
@@ -338,15 +323,6 @@
     outline-offset: 2px;
 }
 
-/* World-info Content header fix.
-   That header is a 3-item `justify-content: space-between` row:
-   [Content + maximize] · [token counter] · [recursion options]. Our launch
-   button widens the first item, so space-between redistributes and shoves the
-   token counter toward the middle. Pin the token-counter cell to the left with
-   an auto end-margin so it stays put regardless of the first item's width.
-   Scoped to the world-info entry editor and gated on our injected pair, so no
-   other editor is touched — and this stylesheet only loads with QuickBar, so
-   vanilla ST (and installs without QuickBar) are unaffected. */
 .world_entry_edit label small > span.justifySpaceBetween:has(.ih-floating-editor-actions-pair)
     > span:has(> .world_entry_form_token_counter) {
     margin-inline-end: auto;
@@ -363,12 +339,10 @@
     }
 }
 
-/* UI-only footer: one quiet row below the editor, never in the title bar. */
 .ih-floating-editor-window.has-edit-tools > .ih-floating-editor-body {
     padding-bottom: 0;
 }
 
-/* The resize control now sits beside the footer, not over the text. */
 .ih-floating-editor-window.has-edit-tools .ih-floating-editor-textarea.text_pole {
     padding: 9px 10px;
 }
@@ -378,14 +352,12 @@
     flex: 0 0 auto;
     flex-wrap: nowrap;
     align-items: center;
-    /* History/undo/redo stay at the start; search/color stay beside resize. */
     justify-content: space-between;
     gap: 6px;
     box-sizing: border-box;
     min-width: 0;
     margin: 0;
     padding-block: 2px;
-    /* Reserve exactly one same-size target; centers match at every viewport. */
     padding-inline: 6px calc(var(--ih-fe-button-size) + 6px);
     border: 0;
     border-radius: 0;
@@ -401,8 +373,6 @@
 }
 
 .ih-floating-editor-window .ih-floating-editor-footer .ih-floating-editor-button {
-    /* Narrower than the hit-target size so adjacent icons sit close together;
-       height keeps the full target. */
     width: calc(var(--ih-fe-button-size) - 6px);
     height: var(--ih-fe-button-size);
     border: 0;
@@ -419,9 +389,6 @@
     display: none !important;
 }
 
-/* ── Change-history drill-down ── */
-/* Replaces the editor inside the window body (not an overlay): opening it hides
- * the textarea and this panel takes its place, so nothing shows through. */
 .ih-floating-editor-window .ih-floating-editor-history {
     display: flex;
     flex: 1 1 auto;
@@ -441,8 +408,6 @@
     display: none;
 }
 
-/* While history is open, its own toggle (now the footer's first control) stays
-   visible as the back control; the remaining edit tools step aside. */
 .ih-floating-editor-window.is-history-open > .ih-floating-editor-body > .ih-floating-editor-textarea {
     display: none;
 }
@@ -453,9 +418,6 @@
     display: none !important;
 }
 
-/* ── Markdown preview ── */
-/* Read-only rendered view. Like history, it replaces the textarea inside the
- * body rather than floating over it, so the editor is fully hidden while open. */
 .ih-floating-editor-window .ih-floating-editor-preview {
     flex: 1 1 auto;
     box-sizing: border-box;
@@ -484,7 +446,6 @@
     outline-offset: -1px;
 }
 
-/* While preview is open, the editor and its edit toolbar step aside. */
 .ih-floating-editor-window.is-preview-open > .ih-floating-editor-body > .ih-floating-editor-textarea {
     display: none;
 }
@@ -493,8 +454,6 @@
     display: none !important;
 }
 
-/* Rendered-content spacing: keep headings/lists/quotes readable without
-   overriding the host theme's own typography. */
 .ih-floating-editor-window .ih-floating-editor-preview > :first-child {
     margin-top: 0;
 }
@@ -503,15 +462,12 @@
     margin-bottom: 0;
 }
 
-/* Lists: the UA default indent (~40px) looks cavernous in a narrow window.
-   Pull it back to a tidy, consistent step and keep item spacing calm. */
 .ih-floating-editor-window .ih-floating-editor-preview :is(ul, ol) {
     margin-block: 6px;
     padding-inline-start: 1.5em;
 }
 
 .ih-floating-editor-window .ih-floating-editor-preview :is(ul, ol) :is(ul, ol) {
-    /* Nested lists only need one more small step, not another full indent. */
     margin-block: 2px;
     padding-inline-start: 1.25em;
 }
@@ -521,11 +477,9 @@
 }
 
 .ih-floating-editor-window .ih-floating-editor-preview li > p {
-    /* showdown wraps loose list items in <p>; don't let that add big gaps. */
     margin-block: 2px;
 }
 
-/* Headings: trim the oversized UA margins so they sit snug with their text. */
 .ih-floating-editor-window .ih-floating-editor-preview :is(h1, h2, h3, h4, h5, h6) {
     margin-block: 10px 4px;
     line-height: 1.3;
@@ -550,7 +504,6 @@
     height: auto;
 }
 
-/* Inline code: a subtle chip so it reads as code without a heavy box. */
 .ih-floating-editor-window .ih-floating-editor-preview :not(pre) > code {
     padding: 1px 5px;
     border-radius: 4px;
@@ -702,9 +655,6 @@
     word-break: break-word;
 }
 
-/* Both sides of a change remain visible. Deleted text is a preview overlay,
- * not part of the state that will be restored. Symbols/strike-through also
- * distinguish the two without relying solely on color. */
 .ih-floating-editor-window .ih-floating-editor-history-added,
 .ih-floating-editor-window .ih-floating-editor-history-removed {
     border-radius: 2px;
@@ -745,7 +695,6 @@
     align-items: center;
     justify-content: flex-end;
     gap: 4px 8px;
-    /* Reserve the resize handle's width at every theme/touch size and in RTL. */
     padding-inline-end: calc(var(--ih-fe-button-size) + 8px);
 }
 
@@ -795,14 +744,67 @@
     outline-offset: 2px;
 }
 
-/* Collapsing hides the whole body, history panel included. */
 .ih-floating-editor-window.is-collapsed .ih-floating-editor-history {
     display: none !important;
 }
 
 
-/* Autosave status only; the footer uses the same controls as other editors. */
 .ih-floating-editor-window.is-character-draft[data-save-state="dirty"] .ih-floating-editor-status,
 .ih-floating-editor-window.is-character-draft[data-save-state="error"] .ih-floating-editor-status {
     color: var(--ih-fe-accent);
+}
+
+.ih-floating-editor-window .ih-floating-editor-button.ih-floating-editor-save {
+    width: auto;
+    min-width: var(--ih-fe-button-size);
+    gap: 5px;
+    padding-inline: 8px;
+    flex: 0 0 auto;
+}
+
+.ih-floating-editor-window .ih-floating-editor-save-label {
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.ih-floating-editor-window.is-preset-draft[data-save-state="dirty"] .ih-floating-editor-status,
+.ih-floating-editor-window.is-preset-draft[data-save-state="error"] .ih-floating-editor-status {
+    color: var(--ih-fe-accent);
+}
+
+.ih-floating-editor-window .ih-floating-editor-title-row {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+    font-size: 13px;
+}
+
+.ih-floating-editor-window .ih-floating-editor-title-row > .ih-floating-editor-title {
+    min-width: 0;
+    flex: 0 1 auto;
+}
+
+.ih-floating-editor-window .ih-floating-editor-details-row {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+    gap: 6px;
+    font-size: 13px;
+}
+
+.ih-floating-editor-window .ih-floating-editor-token-mount {
+    flex: 0 0 auto;
+}
+
+.ih-floating-editor-window .ih-floating-editor-token-mount:empty {
+    display: none;
+}
+
+.ih-floating-editor-window .ih-floating-editor-token-mount > .ih-editor-token-counter {
+    margin-inline-start: 0;
+}
+
+.ih-floating-editor-window .ih-floating-editor-details-row > .ih-floating-editor-status {
+    flex: 1 1 auto;
+    min-width: 0;
 }

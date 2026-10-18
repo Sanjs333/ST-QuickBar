@@ -1,9 +1,4 @@
-/**
- * ST-QuickBar floating editor: adapters, history, window UI and session lifecycle.
- * Dependency-free ESM; styles are loaded separately from floating-editor.css.
- */
 
-// ── Source adapters ──
 
 const HIGH_SURROGATE_START = 0xd800;
 const HIGH_SURROGATE_END = 0xdbff;
@@ -23,12 +18,6 @@ function splitsSurrogatePair(text, offset) {
     isHighSurrogate(text.charCodeAt(offset - 1)) && isLowSurrogate(text.charCodeAt(offset));
 }
 
-/**
- * Compute a single minimal contiguous change turning `before` into `after`.
- * Offsets are UTF-16 code unit indices (matching DOM/CodeMirror positions).
- * Boundaries never split a surrogate pair, so astral characters stay intact.
- * Identical input yields a {from:0,to:0,insert:""} no-op.
- */
 export function minimalTextChange(before, after) {
   before = String(before);
   after = String(after);
@@ -42,7 +31,6 @@ export function minimalTextChange(before, after) {
   while (start < commonMax && before.charCodeAt(start) === after.charCodeAt(start)) {
     start++;
   }
-  // Never cut between a high surrogate and the low surrogate that follows it.
   if (splitsSurrogatePair(before, start) || splitsSurrogatePair(after, start)) {
     start--;
   }
@@ -57,7 +45,6 @@ export function minimalTextChange(before, after) {
     endBefore--;
     endAfter--;
   }
-  // Keep a leading low surrogate of the matched suffix paired with its high half.
   if (splitsSurrogatePair(before, endBefore) || splitsSurrogatePair(after, endAfter)) {
     endBefore++;
     endAfter++;
@@ -66,15 +53,10 @@ export function minimalTextChange(before, after) {
   return { from: start, to: endBefore, insert: after.slice(start, endAfter) };
 }
 
-/* ------------------------------------------------------------------ *
- * CodeMirror 6 resolution (scoped to one source, never a neighbor's). *
- * ------------------------------------------------------------------ */
-
 function hasClass(el, name) {
   return !!(el && el.classList && el.classList.contains(name));
 }
 
-// A live EditorView must still own this exact contentDOM and be usable.
 function validateView(view, content) {
   try {
     if (
@@ -89,16 +71,12 @@ function validateView(view, content) {
       return view;
     }
   } catch (e) {
-    /* fall through to null */
   }
   return null;
 }
 
-// Resolve a view from a `.cm-content` node, trying the legacy BaiBai bridge
-// (`cmView.view` / `cmView.rootView.view`) first, then the newer `cmTile.root.view`.
 function resolveViewFromContent(content) {
   if (!content) return null;
-  // A stale legacy bridge must not hide a valid modern one (or vice versa).
   for (const getView of [
     () => content.cmView && content.cmView.view,
     () => content.cmView && content.cmView.rootView && content.cmView.rootView.view,
@@ -108,15 +86,11 @@ function resolveViewFromContent(content) {
       const view = validateView(getView(), content);
       if (view) return view;
     } catch (e) {
-      /* A detached bridge can throw; still try the remaining bridges. */
     }
   }
   return null;
 }
 
-// Resolve the view when `el` itself lives inside a `.cm-editor` subtree. The
-// walk stops at the first CodeMirror boundary, so it only ever returns the
-// editor that genuinely contains `el`.
 function resolveViewFromCmTree(el) {
   let node = el;
   while (node) {
@@ -133,12 +107,9 @@ function resolveViewFromCmTree(el) {
   return null;
 }
 
-// These integrations insert a dedicated host AFTER the backing control. Never
-// inspect a previous editor or arbitrary sibling/ancestor descendants: in
-// [textarea A, editor A, textarea B], editor A does not belong to B.
 const CM_HOST_CLASSES = [
   "cm-editor",
-  "codemirror-host", // SillyTavern Extension-CodeMirror
+  "codemirror-host",
   "bai-bai-toolkit-description-codemirror-editor",
   "bai-bai-toolkit-custom-css-codemirror-editor",
 ];
@@ -158,7 +129,7 @@ function isCmHost(el) {
 function resolveViewFromHost(host) {
   if (!host || !host.querySelectorAll) return null;
   const editors = hasClass(host, "cm-editor") ? [host] : host.querySelectorAll(".cm-editor");
-  if (editors.length !== 1) return null; // loading, unknown, or ambiguous host
+  if (editors.length !== 1) return null;
   const content = editors[0].querySelector(".cm-content");
   const view = resolveViewFromContent(content);
   return view && view.dom === editors[0] ? view : null;
@@ -176,13 +147,6 @@ function findAdjacentTextarea(editor) {
     resolveViewFromHost(host)?.dom === editor ? backing : null;
 }
 
-/**
- * Resolve the live CodeMirror EditorView bound to `source`, or null. Handles
- * both "source is (inside) the editor DOM" and "source is a hidden textarea
- * whose immediately following, recognized wrapper hosts the editor". Re-resolves
- * on every call, so a replaced view is picked up live. Never guesses ownership
- * from arbitrary ancestor descendants or a preceding editor.
- */
 export function resolveCodeMirrorForSource(source) {
   const el = normalizeElement(source);
   if (!el) return null;
@@ -198,8 +162,6 @@ export function resolveCodeMirrorForSource(source) {
   }
   return null;
 }
-
-/* --------------------------- DOM helpers --------------------------- */
 
 function normalizeElement(source) {
   if (!source) return null;
@@ -223,8 +185,6 @@ function isContentEditableElement(el) {
   return attr === "" || attr === "true" || attr === "plaintext-only";
 }
 
-// Dispatch a bubbling native "input" event in the element's own realm so the
-// host page (and SillyTavern's save handlers) react exactly as for a real edit.
 function dispatchNativeInput(el) {
   if (!el || typeof el.dispatchEvent !== "function") return;
   const doc = el.ownerDocument;
@@ -237,17 +197,11 @@ function dispatchNativeInput(el) {
       bubbles: true, composed: true, inputType: "insertReplacementText", data: null,
     });
   } catch (e) {
-    // Older webviews may expose InputEvent without allowing construction. DOM
-    // dispatchEvent requires a real Event, never a plain object lookalike.
     event = new EventCtor("input", { bubbles: true, composed: true });
   }
   el.dispatchEvent(event);
 }
 
-/* --------------------------- Source analysis ----------------------- */
-
-// Describe the current editor shape for `source`. Recomputed on every call so a
-// view that was swapped out (CM re-created) is re-resolved live.
 function analyzeSource(source) {
   const el = normalizeElement(source);
   if (!el) return { kind: "unsupported", el: null, backing: null, view: null };
@@ -261,9 +215,6 @@ function analyzeSource(source) {
     return { kind: "codemirror", el, backing, view };
   }
 
-  // A CodeMirror DOM is present but no supported view resolved: this source is
-  // hijacked by an editor we do not understand. Refuse rather than clobber the
-  // (now stale) hidden textarea behind it.
   const cmHost = (el.closest && el.closest(CM_HOST_CLASSES.map((name) => `.${name}`).join(","))) ||
     findAdjacentCmEditor(el);
   if (cmHost || CM_SOURCE_CLASSES.some((name) => hasClass(el, name))) {
@@ -278,8 +229,6 @@ function analyzeSource(source) {
   }
   return { kind: "unsupported", el, backing: null, view: null };
 }
-
-/* --------------------------- Read / state -------------------------- */
 
 function readValue(info) {
   if (info.kind === "codemirror" && info.view) {
@@ -296,7 +245,6 @@ function isReadOnly(info) {
     try {
       if (info.view.state && info.view.state.readOnly) return true;
     } catch (e) {
-      /* ignore */
     }
     const content = info.view.contentDOM;
     if (
@@ -328,10 +276,6 @@ function adapterConnected(source, info) {
   return true;
 }
 
-/* --------------------------- Writers ------------------------------- */
-
-// Map a stored caret/anchor offset across a change the way setRangeText's
-// 'preserve' mode would, so fallback writes keep the source's own selection.
 function mapOffset(pos, change, newLength, isEnd = false) {
   const delta = change.insert.length - (change.to - change.from);
   let next;
@@ -356,7 +300,6 @@ function writeNative(info, after, change, options) {
       el.setRangeText(change.insert, change.from, change.to, "preserve");
       usedRange = true;
     } catch (e) {
-      // e.g. <input type=email> has this method, but it does not apply.
       if (e.name !== "InvalidStateError") throw e;
     }
   }
@@ -372,16 +315,11 @@ function writeNative(info, after, change, options) {
         );
       }
     } catch (e) {
-      /* Selection APIs do not apply to every input type. */
     }
   }
   try {
     dispatchNativeInput(el);
   } finally {
-    // An unfocused native textarea at its origin stays there after a range
-    // edit. Even assigning scrollTop=0 forces Chromium to lay out every line
-    // synchronously, making long source fields stall the floating editor.
-    // Still preserve nonzero scroll positions and explicitly focused writes.
     if (scrollTop || scrollLeft || impose || el.ownerDocument.activeElement === el) {
       el.scrollTop = scrollTop;
       el.scrollLeft = scrollLeft;
@@ -393,7 +331,6 @@ function writeContentEditable(info, after) {
   const el = info.backing;
   const scrollTop = el.scrollTop;
   const scrollLeft = el.scrollLeft;
-  // Plain text only — never assign HTML into a contenteditable surface.
   el.textContent = after;
   el.scrollTop = scrollTop;
   el.scrollLeft = scrollLeft;
@@ -405,14 +342,9 @@ function writeCodeMirror(info, before, change, options) {
   const spec = { changes: { from: change.from, to: change.to, insert: change.insert } };
   if (options.userEvent) spec.userEvent = options.userEvent;
   if (options.addToHistory === false) {
-    // Get the public Transaction annotation from this view's own CM bundle.
-    // Importing another @codemirror/state copy would create an incompatible type.
-    // A session-history fallback must never add its inverse edit to a native stack.
     const Transaction = view.state.update({ filter: false }).constructor;
     spec.annotations = Transaction.addToHistory.of(false);
   }
-  // Default: do not move the selection or scroll the editor into view. Only
-  // honor an explicitly requested selection; otherwise CM maps the existing one.
   if (options.selection) {
     spec.selection = { anchor: options.selection.from, head: options.selection.to };
   }
@@ -423,8 +355,6 @@ function writeCodeMirror(info, before, change, options) {
 function notifyCodeMirrorChange(info, before, change) {
   const view = info.view;
   const backing = info.backing;
-  // Native listeners cannot see jQuery-only .trigger("input"). Observe both
-  // paths synchronously, without taking over the integration's saving logic.
   let emittedValue;
   const onInput = (event) => {
     if (event.target === backing) emittedValue = backing.value;
@@ -441,8 +371,6 @@ function notifyCodeMirrorChange(info, before, change) {
     if (observeJquery) jqBacking.off("input", onInput);
   }
 
-  // Transaction filters can reject/normalize changes. Only the resulting CM
-  // document is authoritative, never the requested string or stale textarea.
   const actual = view.state.doc.toString();
   if (actual === before) return;
   if (backing && elementConnected(backing) && !view.destroyed &&
@@ -452,9 +380,6 @@ function notifyCodeMirrorChange(info, before, change) {
   }
 }
 
-/** Invoke the attached CM's own keymap/history, not an inverse edit which
- * would itself create another undo entry. No focus change and no global hotkey.
- */
 function performHistory(source, direction) {
   const info = analyzeSource(source);
   if (info.kind !== "codemirror" || !adapterConnected(source, info) || isReadOnly(info) ||
@@ -474,8 +399,6 @@ function performHistory(source, direction) {
   const markReached = () => { reachedEditor = true; };
   const stop = event => event.stopPropagation();
   notifyCodeMirrorChange(info, before, () => {
-    // Registered after CM's handlers on this DOM element: let its keymap run,
-    // then prevent unrelated document-level shortcuts from processing the event.
     view.contentDOM.addEventListener("keydown", markReached);
     view.dom.addEventListener("keydown", stop);
     try {
@@ -486,14 +409,8 @@ function performHistory(source, direction) {
     }
   });
   const value = readValue(info);
-  // CM's standard history bindings preventDefault even when the stack is empty.
-  // BaiBai omits history AND its keymap for large documents; distinguish that
-  // unhandled command from an exhausted/blocked native history. A command that
-  // never reached the editor is not permission to fall back to an inverse edit.
   return { changed: value !== before, value, unhandled: reachedEditor && !event.defaultPrevented };
 }
-
-/* --------------------------- Public adapter ------------------------ */
 
 const ERR = "[ST-QuickBar floating editor]";
 
@@ -530,42 +447,6 @@ function performWrite(source, text, options) {
   return { changed: value !== current, value };
 }
 
-/**
- * Create a bounded adapter over the editor bound to `source`.
- *
- * Returned shape:
- *   source                  the original source element passed in
- *   get kind()              "codemirror" | "textarea" | "input" |
- *                           "contenteditable" | "unsupported"
- *   read()                  current text (CM doc / value / textContent)
- *   write(text, options={}) -> { changed, value }; options may carry
- *                           `userEvent`, `selection` ({from,to}), and
- *                           `addToHistory: false` (CM session-history fallback).
- *                           By default
- *                           native/CM selection is mapped over the edit, with no
- *                           floating-side selection imposed. No focus or CM scroll
- *                           request; history stays in the existing CM state. Throws
- *                           for disconnected, read-only, unsupported, or composing
- *                           CM sources. `value` is the actual accepted text and
- *                           `changed` compares it with the pre-write text (filters
- *                           may reject edits). A text no-op emits no input.
- *                           Native IME and cross-editor conflicts are caller-owned;
- *                           plain contenteditable is text-only, not rich-text or
- *                           selection/history preserving.
- *   history(direction)      Invoke CM's native undo/redo. Returns {changed,value}
- *                           plus `unhandled` only after probing its keymap; an
- *                           unhandled no-op permits session-history fallback.
- *   getRevision()           CM state.doc object, or the native string value
- *   getSelection()          { from, to } in UTF-16 offsets, or null
- *   isReadOnly()            boolean
- *   isConnected()           boolean
- *
- * Successful writes notify the backing field through the host's `input` path.
- * A synchronous native or jQuery-only integration notification is not duplicated;
- * without one, this adapter updates the backing value and emits native `input`.
- * Async/debounced integration notifications cannot be deduplicated here without
- * owning scheduling. This is not a save API: the host owns persistence/debouncing.
- */
 export function createFloatingEditorAdapter(source) {
   return {
     source,
@@ -608,15 +489,8 @@ export function createFloatingEditorAdapter(source) {
   };
 }
 
-// ── Session history ──
-
-/** Session-only patch history: at most 50 entries / 2M retained code units.
- * Does not intercept another editor's undo stack or store full text per step.
- */
 export function createFloatingEditorHistory(initial, { maxEntries = 50, maxChars = 2_000_000 } = {}) {
   let current = String(initial), entries = [], pointer = 0, lastAt = 0;
-  // Timestamp of the retained baseline (state 0). Advances as trim() drops the
-  // oldest entry; the change history panel reads it as the baseline row's time.
   let baselineAt = Date.now();
   const selection = value => value ? { from: value.from, to: value.to } : null;
   function apply(text, entry, undo) {
@@ -629,8 +503,6 @@ export function createFloatingEditorHistory(initial, { maxEntries = 50, maxChars
     let size = entries.reduce((total, e) => total + e.remove.length + e.insert.length, 0);
     while (entries.length && (entries.length > maxEntries || size > maxChars)) {
       const old = entries.shift(); size -= old.remove.length + old.insert.length; pointer = Math.max(0, pointer - 1);
-      // The dropped entry's result becomes the new baseline; carry its time so
-      // the panel's baseline row reflects the oldest retained state.
       baselineAt = old.at;
     }
   }
@@ -666,7 +538,6 @@ export function createFloatingEditorHistory(initial, { maxEntries = 50, maxChars
   function accept(value, direction) {
     value = String(value);
     if (value === current) return false;
-    // CM may group several contiguous native transactions into one undo step.
     const directions = direction ? [direction] : ["undo", "redo"];
     for (const dir of directions) {
       let candidate = current;
@@ -685,8 +556,6 @@ export function createFloatingEditorHistory(initial, { maxEntries = 50, maxChars
       }
     }
     if (direction === "undo") {
-      // A native history group may cross the opening baseline. Preserve a
-      // known redo marker, without fabricating a new CM transaction.
       const before = current;
       entries = []; pointer = 0; current = value; baselineAt = Date.now();
       record(before); pointer = 0; current = value; lastAt = 0; return true;
@@ -697,10 +566,6 @@ export function createFloatingEditorHistory(initial, { maxEntries = 50, maxChars
     if (direction === "undo") { entries.splice(0, pointer); pointer = 0; }
     else entries.length = pointer;
   }
-  // Reconstruct the full text at state `index` (0 = retained baseline,
-  // entries.length = newest) by replaying diffs from the current pointer. Pure
-  // read: never mutates current/pointer. Returns null if a diff no longer lines
-  // up (e.g. the retained window was trimmed under it).
   function textAt(index) {
     index = Math.max(0, Math.min(entries.length, Math.trunc(index)));
     let text = current;
@@ -711,9 +576,6 @@ export function createFloatingEditorHistory(initial, { maxEntries = 50, maxChars
     }
     return text;
   }
-  // One row per reachable state for the change-history panel. Row 0 is the
-  // retained baseline; row i>0 is produced by entries[i-1]. `insert`/`remove`
-  // are code-unit counts; `at` is the change's timestamp.
   function list() {
     const rows = [{ index: 0, at: baselineAt, insert: 0, remove: 0, from: null }];
     for (let i = 0; i < entries.length; i++) {
@@ -722,9 +584,6 @@ export function createFloatingEditorHistory(initial, { maxEntries = 50, maxChars
     }
     return { entries: rows, position: pointer };
   }
-  // The actual diff that produced state `index` (1..entries.length), for diff
-  // highlighting in the preview. Returns {from, remove, insert} strings, or null
-  // for the baseline (index 0) and out-of-range indices.
   function changeAt(index) {
     index = Math.trunc(index);
     if (!Number.isFinite(index) || index <= 0 || index > entries.length) return null;
@@ -738,10 +597,6 @@ export function createFloatingEditorHistory(initial, { maxEntries = 50, maxChars
     get retainedChars() { return entries.reduce((sum, e) => sum + e.remove.length + e.insert.length, 0); } };
 }
 
-/** Debounced inspection history, separate from the editor's undo stack.
- * Only the latest pending string is retained; diffing happens once at commit.
- * A long uninterrupted edit gets a checkpoint every 30s, not every keystroke.
- */
 export function createFloatingEditorTimeline(initial, {
   delay = 3000, maxWait = 30000, clock = globalThis, onCommit,
   Diff = globalThis.diff_match_patch, ...limits
@@ -759,8 +614,6 @@ export function createFloatingEditorTimeline(initial, {
     const next = pending;
     pending = null;
     if (disposed || !next || !history.record(next.value, { at: next.at })) return false;
-    // Count actual inserted/deleted text, not the unchanged middle of a
-    // coalesced patch. This bounded diff runs at commit, never per keystroke.
     const regions = floatingEditorChangeRegions(history.changeAt(history.position), Diff);
     summaries.push(regions.reduce((sum, region) => ({
       insert: sum.insert + region.insert.length, remove: sum.remove + region.remove.length,
@@ -797,10 +650,6 @@ export function createFloatingEditorTimeline(initial, {
   };
 }
 
-/** Split a retained patch into independent visual change locations on demand.
- * SillyTavern supplies diff_match_patch; no extra module/download is required.
- * Bound expensive comparisons and fall back to a valid coarse replacement.
- */
 export function floatingEditorChangeRegions(change, Diff = globalThis.diff_match_patch) {
   if (!change || !Number.isInteger(change.from) || change.from < 0 ||
       typeof change.remove !== 'string' || typeof change.insert !== 'string') return [];
@@ -829,7 +678,6 @@ export function floatingEditorChangeRegions(change, Diff = globalThis.diff_match
         region.to = newPos;
       }
     }
-    // DMP compares UTF-16 units. Expand/merge boundaries that bisect emoji.
     const normalized = [];
     for (const range of ranges) {
       if (splitsSurrogatePair(remove, range.oldFrom) || splitsSurrogatePair(insert, range.from)) {
@@ -849,8 +697,6 @@ export function floatingEditorChangeRegions(change, Diff = globalThis.diff_match
   } catch { return fallback(); }
 }
 
-// ── Window layout and interaction ──
-
 let nextWindowId = 0;
 const MIN_WIDTH = 280;
 const MIN_HEIGHT = 180;
@@ -859,7 +705,6 @@ const MIN_LAYER = 10030;
 const MAX_LAYER = 10032;
 const layoutHubs = new WeakMap();
 
-/** One viewport listener set and one pending-layout frame per owning document. */
 function registerLayoutPanel(document, panel) {
     let hub = layoutHubs.get(document);
     if (!hub) {
@@ -883,14 +728,12 @@ function registerLayoutPanel(document, panel) {
             for (const current of panels) schedule(current);
         }
         function flushGeometry() {
-            // A callback may synchronously close another registered panel.
             for (const current of [...panels]) if (panels.has(current)) current.flushGeometry();
         }
         function onVisibilityChange() {
             if (document.hidden) flushGeometry();
         }
         function onScroll(event) {
-            // Editor/search scrolling cannot move any panel's containing block.
             for (const current of panels) if (current.element.contains(event.target)) return;
             for (const current of panels) {
                 if (event.target === document || event.target?.contains?.(current.element)) schedule(current);
@@ -952,10 +795,6 @@ const SOURCE_STYLES = {
 };
 const SOURCE_ATTRIBUTES = ['spellcheck', 'autocapitalize', 'autocorrect', 'autocomplete', 'wrap', 'dir', 'lang'];
 
-/** Keep floating controls out of host "click outside" dismissal handlers.
- * Bubble only: target/default behavior and document capture (drag/focus tracking)
- * remain intact. Never block input/change/composition/keyboard/move events.
- */
 export function bindFloatingEditorInteractionBoundary(element) {
     const types = ['click', 'dblclick', 'auxclick', 'contextmenu', 'mousedown', 'mouseup',
         'pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel'];
@@ -968,36 +807,10 @@ export function bindFloatingEditorInteractionBoundary(element) {
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
 const text = value => String(value ?? '');
-// Escape text for safe insertion when no sanitizer/converter is available.
 const escapeHtml = value => text(value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-/**
- * @param {object} options Window options; all callbacks are optional.
- * @param {Document} [options.document=globalThis.document] Owning document.
- * @param {Element} [options.source] Editor used for theme, capabilities, and dialog host.
- * @param {string} [options.title] Accessible window/editor title.
- * @param {string} [options.value] Initial text, not automatically read from source.
- * @param {function(string, InputEvent): void} [options.onInput] Native input notification.
- * @param {function(CompositionEvent): void} [options.onCompositionStart] IME start.
- * @param {function(string, CompositionEvent): void} [options.onCompositionEnd] IME end.
- * @param {function(): void} [options.onClose] Close request; controller calls destroy.
- * @param {function(): ({entries: Array, position: number}|null)} [options.requestHistory]
- *   Snapshot of reachable states for the change-history panel. Null means the
- *   session can no longer report history (locked/invalid); the panel stays closed.
- * @param {function(): void} [options.onHistoryOpen] Flush pending edits before opening history.
- * @param {function(number): (string|null)} [options.previewHistory] Full text at a state
- *   index, for read-only preview. Null means that state is no longer reconstructable.
- * @param {function(number): ({from: number, remove: string, insert: string}|null)} [options.changeHistory]
- *   The diff that produced a state, for highlighting the changed region in the
- *   preview. Null for the baseline/out-of-range (nothing to highlight).
- * @param {function(number): boolean} [options.revertHistory] Write the editor back to the
- *   given state index. Returns whether the revert was accepted.
- * @param {object|null} [options.geometry] Last expanded viewport position and preferred size.
- * @param {function(object): void} [options.onGeometryChange] User gesture-end save, never automatic layout.
- * @returns {object} DOM references and silent UI setters; destroy never calls onClose.
- */
 export function createFloatingEditorWindow({
     document = globalThis.document,
     source,
@@ -1032,24 +845,15 @@ export function createFloatingEditorWindow({
     let host = null;
     let observer = null;
     let copiedAttributes = [];
-    // Change-history drill-down state. historyOpen tracks whether the panel has
-    // replaced the editor; the selected row index (null = none) drives preview
-    // + the revert button. baseTitle is restored to the title bar on close.
     let historyOpen = false;
     let historySelected = null;
-    // Markdown preview is a read-only overlay toggled from the header. Like the
-    // history drill-down it replaces the textarea inside the body; it never
-    // writes text back and is only offered when the controller sets canPreview.
     let previewOpen = false;
     let baseTitle = '悬浮编辑';
-    // Memoize list structure and preview so repeated refresh requests do not
-    // rebuild DOM or reconstruct unchanged text. Polling never renders history.
     let historySignature = null;
     let lastPreviewIndex = null;
     let lastPreviewKey = null;
     let previewValueKey = null;
     let previewText = '', previewRegions = [], previewRegionIndex = -1;
-    // Keep the preferred size across keyboard/viewport shrinkage and collapsing.
     const preferred = { x: null, y: null, width: 640, height: 440 };
     const finite = value => typeof value === "number" && Number.isFinite(value);
     if (geometry && typeof geometry === "object") {
@@ -1068,7 +872,6 @@ export function createFloatingEditorWindow({
     element.setAttribute('aria-modal', 'false');
     element.setAttribute('aria-labelledby', `${id}-title`);
     element.tabIndex = -1;
-    // Only geometry is hardened inline; colors and typography remain themeable.
     for (const [property, val] of Object.entries({ position: 'fixed', inset: 'auto', margin: '0', transform: 'none', translate: 'none' })) {
         element.style.setProperty(property, val, 'important');
     }
@@ -1093,7 +896,15 @@ export function createFloatingEditorWindow({
     statusElement.setAttribute('aria-live', 'polite');
     statusElement.setAttribute('aria-atomic', 'true');
     statusElement.hidden = true;
-    heading.append(titleElement, statusElement);
+    const titleRow = document.createElement('div');
+    titleRow.className = 'ih-floating-editor-title-row';
+    titleRow.append(titleElement);
+    const detailsRow = document.createElement('div');
+    detailsRow.className = 'ih-floating-editor-details-row';
+    const tokenMount = document.createElement('span');
+    tokenMount.className = 'ih-floating-editor-token-mount';
+    detailsRow.append(tokenMount, statusElement);
+    heading.append(titleRow, detailsRow);
     const actions = document.createElement('div');
     actions.className = 'ih-floating-editor-actions';
     header.append(grip, heading, actions);
@@ -1125,9 +936,6 @@ export function createFloatingEditorWindow({
     collapseButton.setAttribute('aria-pressed', 'false');
     collapseButton.setAttribute('aria-expanded', 'true');
     collapseButton.setAttribute('aria-controls', `${id}-body`);
-    // The change-history toggle lives in the footer (mounted by the tools
-    // module as its first control), not the header. It is created detached here
-    // so setHistoryOpen keeps owning its glyph/pressed/back-label state.
     const historyButton = makeButton('history', '变更历史', 'fa-clock-rotate-left', document.createElement('div'));
     historyButton.setAttribute('aria-pressed', 'false');
     historyButton.setAttribute('aria-expanded', 'false');
@@ -1139,16 +947,12 @@ export function createFloatingEditorWindow({
     body.className = 'ih-floating-editor-body';
     body.id = `${id}-body`;
     const textarea = document.createElement('textarea');
-    // Intentionally no maximized_textarea, ih-floating-panel, or ih-dialog-overlay.
     textarea.className = 'text_pole ih-floating-editor-textarea';
     textarea.setAttribute('aria-labelledby', titleElement.id);
     textarea.setAttribute('aria-describedby', statusElement.id);
     textarea.value = text(value);
     body.append(textarea);
 
-    // Markdown preview surface. Read-only, sanitized, and hidden until toggled.
-    // Opening it hides the textarea (via is-preview-open) the same way history
-    // does; it only renders — it never feeds text back into the editor.
     const previewPanel = document.createElement('div');
     previewPanel.className = 'ih-floating-editor-preview';
     previewPanel.id = `${id}-preview`;
@@ -1157,12 +961,6 @@ export function createFloatingEditorWindow({
     previewPanel.setAttribute('aria-label', 'Markdown 预览');
     previewPanel.tabIndex = 0;
     body.append(previewPanel);
-    // Change-history drill-down. Lives inside the body and replaces the editor
-    // when open (the textarea/edit tools hide via is-history-open); it never
-    // leaves the window. The footer's history button (its first control)
-    // doubles as the back control, so the panel has no bar of its own. UI only
-    // — the controller owns the text, snapshots, preview reconstruction and the
-    // actual revert.
     const historyPanel = document.createElement('div');
     historyPanel.className = 'ih-floating-editor-history';
     historyPanel.id = `${id}-history`;
@@ -1245,8 +1043,6 @@ export function createFloatingEditorWindow({
         if (destroyed) return;
         const bounds = viewport();
         box.width = Math.min(bounds.width, Math.max(MIN_WIDTH, preferred.width));
-        // A scaled dialog also scales its header; use its visible height so a
-        // collapsed window never clips the buttons or status line.
         const rendered = element.getBoundingClientRect();
         const renderedScale = element.offsetHeight ? rendered.height / element.offsetHeight : 1;
         const chrome = view.getComputedStyle(element);
@@ -1257,8 +1053,6 @@ export function createFloatingEditorWindow({
         box.y = clamp(preferred.y ?? box.y, bounds.y, bounds.y + bounds.height - box.height);
         writeBox(box.x, box.y, box.width, box.height);
 
-        // Translated/scaled dialog ancestors (also filter/backdrop-filter) can
-        // establish a fixed containing block. Compensate without altering them.
         const rect = element.getBoundingClientRect();
         const scaleX = rect.width / box.width;
         const scaleY = rect.height / box.height;
@@ -1296,8 +1090,6 @@ export function createFloatingEditorWindow({
     }
 
     function guardDialogCancel(event) {
-        // Escape must not dismiss the enclosing native modal as a side effect,
-        // including when the IME consumes Escape without a regular keydown.
         if (event.target !== host || !element.contains(document.activeElement)) return;
         event.preventDefault();
         event.stopPropagation();
@@ -1311,8 +1103,6 @@ export function createFloatingEditorWindow({
     function setCollapsed(next) {
         if (destroyed || collapsed === next) return;
         endGesture();
-        // Collapsing hides the body; close the history panel or preview so
-        // reopening the window lands back on the editor, not a stale overlay.
         if (next && historyOpen) setHistoryOpen(false);
         if (next && previewOpen) setPreviewOpen(false);
         const hidingFocus = next && body.contains(document.activeElement);
@@ -1330,8 +1120,6 @@ export function createFloatingEditorWindow({
         layout();
         if (hidingFocus) collapseButton.focus({ preventScroll: true });
     }
-
-    // ── Change-history drill-down (UI only) ──
 
     const relativeTime = at => {
         if (!Number.isFinite(at)) return '';
@@ -1353,8 +1141,6 @@ export function createFloatingEditorWindow({
         return parts.length ? `修改（${parts.join(' / ')} 字）` : '修改';
     };
 
-    // Show a bounded excerpt at the selected change, including deleted text
-    // (display only: restore always uses the untouched historical snapshot).
     const CAP = 4000;
     function resetPreview() {
         previewText = '';
@@ -1399,8 +1185,6 @@ export function createFloatingEditorWindow({
             const mark = document.createElement(tag);
             mark.className = `ih-floating-editor-history-${kind}`;
             mark.title = `${label} ${value.length} 字`;
-            // Split the budget between old/new text. Huge pastes must not bypass
-            // the preview cap (nor create a giant layout just to show one mark).
             const limit = 1400;
             let edge = limit;
             if (splitsSurrogatePair(value, edge)) edge--;
@@ -1411,7 +1195,6 @@ export function createFloatingEditorWindow({
         append(previewText.slice(end, stop));
         if (stop < previewText.length) append('\n…');
         historyPreviewText.scrollTop = 0;
-        // Scroll only this preview, never the page or the underlying editor.
         const top = location.getBoundingClientRect().top - historyPreviewText.getBoundingClientRect().top;
         historyPreviewText.scrollTop = Math.max(0, top - historyPreviewText.clientHeight / 3);
     }
@@ -1423,8 +1206,6 @@ export function createFloatingEditorWindow({
 
     function previewHistoryAt(index, force = false) {
         if (destroyed) return;
-        // Skip the full-text reconstruction + large DOM write when the selection
-        // and underlying content are unchanged (re-renders fire on every poll).
         if (!force && index === historySelected && index === lastPreviewIndex && previewValueKey === lastPreviewKey) {
             return;
         }
@@ -1450,13 +1231,11 @@ export function createFloatingEditorWindow({
             let change = null;
             try { change = typeof changeHistory === 'function' ? changeHistory(index) : null; }
             catch { change = null; }
-            // Validate the inserted slice before overlaying removed/added text.
             if (change && typeof change.remove === 'string' &&
                 text.slice(change.from, change.from + change.insert.length) !== change.insert) {
                 change = null;
             }
             renderPreview(text, change);
-            // A locked/read-only session can inspect history but not revert.
             historyRevert.disabled = !!readOnly || !!textarea.readOnly;
         }
     }
@@ -1482,19 +1261,15 @@ export function createFloatingEditorWindow({
             }
             return;
         }
-        // Include the timeline revision: retention can replace states without
-        // changing their indices, lengths or even millisecond timestamps.
         const last = snapshot.entries[snapshot.entries.length - 1];
         const signature = `${snapshot.revision ?? ""}:${snapshot.entries.length}:${snapshot.position}:${last.index}:${last.at}:${last.insert}:${last.remove}`;
         previewValueKey = signature;
         if (signature === historySignature) {
-            // Structure unchanged: at most refresh the preview for the live state.
             if (historySelected !== null) previewHistoryAt(historySelected);
             return;
         }
         historySignature = signature;
         historyList.textContent = '';
-        // Newest first so the most recent change sits at the top.
         const rows = [...snapshot.entries].reverse();
         const fragment = document.createDocumentFragment();
         for (const row of rows) {
@@ -1520,7 +1295,6 @@ export function createFloatingEditorWindow({
             fragment.append(item);
         }
         historyList.append(fragment);
-        // Keep the current selection if still present, else default to current state.
         const available = rows.map(r => r.index);
         const target = available.includes(historySelected) ? historySelected
             : (available.includes(snapshot.position) ? snapshot.position : rows[0].index);
@@ -1532,7 +1306,6 @@ export function createFloatingEditorWindow({
         if (destroyed || historyOpen === next) return;
         if (next && typeof requestHistory !== 'function') return;
         if (next) {
-            // History and preview are mutually exclusive body overlays.
             if (previewOpen) setPreviewOpen(false);
             onHistoryOpen?.();
         }
@@ -1544,8 +1317,6 @@ export function createFloatingEditorWindow({
         historyPanel.hidden = !historyOpen;
         historyButton.setAttribute('aria-pressed', String(historyOpen));
         historyButton.setAttribute('aria-expanded', String(historyOpen));
-        // The same header button doubles as the back control: swap its glyph and
-        // retitle it, and show the drill-down label in the title bar.
         historyButton.title = historyOpen ? '返回编辑' : '变更历史';
         historyButton.setAttribute('aria-label', historyButton.title);
         historyButton.firstElementChild.className = `fa-solid ${historyOpen ? 'fa-arrow-left' : 'fa-clock-rotate-left'}`;
@@ -1564,10 +1335,6 @@ export function createFloatingEditorWindow({
         }
     }
 
-    // Render the current text as sanitized Markdown into the preview surface.
-    // Uses SillyTavern's own showdown converter when present so the output
-    // matches chat rendering; always runs through DOMPurify. Falls back to
-    // escaped plain text if neither global is available.
     function renderPreview() {
         const value = textarea.value;
         const win = document.defaultView;
@@ -1602,7 +1369,6 @@ export function createFloatingEditorWindow({
         if (destroyed || previewOpen === next) return;
         if (next && !canPreview) return;
         if (next) {
-            // History and preview are mutually exclusive body overlays.
             if (historyOpen) setHistoryOpen(false);
             renderPreview();
         }
@@ -1629,7 +1395,6 @@ export function createFloatingEditorWindow({
         pinButton.title = label;
         pinButton.setAttribute('aria-label', label);
         header.tabIndex = pinned ? -1 : 0;
-        // Do not aria-disable this group: its action buttons must remain usable.
         header.setAttribute('aria-label', pinned ? '悬浮窗位置和大小已固定' : '移动悬浮窗（方向键；Shift 加速）');
         resizeButton.disabled = pinned || collapsed;
     }
@@ -1669,7 +1434,7 @@ export function createFloatingEditorWindow({
         element.classList.remove('is-dragging', 'is-resizing', 'is-drag-override');
         try {
             if (previous.handle.hasPointerCapture?.(previous.pointerId)) previous.handle.releasePointerCapture(previous.pointerId);
-        } catch { /* The pointer may already have been released by the browser. */ }
+        } catch {                                                                  }
         persistGeometry();
     }
 
@@ -1702,10 +1467,6 @@ export function createFloatingEditorWindow({
     function startGesture(event, kind, handle) {
         if (destroyed || gesture || event.isPrimary === false || event.button > 0 || (kind === 'resize' && collapsed)) return;
         if (kind === 'move' && event.target.closest('button, a, input, textarea, [contenteditable="true"]')) return;
-        // A pinned window stays locked, but a deliberate header drag may still
-        // move it. The pin is never actually cleared — it simply permits this one
-        // move gesture — so the window re-locks on its own when the drag ends.
-        // Resize stays blocked while pinned (its handle is pointer-events:none).
         if (pinned && kind !== 'move') return;
         event.preventDefault();
         layout();
@@ -1724,7 +1485,7 @@ export function createFloatingEditorWindow({
         document.addEventListener('pointerup', endGesture, true);
         document.addEventListener('pointercancel', endGesture, true);
         handle.addEventListener('lostpointercapture', endGesture);
-        try { handle.setPointerCapture(event.pointerId); } catch { /* Document listeners cover unavailable capture. */ }
+        try { handle.setPointerCapture(event.pointerId); } catch {                                                     }
     }
 
     function geometryKeys(event, kind) {
@@ -1746,7 +1507,6 @@ export function createFloatingEditorWindow({
         scheduleGeometrySave();
     }
 
-    /** Update text without synthetic input events or stealing source selection. */
     function setValue(next) {
         if (destroyed) return;
         const normalized = text(next).replace(/\r\n?/g, '\n');
@@ -1759,21 +1519,18 @@ export function createFloatingEditorWindow({
         textarea.setSelectionRange(textarea.selectionStart, textarea.selectionEnd, direction);
         textarea.scrollTop = scrollTop;
         textarea.scrollLeft = scrollLeft;
-        // Keep an open preview in sync with external/host-driven text changes.
         if (previewOpen) renderPreview();
     }
 
     function setTitle(next) {
         if (destroyed) return;
         baseTitle = text(next).trim() || '悬浮编辑';
-        // While history is open the title bar shows the drill-down label instead.
         if (!historyOpen) {
             titleElement.textContent = baseTitle;
             titleElement.title = baseTitle;
         }
     }
 
-    /** Presentation only: activation/focus and read-only policy belong to the controller. */
     function setActive(next) {
         if (destroyed) return;
         const active = !!next;
@@ -1781,7 +1538,6 @@ export function createFloatingEditorWindow({
         element.dataset.active = String(active);
     }
 
-    /** Absolute sibling z-index, bounded to the controller's three window slots. */
     function setLayer(next) {
         if (destroyed || !Number.isFinite(next)) return;
         element.style.setProperty('z-index', String(clamp(Math.trunc(next), MIN_LAYER, MAX_LAYER)), 'important');
@@ -1795,14 +1551,12 @@ export function createFloatingEditorWindow({
         scheduleLayout();
     }
 
-    /** Visible capacity hint: how many windows are open against the cap. */
     function setCapacity(count, max, full) {
         if (destroyed) return;
         element.dataset.capacity = `${count}/${max}`;
         element.classList.toggle('is-at-capacity', !!full);
     }
 
-    /** Enable/disable the Markdown preview button; closes an open preview when disabled. */
     function setCanPreview(next) {
         next = !!next;
         if (destroyed || next === canPreview) return;
@@ -1816,17 +1570,13 @@ export function createFloatingEditorWindow({
         next = !!next;
         if (destroyed || next === readOnly) return;
         readOnly = next;
-        // Never disable the textarea: invalid sessions still allow selection/copy.
         textarea.readOnly = !!next;
         textarea.setAttribute('aria-readonly', String(!!next));
         element.classList.toggle('is-readonly', !!next);
-        // A locked session cannot revert; the panel still opens for read-only
-        // inspection, but refresh it so the revert button reflects the new state.
         if (!!next) historyRevert.disabled = true;
         if (historyOpen && historySelected !== null) previewHistoryAt(historySelected, true);
     }
 
-    /** Refresh computed styling/capabilities; move into the source's top layer. */
     function setThemeSource(next) {
         if (destroyed) return;
         const validSource = next?.ownerDocument === document && typeof next.closest === 'function' ? next : null;
@@ -1901,8 +1651,6 @@ export function createFloatingEditorWindow({
         onCompositionEnd?.(textarea.value, event);
     });
     listen(closeButton, 'click', event => {
-        // destroy() removes root listeners synchronously. Stop this event before
-        // teardown, while the dispatch path still includes the former host.
         event.stopPropagation();
         requestClose();
     });
@@ -1954,12 +1702,9 @@ export function createFloatingEditorWindow({
     listen(element, 'focusout', () => { if (geometryTimer) persistGeometry(); });
     listen(element, 'keydown', event => {
         if (event.key !== 'Escape') return;
-        // Let IME/autocomplete consume the key, but never leak it to the host.
         event.stopPropagation();
         if (composing || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
         event.preventDefault();
-        // Escape first backs out of an open body overlay (history or preview),
-        // then closes the window.
         if (historyOpen) setHistoryOpen(false);
         else if (previewOpen) setPreviewOpen(false);
         else requestClose();
@@ -1979,22 +1724,13 @@ export function createFloatingEditorWindow({
     setActive(false);
     setLayer(MIN_LAYER);
     setThemeSource(source);
-    // Re-measure after the separately loaded stylesheet/fonts finish layout.
     scheduleLayout();
 
-    // The controller calls this after a sync/write changes history while the
-    // drill-down is open, so the list/preview reflect the new state.
     function refreshHistory() { if (historyOpen) renderHistory(); }
 
-    return { element, textarea, historyButton, setValue, setTitle, setActive, setLayer, setStatus, setCapacity, setCanPreview, setReadOnly, setThemeSource, focus, getGeometry, refreshHistory, destroy };
+    return { element, textarea, titleRow, tokenMount, historyButton, setValue, setTitle, setActive, setLayer, setStatus, setCapacity, setCanPreview, setReadOnly, setThemeSource, focus, getGeometry, refreshHistory, destroy };
 }
 
-// ── Footer controls ──
-
-/**
- * UI-only footer. The controller owns text, per-window history, shared find,
- * and the existing color picker; this module never reads or writes editor text.
- */
 const setDisabled = (button, disabled) => {
     if (button && button.disabled !== disabled) button.disabled = disabled;
 };
@@ -2002,18 +1738,6 @@ const setAttribute = (node, name, value) => {
     if (node.getAttribute(name) !== value) node.setAttribute(name, value);
 };
 
-/**
- * @param {object} options
- * @param {{element: HTMLElement, textarea: HTMLTextAreaElement}} options.window Panel API.
- * @param {boolean} [options.isCss=false] Only customCSS gets the existing-picker button.
- * @param {function(): void} [options.onUndo]
- * @param {function(): void} [options.onRedo]
- * @param {function(): void} [options.onFind] Shared find entry point; must validate the
- *   session/target itself. Read-only text can be searched even when canEdit is false.
- * @param {function(): void} [options.onColor]
- * @param {function(): boolean} [options.canEdit] Live identity/lock guard for writes.
- * @returns {{update: Function, refresh: Function, destroy: Function, toggleSearch: Function, readonly searchOpen: boolean}}
- */
 export function createFloatingEditorTools({
     window: panel,
     isCss = false,
@@ -2021,6 +1745,7 @@ export function createFloatingEditorTools({
     onRedo,
     onFind,
     onColor,
+    onSave,
     canEdit = () => true,
 } = {}) {
     const { element, textarea, historyButton } = panel || {};
@@ -2036,6 +1761,7 @@ export function createFloatingEditorTools({
         canUndo: false,
         canRedo: false,
         searchOpen: false,
+        canSave: false,
     };
 
     function node(tag, className, parent) {
@@ -2064,21 +1790,23 @@ export function createFloatingEditorTools({
     footer.setAttribute('aria-label', '编辑工具');
     const historyActions = node('div', 'ih-floating-editor-tool-group', footer);
     const contextActions = node('div', 'ih-floating-editor-tool-group', footer);
-    // The change-history toggle is created by the window (so it keeps owning its
-    // open/back state) and mounted here as the first footer control.
     if (historyButton) historyActions.append(historyButton);
     const undo = button(historyActions, 'undo', '撤销', 'fa-rotate-left');
     const redo = button(historyActions, 'redo', '重做', 'fa-rotate-right');
     const find = button(contextActions, 'find', '查找 / 替换（Ctrl/⌘+F）', 'fa-magnifying-glass');
     const color = isCss ? button(contextActions, 'color', '选择颜色', 'fa-eye-dropper') : null;
-    // Footer precedes the absolute resize control.
+    const save = typeof onSave === 'function' ? button(contextActions, 'save', '保存条目（仍需在酒馆保存预设）', 'fa-floppy-disk') : null;
+    if (save) {
+        const label = node('span', 'ih-floating-editor-save-label', save);
+        label.textContent = '保存条目';
+        save.classList.add('ih-floating-editor-save');
+        listen(save, 'click', () => { if (editable() && state.canSave) onSave(); });
+    }
     element.insertBefore(footer, element.querySelector(':scope > .ih-floating-editor-resize'));
     element.classList.add('has-edit-tools');
 
     const available = () => !destroyed && !composing && element.isConnected
         && element.contains(textarea) && !textarea.disabled && !element.classList.contains('is-collapsed');
-    // Rendering uses the controller's supplied capabilities. Fresh identity/IME
-    // validation belongs to the actual command, not every idle render pass.
     const writable = () => !destroyed && !composing && !textarea.disabled && !state.readOnly && !textarea.readOnly;
     const editable = () => available() && writable() && typeof canEdit === 'function' && Boolean(canEdit());
     const canFind = () => available() && typeof onFind === 'function';
@@ -2089,31 +1817,26 @@ export function createFloatingEditorTools({
         setDisabled(undo, !canWrite || !state.canUndo || typeof onUndo !== 'function');
         setDisabled(redo, !canWrite || !state.canRedo || typeof onRedo !== 'function');
         setDisabled(color, !canWrite || typeof onColor !== 'function');
-        // Reopening a mounted/collapsed window must leave find available.
+        setDisabled(save, !canWrite || !state.canSave);
         setDisabled(find, composing || textarea.disabled || typeof onFind !== 'function');
         setAttribute(find, 'aria-expanded', String(state.searchOpen));
         setAttribute(find, 'aria-pressed', String(state.searchOpen));
     }
     function toggleSearch() {
-        // Read-only search is allowed; the controller rejects stale targets.
         if (canFind()) onFind();
     }
     function update(nextState = {}) {
         if (destroyed) return;
-        for (const key of ['readOnly', 'canUndo', 'canRedo', 'searchOpen']) {
+        for (const key of ['readOnly', 'canUndo', 'canRedo', 'searchOpen', 'canSave']) {
             if (key in nextState) state[key] = Boolean(nextState[key]);
         }
-        // Native textarea/composition guards still apply; controller state owns
-        // capabilities/searchOpen, and setters avoid redundant DOM writes.
         render();
     }
-    // Shared search is refreshed by the controller, not this UI.
     function refresh() {}
 
     listen(find, 'click', toggleSearch);
     const collapse = element.querySelector('[data-action="collapse"]');
     if (collapse) listen(collapse, 'click', () => {
-        // The existing window handler toggles its class before this listener.
         if (element.classList.contains('is-collapsed') && state.searchOpen) onFind?.();
     });
     listen(undo, 'click', () => {
@@ -2131,7 +1854,6 @@ export function createFloatingEditorTools({
         if (event.defaultPrevented || composing || event.isComposing || event.keyCode === 229) return;
         if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || !['f', 'h'].includes(event.key.toLowerCase())) return;
         if (!canFind()) return;
-        // Handle only our textarea; IME and already-handled events stay untouched.
         event.preventDefault();
         event.stopPropagation();
         onFind({ focusInput: event.key.toLowerCase() === 'h' ? 'replacement' : 'query' });
@@ -2143,16 +1865,11 @@ export function createFloatingEditorTools({
         for (const dispose of disposers.splice(0)) dispose();
         footer.remove();
         if (!hadToolsClass) element.classList.remove('has-edit-tools');
-        // Shared find/picker and session history are owned by the controller.
     }
     render();
     return { update, refresh, destroy, toggleSearch, get searchOpen() { return state.searchOpen; } };
 }
 
-// ── Session manager and lifecycle ──
-
-// Persisted scalar fields only. Alternate greetings and existing chat messages
-// are different records and deliberately do not use this adapter.
 const CHARACTER_DRAFT_FIELDS = new Map([
   ["description_textarea", { field: "description", label: "角色描述" }],
   ["personality_textarea", { field: "personality", label: "角色性格" }],
@@ -2166,8 +1883,6 @@ const CHARACTER_FIELDS = new Set([
   "post_history_instructions_textarea", "creator_notes_textarea", "tags_textarea",
   "depth_prompt_prompt",
 ]);
-// Declarative extension integration. These attributes are opt-in, not heuristic
-// matches for arbitrary expand icons. See the plugin-author notes in README.md.
 const EXTENSION_EDITOR_TARGET = "data-quickbar-editor-for";
 const EXTENSION_EDITOR_KEY = "data-quickbar-editor-key";
 const EXTENSION_EDITOR_TITLE = "data-quickbar-editor-title";
@@ -2182,8 +1897,6 @@ function selectionIdentity(doc, selector) {
   return el ? `${el.value ?? ""}\u0000${el.selectedOptions?.[0]?.textContent ?? ""}` : "";
 }
 
-// Capture identities, not field values: native character forms reuse the same DOM.
-// Each write must re-check this snapshot, even if no host event has fired yet.
 export function captureEditorIdentity(source, getContext = () => ({})) {
   const doc = source.ownerDocument;
   const context = getContext() || {};
@@ -2194,9 +1907,6 @@ export function captureEditorIdentity(source, getContext = () => ({})) {
   const base = { source, id, dialog, kind: "generic" };
   const extensionKey = source.getAttribute?.(EXTENSION_EDITOR_KEY);
   if (extensionKey != null) {
-    // The extension owns this logical context. Unrelated chat/character changes
-    // must not retire an editor for a global extension theme. The key must change
-    // BEFORE replacing the backing value, including a new epoch on A -> B -> A.
     return { ...base, kind: "extension", extensionKey };
   }
   if (id === "customCSS") {
@@ -2221,7 +1931,6 @@ export function captureEditorIdentity(source, getContext = () => ({})) {
       epoch: context.editorEpoch ?? 0,
     };
   }
-  // Unknown/native extension editors get conservative context binding as well.
   return {
     ...base, characterId, avatar: character?.avatar ?? "", chatId: context.chatId ?? "",
     preset: PRESET_SELECTORS.map(selector => selectionIdentity(doc, selector)).join("\u0001"),
@@ -2235,22 +1944,16 @@ export function sameEditorIdentity(a, b) {
     Object.keys(a).every(key => a[key] === b[key]);
 }
 
-// Logical field key for de-duplication across windows. It excludes DOM/instance
-// references (source, dialog, entry): reopening the SAME logical field focuses
-// the existing window, while a different book/entry/character/draft epoch is a
-// distinct target that may occupy its own slot. This is the de-dup identity, NOT
-// the per-open instance snapshot used by valid()/sameEditorIdentity for safety.
 export function editorLogicalKey(identity) {
   if (!identity) return "";
   const { source, dialog, entry, ...logical } = identity;
   return JSON.stringify(Object.entries(logical).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-// This adapter never reads/writes the reused native character form.
-function createCharacterDraftAdapter(initialValue) {
+function createIndependentDraftAdapter(initialValue, kind = "character-draft") {
   let value = initialValue;
   return {
-    kind: "character-draft",
+    kind,
     read: () => value,
     getRevision: () => value,
     getSelection: () => null,
@@ -2277,9 +1980,6 @@ function editorTitle(source, maximize) {
     const comment = row?.querySelector('[name="comment"]')?.value;
     return comment ? `世界书 · ${comment}` : `世界书条目 ${source.id.slice(20)}`;
   }
-  // Prompt Manager preset entry: the edit form's name field (…_form_name) sits
-  // beside the prompt textarea (…_form_prompt). Read it so the window shows the
-  // entry's name instead of a generic label.
   if (source.id.endsWith("prompt_manager_popup_entry_form_prompt")) {
     const nameId = source.id.replace(/_prompt$/, "_name");
     const name = source.ownerDocument.getElementById(nameId)?.value?.trim();
@@ -2304,9 +2004,10 @@ export function createFloatingEditorController({
   onCharacterDescriptionSaved = null,
   characterFieldStore = characterDescriptionStore,
   onCharacterFieldSaved = onCharacterDescriptionSaved,
+  presetEntryStore = null,
+  createTokenCounter = null,
 } = {}) {
   const win = doc.defaultView;
-  // Bound simultaneous fields, shared resources and window layers.
   const MAX_WINDOWS = 3;
   const CHARACTER_AUTOSAVE_DELAY = 700;
   const CHARACTER_AUTOSAVE_RETRIES = 2;
@@ -2320,26 +2021,18 @@ export function createFloatingEditorController({
   const MAXIMIZE = `${NATIVE_MAXIMIZE}, [${EXTENSION_EDITOR_TARGET}]`;
   const LAUNCH = ".ih-floating-editor-launch";
   const EDITABLE = "textarea, input, [contenteditable]";
-  // Each window is an independent session with its own write/compose/history
-  // state. There is no single `session`; operations take an explicit session.
   const sessions = new Map();
-  // Keep ownership even after close/detach. A retained target must never fall
-  // through to QuickBar's unrelated-input fallback; WeakMap does not retain it.
   const toolTargets = new WeakMap();
   let nextSessionId = 0;
   let activeId = null;
-  // The shared color picker (index.js single portal) may have one owner at a time.
   let colorOwnerId = null;
   let findOwner = null;
   let observer = null;
   let scanFrame = 0;
-  // One polling interval drives every live session, not one timer per window.
   let timer = 0;
   let running = false;
   let observing = false;
   let retryUnresolved = false;
-  // One document-level theme observer shared by all windows; each session also
-  // observes its own source node while open.
   let themeObserver = null;
   let themeFrame = 0;
 
@@ -2349,13 +2042,9 @@ export function createFloatingEditorController({
     const explicit = maximize.getAttribute(EXTENSION_EDITOR_TARGET);
     const native = maximize.matches(NATIVE_MAXIMIZE);
     const id = explicit ?? maximize.getAttribute("data-for");
-    // Conflicting native/custom targets are ambiguous; fail closed. An explicit
-    // empty target suspends integration while a component is changing records.
     if (!id || (native && explicit !== null && explicit !== maximize.getAttribute("data-for"))) return null;
     const source = doc.getElementById(id);
     if (!source || source.closest(".ih-floating-editor") || !source.matches(EDITABLE)) return null;
-    // Do not expose passwords, hidden fields, checkboxes or number/range values
-    // in a general text editor, even if somebody marks a button by mistake.
     if (source.tagName === "INPUT" && !TEXT_INPUT_TYPES.has(source.type)) return null;
     const key = source.getAttribute(EXTENSION_EDITOR_KEY);
     if (key !== null && !key.trim()) return null;
@@ -2365,37 +2054,34 @@ export function createFloatingEditorController({
   const sessionList = () => [...sessions.values()];
   const activeSession = () => (activeId != null ? sessions.get(activeId) : null);
   function sessionForSource(source) {
-    for (const s of sessions.values()) if (!s.characterDraft && s.source === source) return s;
+    for (const s of sessions.values()) if (!s.characterDraft && !s.presetDraft && s.source === source) return s;
     return null;
   }
 
-  function invalidate(s, message = "编辑对象已切换；此窗口已锁定，可复制内容后重新打开。") {
+  function invalidate(s, message = "编辑对象已切换或原面板已关闭；此窗口已锁定，可复制内容后重新打开。") {
     if (!s || s.invalid) return;
     s.timeline.flush();
     s.invalid = true;
     const dialog = s.identity.dialog;
-    // Preserve a recoverable, visible copy even after a native modal closes or
-    // its DOM is removed. The locked window can no longer write to that source.
     if (dialog && (!dialog.isConnected || !dialog.open)) s.window.setThemeSource(null);
     s.window.setReadOnly(true);
     releaseColorOwner(s);
     releaseFindReplace(s, false);
     updateTools(s, true);
     s.window.setStatus(message);
-    // Retain the recoverable snapshot/identity, but remove session bridges so
-    // stale source notifications cannot revive this locked window.
     stopSessionSource(s);
     maybeStopPolling();
     notify(message);
   }
 
-  // Pure validity probe for history-state reads: querying toolbar state must
-  // not invalidate/notify recursively. Mutating commands use valid() below.
   function sessionIsValid(s) {
     if (!s || s.invalid || sessions.get(s.id) !== s || !s.window?.textarea.isConnected) return false;
-    if (s.characterDraft) return isEnabled();
+    if (s.characterDraft || s.presetDraft) return isEnabled();
     const dialog = s.identity.dialog;
-    return isEnabled() && s.adapter.isConnected() && s.adapter.kind !== "unsupported" &&
+    const displayed = resolveCodeMirrorForSource(s.source)?.dom || s.source;
+    return isEnabled() && displayed.getClientRects().length > 0 &&
+      win.getComputedStyle(displayed).visibility !== "hidden" &&
+      s.adapter.isConnected() && s.adapter.kind !== "unsupported" &&
       resolveSource(s.maximize) === s.source &&
       (!dialog || (dialog.isConnected && dialog.open)) &&
       sameEditorIdentity(s.identity, captureEditorIdentity(s.source, getContext));
@@ -2403,9 +2089,7 @@ export function createFloatingEditorController({
 
   function valid(s) {
     if (!s || s.invalid || sessions.get(s.id) !== s) return false;
-    // Advanced character fields may live in a native popup. Retain the draft
-    // when that popup closes/unmounts; its source is not the persistence target.
-    const host = s.characterDraft && s.window?.element.parentElement;
+    const host = (s.characterDraft || s.presetDraft) && s.window?.element.parentElement;
     if (host?.tagName === "DIALOG" && (!host.isConnected || !host.open)) s.window.setThemeSource(null);
     if (!sessionIsValid(s)) {
       invalidate(s);
@@ -2417,6 +2101,7 @@ export function createFloatingEditorController({
   function sync(s) {
     if (!s || s.writing || !valid(s)) return;
     if (s.characterDraft) { updateCharacterDraft(s); updateTools(s); return; }
+    if (s.presetDraft) { updatePresetDraft(s); updateTools(s); return; }
     s.window.setReadOnly(s.adapter.isReadOnly());
     const title = editorTitle(s.source, s.maximize);
     if (title !== s.title) { s.title = title; s.window.setTitle(title); }
@@ -2443,10 +2128,8 @@ export function createFloatingEditorController({
 
   function write(s, value, options = {}) {
     if (!s || s.writing || !valid(s) || s.composing) return false;
-    // CM revisions are immutable document identities. Avoid converting the
-    // entire source document to a string again when beforeinput just synced it.
     const revision = s.adapter.getRevision();
-    if (s.sourceComposing || (!s.characterDraft && resolveCodeMirrorForSource(s.source)?.composing) ||
+    if (s.sourceComposing || (!s.characterDraft && !s.presetDraft && resolveCodeMirrorForSource(s.source)?.composing) ||
         (revision !== s.revision && s.adapter.read() !== s.lastValue)) {
       invalidate(s, "原框同时发生了修改；已暂停同步，保留两边内容以避免覆盖。 ");
       return;
@@ -2482,6 +2165,7 @@ export function createFloatingEditorController({
         if (valueChanged) { s.characterDraft.retryCount = 0; scheduleCharacterSave(s); }
         updateCharacterDraft(s);
       }
+      if (s.presetDraft) updatePresetDraft(s);
       updateTools(s, valueChanged);
       return true;
     } catch (error) {
@@ -2498,8 +2182,8 @@ export function createFloatingEditorController({
   }
 
   function editable(s) {
-    const cm = s.characterDraft ? null : resolveCodeMirrorForSource(s.source);
-    return !s.characterDraft?.closing && !s.composing && !s.sourceComposing && !cm?.composing &&
+    const cm = s.characterDraft || s.presetDraft ? null : resolveCodeMirrorForSource(s.source);
+    return !s.characterDraft?.closing && !s.presetDraft?.saving && !s.composing && !s.sourceComposing && !cm?.composing &&
       !cm?.compositionStarted && !s.adapter.isReadOnly();
   }
 
@@ -2508,8 +2192,6 @@ export function createFloatingEditorController({
   }
 
   function getHistoryState(s, checkIdentity = true) {
-    // Public reads validate identity freshly, but a render following sync/write
-    // must not repeat the same expensive host-context capture on every idle tick.
     const current = checkIdentity ? sessionIsValid(s) :
       sessions.get(s.id) === s && !s.invalid && s.window.textarea.isConnected;
     const readOnly = !current || !editable(s);
@@ -2518,11 +2200,13 @@ export function createFloatingEditorController({
 
   function updateTools(s, forceHistory = false) {
     if (!s) return;
+    s.tokenCounter?.refresh();
     const state = getHistoryState(s, false);
     if (state.readOnly) releaseColorOwner(s);
-    s.tools?.update({ ...state, searchOpen: !!s.findOwner });
-    // The inspection timeline refreshes only when a debounced entry commits;
-    // polling/typing must not reconstruct preview text or rebuild its DOM.
+    s.tools?.update({ ...state, searchOpen: !!s.findOwner,
+      canSave: !!s.presetDraft && !s.presetDraft.saving && !s.composing && !s.invalid &&
+        (presetDraftDirty(s) || !!s.presetDraft.error),
+    });
     const key = `${state.canUndo}/${state.canRedo}/${state.readOnly}`;
     if (typeof onHistoryChange !== "function" || s.notifyingHistory || (!forceHistory && s.historyStateKey === key)) return;
     s.historyStateKey = key;
@@ -2535,8 +2219,6 @@ export function createFloatingEditorController({
   function applyEdit(s, { value, selection, expectedValue } = {}, options = {}) {
     if (!canEdit(s) || s.writing || typeof value !== "string") return false;
     if (expectedValue !== undefined && expectedValue !== s.window.textarea.value) return false;
-    // Tool results must be based on the currently synchronized version. Do not
-    // apply a stale replacement to a silently changed source/editor document.
     if (s.adapter.read() !== s.lastValue || s.window.textarea.value !== s.lastValue) {
       sync(s); s.tools?.refresh(); return false;
     }
@@ -2564,9 +2246,6 @@ export function createFloatingEditorController({
       if (!valid(s)) return false;
       if (!result.changed) {
         if (result.unhandled) {
-          // No native history binding (e.g. BaiBai CSS over 12,000 characters).
-          // Reuse the bounded session history and the normal, conflict-checked CM
-          // transaction/save path. Do not record this inverse edit in native history.
           s.writing = false;
           return applyEdit(s, candidate, {
             historyDirection: direction, userEvent: direction, addToHistory: false,
@@ -2595,8 +2274,6 @@ export function createFloatingEditorController({
     } finally { s.writing = false; updateTools(s, valueChanged); }
   }
 
-  // The color picker is a single shared portal. Only one session may own it;
-  // switching owners or losing validity releases the previous owner first.
   function releaseColorOwner(s) {
     if (colorOwnerId !== s.id) { s.colorClose?.(); s.colorClose = null; return; }
     const close = s.colorClose;
@@ -2609,7 +2286,6 @@ export function createFloatingEditorController({
     if (!canEdit(s) || s.source.id !== "customCSS") return;
     if (colorOwnerId === s.id && s.colorClose) { releaseColorOwner(s); return; }
     if (typeof openColorPicker !== "function") return;
-    // A different session may currently own the single portal; release it first.
     if (colorOwnerId != null) { const owner = sessions.get(colorOwnerId); if (owner) releaseColorOwner(owner); }
     sync(s);
     if (!canEdit(s)) return;
@@ -2630,16 +2306,12 @@ export function createFloatingEditorController({
     if (!s.colorClose && colorOwnerId === s.id) colorOwnerId = null;
   }
 
-  // The shared find UI receives only a target, not edit/history closures. It
-  // resolves the stable descriptor with getToolTarget(target) on each command.
   function releaseFindReplace(s, refresh = true) {
     const owner = s.findOwner;
     const close = s.findClose;
     s.findOwner = null;
     s.findClose = null;
     if (findOwner === owner) findOwner = null;
-    // Clear ownership before calling out: an old onClose cannot clear a newer
-    // search, including one opened reentrantly by the host's close callback.
     try { close?.(); }
     catch (error) { console.warn("[ST-QuickBar] 悬浮编辑查找关闭失败", error); }
     if (refresh && (owner || close)) updateTools(s);
@@ -2653,8 +2325,6 @@ export function createFloatingEditorController({
     if (!valid(s)) return false;
     if (s.findOwner && focusInput) {
       const owner = s.findOwner;
-      // Ctrl/Cmd+H refocuses the existing shared UI, not a new search. Keep
-      // its original onClose/findClose pair so close/collapse still releases it.
       try {
         const close = openFindReplace({ target: s.window.textarea, keepOpen: true, focusInput });
         return typeof close === "function" && s.findOwner === owner && valid(s);
@@ -2689,8 +2359,6 @@ export function createFloatingEditorController({
     }
     if (typeof close !== "function") { onClose(); return false; }
     if (s.findOwner !== owner || !valid(s)) {
-      // The session/search may have closed while the host was opening it. The
-      // returned callback is contractually scoped to this exact search owner.
       try { close(); }
       catch (error) { console.warn("[ST-QuickBar] 悬浮编辑查找关闭失败", error); }
       return false;
@@ -2712,37 +2380,26 @@ export function createFloatingEditorController({
     s.window.setThemeSource(s.source);
   }
 
-  // ── Change-history drill-down bridges (session → window UI) ──
-
-  // Snapshot of reachable states for the panel. Null means the session can no
-  // longer report history, so the UI keeps the drill-down closed/empty.
   function historySnapshot(s) {
     if (!s || s.invalid || sessions.get(s.id) !== s || !s.window?.textarea.isConnected) return null;
     try { return s.timeline.list(); }
     catch (error) { console.warn("[ST-QuickBar] 变更历史读取失败", error); return null; }
   }
 
-  // Preview reads one committed snapshot. Never sync/commit here: doing so can
-  // shift trimmed indices or recursively render while selecting a history row.
   function historyPreview(s, index) {
     if (!s || sessions.get(s.id) !== s) return null;
     try { return s.timeline.textAt(index); }
     catch (error) { console.warn("[ST-QuickBar] 变更历史预览失败", error); return null; }
   }
 
-  // The diff that produced state `index`, for highlighting the changed region
-  // in the preview. Null for the baseline/out-of-range (nothing to highlight).
   function historyChange(s, index) {
     if (!s || sessions.get(s.id) !== s) return null;
     try { return s.timeline.changeAt(index); }
     catch (error) { console.warn("[ST-QuickBar] 变更历史差异读取失败", error); return null; }
   }
 
-  // Write the editor back to a chosen historical state. This is a normal edit:
-  // it records a new history entry, so a revert is itself undoable.
   function historyRevert(s, index) {
     if (!valid(s) || !canEdit(s) || s.writing) return false;
-    // Capture before syncing/flushing: trimming must not change the chosen row.
     let target = null;
     try { target = s.timeline.textAt(index); }
     catch (error) { console.warn("[ST-QuickBar] 变更历史回退失败", error); return false; }
@@ -2756,8 +2413,6 @@ export function createFloatingEditorController({
     return write(s, target, { userEvent: "input.restore" }) === true;
   }
 
-  // Release session-specific bridges on lock/close. Document listeners and
-  // observers are shared; queued source syncs also check session membership.
   function stopSessionSource(s) {
     cancelCharacterSave(s);
     s.timeline.dispose();
@@ -2767,9 +2422,6 @@ export function createFloatingEditorController({
     s.sourceComposing = false;
   }
 
-  // Only one window is "active" (receives activation styling and the front
-  // layer). Every valid window remains independently writable; activation just
-  // tracks the most recently focused window for picker/layer ownership.
   function setActive(id) {
     if (activeId === id) { restack(); return; }
     activeId = id;
@@ -2777,12 +2429,8 @@ export function createFloatingEditorController({
     restack();
   }
 
-  // Bounded z-index ordering across at most MAX_WINDOWS. The active window sits
-  // on top; others keep a stable relative order. Native dialog top layer still
-  // wins regardless; this only orders our own sibling windows.
   function restack() {
     const order = sessionList();
-    // Active last so it gets the highest layer; id breaks openedAt ties.
     order.sort((a, b) =>
       (a.id === activeId ? 1 : 0) - (b.id === activeId ? 1 : 0) ||
       (a.openedAt - b.openedAt) || (a.id - b.id));
@@ -2798,8 +2446,6 @@ export function createFloatingEditorController({
   function characterDraftDirty(s) {
     const draft = s.characterDraft;
     if (!draft) return false;
-    // The conflict baseline is not proof that the current text is persisted:
-    // opening a stale form and an unconfirmed POST both need discard protection.
     if (draft.confirmedValue === null || draft.uncertain) return true;
     return s.window.textarea.value !== draft.confirmedValue.replace(/\r\n?/g, "\n");
   }
@@ -2836,7 +2482,6 @@ export function createFloatingEditorController({
     draft.saveTimer = win.setTimeout(() => {
       draft.saveTimer = 0;
       if (sessions.get(s.id) !== s || s.invalid || draft.closing || !isEnabled()) return;
-      // Composition end and request completion schedule the latest text again.
       if (s.composing || draft.loading || draft.saving) return;
       if (draft.baseline === null) loadCharacterDraft(s);
       else saveCharacterDraft(s);
@@ -2856,7 +2501,6 @@ export function createFloatingEditorController({
     }
   }
 
-  // The form avatar, not this_chid, identifies the actual visible editor.
   function currentCharacterField(draft) {
     const { avatar, sourceId, label } = draft;
     if (doc.querySelector("#form_create")?.getAttribute("actiontype") !== "editcharacter" ||
@@ -2901,10 +2545,8 @@ export function createFloatingEditorController({
     if (latest?.avatar === draft.avatar && (latest.field ?? "description") === draft.field && typeof latest.value === "string") {
       draft.confirmedValue = latest.value;
       draft.uncertain = false;
-      // Keep this window's text untouched, but let reopening the role's field
-      // start from the known persisted value when the native field is still old.
       try { publishCharacterField(s, latest, [draft.nativeValue, draft.baseline]); }
-      catch { /* Never replace a newer native edit to repair a conflict. */ }
+      catch {                                                               }
     }
     draft.error = (error.message || "编辑内容发生冲突。") + " 已暂停自动同步，内容保留，可复制后关闭并重新打开。";
     invalidate(s, draft.error);
@@ -2923,8 +2565,6 @@ export function createFloatingEditorController({
         let snapshot = await characterFieldStore.load(draft.avatar, draft.field);
         if (sessions.get(s.id) !== s || s.invalid) return false;
         if (snapshot.value.replace(/\r\n?/g, "\n") !== s.initialValue) {
-          // A native edit may still be in its own debounce/save path. Allow one
-          // settling read; never silently rebase a draft over different content.
           await new Promise(resolve => win.setTimeout(resolve, CHARACTER_AUTOSAVE_DELAY));
           if (sessions.get(s.id) !== s || s.invalid) return false;
           snapshot = await characterFieldStore.load(draft.avatar, draft.field);
@@ -3008,9 +2648,135 @@ export function createFloatingEditorController({
         draft.retryable = retryable;
         updateCharacterDraft(s);
         updateTools(s);
-        // More typing during this request remains dirty and gets its own save.
         if (completed || (!s.invalid && s.lastValue !== value)) scheduleCharacterSave(s);
         else if (retryable) retryCharacterSave(s);
+      }
+    })();
+    return draft.savePromise;
+  }
+
+  function presetDraftDirty(s) {
+    const draft = s?.presetDraft;
+    if (!draft) return false;
+    const baseline = draft.baseline.replace(/\r\n?/g, "\n");
+    if (draft.uncertain || s.window.textarea.value !== baseline) return true;
+    try {
+      return presetEntryStore.current(draft).value.replace(/\r\n?/g, "\n") !== baseline;
+    } catch {
+      return !!draft.savedEver;
+    }
+  }
+
+  function hasRecoverableDraft(s) {
+    return characterDraftDirty(s) || presetDraftDirty(s) ||
+      (!s.characterDraft && !s.presetDraft && s.invalid && !!s.window.textarea.value);
+  }
+
+  function updatePresetDraft(s) {
+    const draft = s.presetDraft;
+    if (!draft) return;
+    const dirty = presetDraftDirty(s);
+    let state = dirty ? "dirty" : "saved";
+    let status = dirty ? "独立草稿 · 请点保存条目（Ctrl/⌘+S）" : "条目已同步 · 仍需保存预设";
+    if (draft.error) { state = "error"; status = draft.error; }
+    if (draft.saving) { state = "saving"; status = "正在保存条目，请稍候…"; }
+    else if (!draft.error) {
+      try { presetEntryStore.current(draft); }
+      catch (error) { state = "dirty"; status = error.message + " 草稿可继续编辑，内容不会清空。"; }
+    }
+    const title = draft.name + (dirty ? " *" : "") + " · 预设「" + draft.preset + "」";
+    if (title !== s.title) { s.title = title; s.window.setTitle(title); }
+    const statusKey = state + status;
+    if (draft.statusKey !== statusKey) {
+      draft.statusKey = statusKey;
+      s.window.element.dataset.saveState = state;
+      s.window.setStatus(status);
+    }
+  }
+
+  function currentPresetSource(s) {
+    const draft = s.presetDraft;
+    const source = doc.getElementById(draft.sourceId);
+    if (!source?.isConnected || source.closest('dialog:not([open])')) return null;
+    const cm = resolveCodeMirrorForSource(source);
+    const visibleEditor = cm?.dom || source;
+    const popup = source.closest('[id$="prompt_manager_popup"]');
+    if (!visibleEditor.getClientRects().length || (popup && !popup.classList.contains("openDrawer"))) return null;
+    let binding;
+    try { binding = presetEntryStore.capture(source); } catch { return null; }
+    if (binding?.key !== s.logicalKey) return null;
+    const adapter = createFloatingEditorAdapter(source);
+    if (adapter.kind === "unsupported" || adapter.isReadOnly() || resolveCodeMirrorForSource(source)?.composing) {
+      throw new Error("原条目编辑器暂时不可写或正在组字，请稍后重试。");
+    }
+    return { source, adapter, value: adapter.read() };
+  }
+
+  function checkPresetSources(s, desired) {
+    const draft = s.presetDraft;
+    presetEntryStore.current(draft);
+    const current = currentPresetSource(s);
+    const mirrors = current ? [current] : [];
+    if (current && ![draft.nativeValue, draft.baseline, desired].includes(current.value)) {
+      throw new Error("原条目编辑框也有修改，未覆盖任何一边。请复制保留两边内容后重新打开条目。");
+    }
+    if (["main", "nsfw", "jailbreak"].includes(draft.identifier)) {
+      const source = doc.getElementById(draft.identifier + "_prompt_quick_edit_textarea");
+      if (source?.isConnected) {
+        const adapter = createFloatingEditorAdapter(source);
+        const value = adapter.read();
+        if (adapter.kind === "unsupported" || adapter.isReadOnly() || resolveCodeMirrorForSource(source)?.composing ||
+            ![draft.baseline, desired].some(allowed => allowed.replace(/\r\n?/g, "\n") === value)) {
+          throw new Error("对应快捷编辑框也有修改或正在组字，未覆盖其内容；请先保留两边修改。");
+        }
+        mirrors.push({ source, adapter, value });
+      }
+    }
+    return mirrors;
+  }
+
+  function savePresetDraft(s) {
+    const draft = s?.presetDraft;
+    if (!draft || !valid(s) || s.composing) return Promise.resolve(false);
+    if (draft.saving) return draft.savePromise;
+    if (!presetDraftDirty(s) && !draft.error) return Promise.resolve(true);
+    const value = s.window.textarea.value;
+    draft.saving = true;
+    draft.error = "";
+    s.window.setReadOnly(true);
+    updatePresetDraft(s);
+    updateTools(s);
+    draft.savePromise = (async () => {
+      try {
+        checkPresetSources(s, value);
+        const snapshot = await presetEntryStore.save({ ...draft, value });
+        if (sessions.get(s.id) !== s) return false;
+        let mirrors = [];
+        try { mirrors = checkPresetSources(s, value); }
+        catch (error) { draft.error = "条目已保存；" + error.message; }
+        draft.baseline = snapshot.value;
+        draft.name = snapshot.name;
+        draft.uncertain = false;
+        draft.savedEver = true;
+        for (const current of mirrors) if (current.value !== snapshot.value) {
+          try { current.adapter.write(snapshot.value, { userEvent: "input.quickbar-save", addToHistory: false }); }
+          catch { draft.error = "条目已保存，但原框未能同步；请重新打开原条目，避免用旧值覆盖。"; }
+        }
+        draft.nativeValue = snapshot.value;
+        return true;
+      } catch (error) {
+        if (error.uncertain) draft.uncertain = true;
+        draft.error = (error.message || "保存条目失败。") + " 草稿已保留，未覆盖其他条目。";
+        notify(draft.error);
+        return false;
+      } finally {
+        draft.saving = false;
+        draft.savePromise = null;
+        if (sessions.get(s.id) === s) {
+          s.window.setReadOnly(s.invalid);
+          updatePresetDraft(s);
+          updateTools(s);
+        }
       }
     })();
     return draft.savePromise;
@@ -3030,7 +2796,6 @@ export function createFloatingEditorController({
   function closeCharacterSession(s) {
     const draft = s.characterDraft;
     if (draft.closePromise) return draft.closePromise;
-    // Commit the visible IME text before making the closing window read-only.
     if (s.composing && !s.invalid) { s.composing = false; write(s, s.window.textarea.value); }
     draft.closing = true;
     cancelCharacterSave(s);
@@ -3050,7 +2815,6 @@ export function createFloatingEditorController({
           s.window.setReadOnly(s.invalid);
           updateCharacterDraft(s);
           updateTools(s);
-          // Cancelling a failed close resumes any still-available retry budget.
           if (draft.retryable) retryCharacterSave(s);
         }
       }
@@ -3066,26 +2830,25 @@ export function createFloatingEditorController({
   }
 
   function canCloseSessions(list) {
-    if (list.some(s => s.characterDraft?.saving || s.characterDraft?.closing)) {
-      notify("角色字段正在保存，请等待结果后再关闭。");
+    if (list.some(s => s.characterDraft?.saving || s.characterDraft?.closing || s.presetDraft?.saving)) {
+      notify("编辑内容正在保存，请等待结果后再关闭。");
       return false;
     }
-    const dirty = list.filter(characterDraftDirty);
-    return !dirty.length || win.confirm("「" + dirty.map(s => s.characterDraft.name + " · " + s.characterDraft.label).join("、") + "」有未保存或尚未确认保存的字段草稿。关闭将丢弃这些内容，确定关闭？");
+    const dirty = list.filter(hasRecoverableDraft);
+    return !dirty.length || win.confirm("「" + dirty.map(s => s.title).join("、") + "」有未保存、尚未确认保存或已脱离原框的内容。取消关闭后可继续编辑、保存或复制；确定丢弃并关闭？");
   }
 
   function closeSession(s, confirmed = false) {
     if (!s || !sessions.has(s.id)) return false;
     if (!confirmed && s.characterDraft) return closeCharacterSession(s);
     if (!confirmed && !canCloseSessions([s])) return false;
-    // A blur/close can precede compositionend on mobile. Commit only to the same
-    // bound context and only if the source has not changed meanwhile.
     if (s.composing && !s.invalid) {
       s.composing = false;
       write(s, s.window.textarea.value);
     }
     s.timeline.flush();
     sessions.delete(s.id);
+    s.tokenCounter?.destroy();
     s.generation++;
     releaseColorOwner(s);
     releaseFindReplace(s, false);
@@ -3095,8 +2858,6 @@ export function createFloatingEditorController({
     s.window.destroy();
     if (s.button?.isConnected) s.button.setAttribute("aria-pressed", "false");
     if (activeId === s.id) {
-      // Promote the most recently opened remaining window, if any. setActive
-      // clears the stale active flag on every other window and restacks.
       activeId = null;
       const remaining = sessionList().sort((a, b) => b.openedAt - a.openedAt)[0];
       if (remaining) setActive(remaining.id);
@@ -3112,7 +2873,6 @@ export function createFloatingEditorController({
     return true;
   }
 
-  // Disable/destroy releases every window; close() releases only its target.
   function closeAll() {
     const list = sessionList();
     if (!canCloseSessions(list)) return false;
@@ -3120,14 +2880,12 @@ export function createFloatingEditorController({
     return true;
   }
 
-  // Without an explicit target, close only the active window.
   function close() {
     const s = activeSession() || sessionList()[0];
     return s ? closeSession(s) : true;
   }
 
   function maybeStopPolling() {
-    // Stop the shared poll when no live (valid, non-locked) session remains.
     if (!sessions.size) { win.clearInterval(timer); timer = 0; return; }
     const anyLive = sessionList().some(s => !s.invalid);
     if (!anyLive) { win.clearInterval(timer); timer = 0; }
@@ -3135,16 +2893,12 @@ export function createFloatingEditorController({
 
   function ensurePolling() {
     if (timer || !sessions.size) return;
-    // One interval drives every live session. Background pages skip the read.
     timer = win.setInterval(() => {
       if (doc.hidden) return;
       for (const s of sessionList()) if (!s.invalid) sync(s);
     }, 250);
   }
 
-  // Versioned, 3-slot geometry persistence. The legacy single {x,y,width,height}
-  // migrates into slot 0. Only geometry is persisted — never activeId, layer,
-  // pin/collapse, source identity, text or history. Each session owns one slot.
   function readSlots() {
     const raw = getGeometry();
     const slots = [null, null, null];
@@ -3155,7 +2909,6 @@ export function createFloatingEditorController({
     if (Array.isArray(raw.slots)) {
       for (let i = 0; i < MAX_WINDOWS; i++) slots[i] = sane(raw.slots[i]);
     } else if (finite(raw.x) || finite(raw.width)) {
-      // Legacy single-object geometry migrates to slot 0.
       slots[0] = sane(raw);
     }
     return slots;
@@ -3167,8 +2920,6 @@ export function createFloatingEditorController({
     return used;
   }
 
-  // Pick the first free slot for a new session. Falls back to 0 only when all
-  // slots are nominally occupied (should not happen under the MAX_WINDOWS cap).
   function pickSlot(s) {
     const used = occupiedSlots();
     for (let i = 0; i < MAX_WINDOWS; i++) if (!used.has(i)) return i;
@@ -3179,8 +2930,6 @@ export function createFloatingEditorController({
     const slots = readSlots();
     const base = slots[slot];
     if (base) return base;
-    // No saved geometry for this slot: offset by slot index so three fresh
-    // windows do not stack exactly on top of each other.
     const fallback = slots.find(Boolean);
     if (!fallback) return null;
     const step = 28 * slot;
@@ -3191,9 +2940,6 @@ export function createFloatingEditorController({
     if (s.slot == null) return;
     const slots = readSlots();
     slots[s.slot] = geometry;
-    // Versioned slots drive multi-window restore. The flat x/y/width/height
-    // mirror the most recent save so a legacy single-object reader still sees a
-    // valid last position; readSlots prefers `slots` and ignores the mirror.
     saveGeometry({ version: 2, slots, ...geometry });
   }
 
@@ -3201,9 +2947,13 @@ export function createFloatingEditorController({
     if (!isEnabled() || !maximize?.isConnected) return null;
     const source = resolveSource(maximize);
     if (!source) return null;
-    // Re-point to the same logical field: focus the existing window instead of
-    // creating a second editing copy. Repeated clicks never duplicate a source.
-    const existingBySource = sessionForSource(source);
+    let presetBinding = null;
+    if (presetEntryStore?.isSource(source)) {
+      try { presetBinding = presetEntryStore.capture(source); }
+      catch (error) { notify(error.message || "无法确认预设条目，请先在原面板保存条目。"); return null; }
+      if (!presetBinding) { notify("此预设条目暂不支持独立悬浮编辑，请先在原面板保存条目。"); return null; }
+    }
+    const existingBySource = presetBinding ? null : sessionForSource(source);
     if (existingBySource && valid(existingBySource)) {
       setActive(existingBySource.id);
       existingBySource.window.focus();
@@ -3214,12 +2964,10 @@ export function createFloatingEditorController({
     const character = definition && identity.kind === "character" &&
       identity.mode === "editcharacter" && identity.formAvatar && characterFieldStore
       ? getContext()?.characters?.find(item => item.avatar === identity.formAvatar) : null;
-    const key = character ? JSON.stringify(["character-field", character.avatar, definition.field]) : editorLogicalKey(identity);
+    const key = presetBinding?.key || (character ? JSON.stringify(["character-field", character.avatar, definition.field]) : editorLogicalKey(identity));
     const existingByKey = sessionList().find(s => !s.invalid && s.logicalKey === key && valid(s));
     if (existingByKey) {
-      if (existingByKey.characterDraft) {
-        // Reopened advanced settings may mount a new source/dialog instance.
-        // Reattach only the theme host; the role/field and draft stay unchanged.
+      if (existingByKey.characterDraft || existingByKey.presetDraft) {
         existingByKey.source = source;
         existingByKey.maximize = maximize;
         existingByKey.button = buttons.get(maximize);
@@ -3246,11 +2994,16 @@ export function createFloatingEditorController({
       nativeValue: value, loading: false, saving: false, error: "",
       saveTimer: 0, retryCount: 0, retryable: false, closing: false, loadPromise: null, savePromise: null, closePromise: null,
     } : null;
-    if (characterDraft) adapter = createCharacterDraftAdapter(value);
+    const presetDraft = presetBinding && !adapter.isReadOnly() ? {
+      ...presetBinding, sourceId: source.id, nativeValue: value,
+      saving: false, uncertain: false, error: "", savePromise: null, statusKey: "",
+    } : null;
+    if (presetBinding && !presetDraft) { notify("原条目不可编辑，未创建悬浮草稿。"); return null; }
+    if (characterDraft || presetDraft) adapter = createIndependentDraftAdapter(value, presetDraft ? "preset-draft" : "character-draft");
     const s = {
       id: ++nextSessionId, generation: 0, openedAt: Date.now(),
-      source, maximize, adapter, identity, characterDraft, logicalKey: key,
-      title: characterDraft ? characterDraft.name + " · " + characterDraft.label : editorTitle(source, maximize),
+      source, maximize, adapter, identity, characterDraft, presetDraft, logicalKey: key,
+      title: presetDraft ? presetDraft.name + " · 预设「" + presetDraft.preset + "」" : characterDraft ? characterDraft.name + " · " + characterDraft.label : editorTitle(source, maximize),
       initialValue: value, lastValue: value, revision: adapter.getRevision(),
       invalid: false, composing: false, sourceComposing: false, writing: false,
       syncQueued: false,
@@ -3263,14 +3016,10 @@ export function createFloatingEditorController({
       clock: win, onCommit: () => s.window?.refreshHistory(),
     });
     sessions.set(s.id, s);
-    // Assign a geometry slot before building the window so restore uses it.
     s.slot = pickSlot(s);
     s.window = createFloatingEditorWindow({
       document: doc, source, title: s.title, value,
       geometry: getSlotGeometry(s.slot),
-      // Markdown preview is offered for every source except CSS, where rendering
-      // stylesheet text as Markdown is meaningless. The button only renders a
-      // read-only, sanitized view; it never writes text back to the editor.
       canPreview: identity.kind !== "css" && source.id !== "customCSS",
       onGeometryChange: geometry => {
         try { saveSlotGeometry(s, geometry); } catch (error) { console.warn("[ST-QuickBar] 窗口位置保存失败", error); }
@@ -3295,8 +3044,15 @@ export function createFloatingEditorController({
       changeHistory: index => historyChange(s, index),
       revertHistory: index => historyRevert(s, index),
     });
-    // Never delete this entry on retirement: callers holding an old textarea
-    // must receive its invalid descriptor instead of an unrelated fallback.
+    if (typeof createTokenCounter === "function") {
+      try {
+        s.tokenCounter = createTokenCounter({
+          document: doc, source, mount: s.window.tokenMount, clock: win,
+          read: () => ({ text: s.window.textarea.value, identity: s.logicalKey, composing: s.composing }),
+          isActive: () => sessions.get(s.id) === s && s.window.textarea.isConnected && !doc.hidden,
+        });
+      } catch (error) { console.warn("[ST-QuickBar] 编辑器 token 计数初始化失败", error); }
+    }
     toolTargets.set(s.window.textarea, {
       target: s.window.textarea,
       isValid: () => valid(s),
@@ -3314,28 +3070,27 @@ export function createFloatingEditorController({
       onColor: () => { if (sessions.get(s.id) === s) showColorPicker(s); },
       canEdit: () => sessions.get(s.id) === s && canEdit(s),
       onFind: options => showFindReplace(s, options),
+      onSave: presetDraft ? () => savePresetDraft(s) : undefined,
     });
     s.window.element.addEventListener("keydown", event => {
       if (event.target !== s.window.textarea || !(event.ctrlKey || event.metaKey) || event.altKey ||
           event.isComposing || s.composing || event.keyCode === 229) return;
       const key = event.key.toLowerCase();
+      if (key === "s" && !event.shiftKey && s.presetDraft) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        savePresetDraft(s); return;
+      }
       if (key !== "z" && key !== "y") return;
       event.preventDefault(); event.stopImmediatePropagation();
       if (sessions.get(s.id) === s) runHistory(s, key === "y" || event.shiftKey ? "redo" : "undo");
     }, true);
-    // Activate when the user interacts with this window.
     s.window.element.addEventListener("pointerdown", () => { if (sessions.get(s.id) === s) setActive(s.id); }, true);
     s.window.element.addEventListener("focusin", () => { if (sessions.get(s.id) === s) setActive(s.id); });
 
-    // QuickBar and other native tools often emit jQuery-only input events.
-    // Native input is already handled by the window; bridge synthetic ones once.
     win.jQuery?.(s.window.textarea).on("input.ihFloatingEditor", event => {
       if (!event.originalEvent && sessions.get(s.id) === s) write(s, s.window.textarea.value);
     });
-    // Native source input/change is observed at document level. jQuery-only
-    // host notifications need their own bridge to refresh this session's history
-    // promptly; remove exactly this handler, never another session's listeners.
-    const jqSource = !characterDraft && win.jQuery?.(s.source);
+    const jqSource = !characterDraft && !presetDraft && win.jQuery?.(s.source);
     if (jqSource) {
       const onInput = event => { if (!event.originalEvent) queueSync(s); };
       jqSource.on("input.ihFloatingEditor change.ihFloatingEditor", onInput);
@@ -3385,13 +3140,12 @@ export function createFloatingEditorController({
       s.window.element.classList.add("is-character-draft");
       loadCharacterDraft(s);
     }
+    if (presetDraft) { s.window.element.classList.add("is-preset-draft"); updatePresetDraft(s); }
     s.button?.setAttribute("aria-pressed", "true");
     updateCapacityHints();
     setActive(s.id);
-    // One shared poll drives every live session; (re)start it and theme tracking.
     ensurePolling();
     startThemeTracking();
-    // Ensure the shared theme observer also watches this session's source node.
     if (themeObserver && s.source.isConnected) themeObserver.observe(s.source, { attributes: true, attributeFilter: ["style", "class"] });
     syncTheme(s);
     s.window.focus();
@@ -3401,7 +3155,6 @@ export function createFloatingEditorController({
   function detachButton(maximize, button) {
     const pair = button.parentElement;
     if (ownedPairs.has(pair) && pair?.matches(PAIR) && maximize.parentElement === pair && pair.parentNode) {
-      // Restore the original DOM placement; never replace the native control.
       pair.replaceWith(maximize);
     } else {
       button.remove();
@@ -3410,11 +3163,7 @@ export function createFloatingEditorController({
   }
 
   function styleLauncher(maximize, button) {
-    // Same FA element and shared native styling classes, not a menu_button.
-    // Never copy editor_maximize (host click handler), ids, handlers or data-for.
     const external = maximize.hasAttribute(EXTENSION_EDITOR_TARGET);
-    // Custom classes may be delegated click selectors. Copy only known visual
-    // host classes for an explicit extension button, never its behavior hooks.
     const classes = external
       ? ["right_menu_button", "menu_button"].filter(name => maximize.classList.contains(name))
       : [...maximize.classList].filter(name =>
@@ -3436,7 +3185,6 @@ export function createFloatingEditorController({
     let button = buttons.get(maximize);
     if (!button) {
       button = doc.createElement("i");
-      // Protect the opening gesture too: mousedown/touchstart precede click.
       bindFloatingEditorInteractionBoundary(button);
       button.tabIndex = 0;
       button.setAttribute("role", "button");
@@ -3459,8 +3207,6 @@ export function createFloatingEditorController({
     }
     styleLauncher(maximize, button);
     if (maximize.hasAttribute(EXTENSION_EDITOR_TARGET)) {
-      // Do not reparent framework-owned custom controls into our wrapper. If a
-      // previously native control opted in dynamically, restore its parent first.
       const oldPair = maximize.parentElement;
       if (ownedPairs.has(oldPair) && oldPair.matches(PAIR)) oldPair.replaceWith(maximize);
       if (maximize.previousElementSibling !== button) maximize.before(button);
@@ -3492,7 +3238,6 @@ export function createFloatingEditorController({
 
   function discover(root) {
     if (root !== doc && (!root.isConnected || root.closest?.(".ih-floating-editor"))) return;
-    // Worldbook templates may clone our markup, but not its native listeners.
     const removeClone = button => { if (!ownedButtons.has(button)) button.remove(); };
     if (root.matches?.(LAUNCH)) removeClone(root);
     root.querySelectorAll?.(LAUNCH).forEach(removeClone);
@@ -3506,7 +3251,6 @@ export function createFloatingEditorController({
     cleanupLaunchers();
     const roots = [...pendingRoots];
     pendingRoots.clear();
-    // Inspect only newly inserted subtrees, not the entire document per change.
     for (const root of roots) {
       if (!roots.some(other => other !== root && other.contains(root))) discover(root);
     }
@@ -3528,7 +3272,7 @@ export function createFloatingEditorController({
   }
 
   function isSourceEventFor(s, target) {
-    if (!s || s.characterDraft || !target?.closest) return false;
+    if (!s || s.characterDraft || s.presetDraft || !target?.closest) return false;
     const source = s.source;
     if (target === source || source.contains(target)) return true;
     const cm = target.closest(".cm-editor");
@@ -3544,8 +3288,6 @@ export function createFloatingEditorController({
     if (!sessions.size || inAnyWindow(event.target)) return;
     const target = event.target;
     if (target.matches?.("#themes")) scheduleThemeSync();
-    // A shared selector change (book/theme/preset/avatar) may affect several
-    // sessions' identity: re-check each; a direct source event targets one.
     const shared = target.matches?.(
       "#world_editor_select, #themes, #avatar_url_pole, " + PRESET_SELECTORS.join(", ")
     );
@@ -3560,7 +3302,7 @@ export function createFloatingEditorController({
     const target = event.target;
     const cm = target.closest?.(".cm-editor");
     for (const s of sessions.values()) {
-      if (s.characterDraft) continue;
+      if (s.characterDraft || s.presetDraft) continue;
       if (target === s.source ||
         (cm && (cm.previousElementSibling === s.source || cm.nextElementSibling === s.source ||
           cm.parentElement?.previousElementSibling === s.source))) {
@@ -3573,8 +3315,6 @@ export function createFloatingEditorController({
 
   function onKey(event) {
     if (!sessions.size || !(event.ctrlKey || event.metaKey) || !event.altKey || event.isComposing) return;
-    // Keyboard rescue targets a single explicit window, never a sweep across all.
-    // Prefer the window containing focus, else the active window.
     let target = null;
     for (const s of sessions.values()) if (s.window.element.contains(doc.activeElement)) { target = s; break; }
     target = target || activeSession();
@@ -3588,7 +3328,6 @@ export function createFloatingEditorController({
 
   function syncTheme(only) {
     if (!sessions.size) return;
-    // Locked text must stay locked, but its colors/font still follow the theme.
     const apply = s => {
       const source = s.source;
       const dialog = source.closest("dialog");
@@ -3603,7 +3342,6 @@ export function createFloatingEditorController({
     themeFrame = win.requestAnimationFrame(() => {
       themeFrame = 0;
       if (!sessions.size) return;
-      // One batched theme frame updates every window.
       for (const s of sessionList()) sync(s);
       syncTheme();
     });
@@ -3614,8 +3352,6 @@ export function createFloatingEditorController({
   }
 
   function startThemeTracking() {
-    // One shared observer for every open window; batch each theme frame. No
-    // whole-body subtree style observer or per-keystroke computed style reads.
     if (themeObserver) return;
     themeObserver = new win.MutationObserver(mutations => {
       if (mutations.some(m => m.type === "attributes" ||
@@ -3626,7 +3362,6 @@ export function createFloatingEditorController({
     themeObserver.observe(doc.body, { attributes: true, attributeFilter: ["style", "class"] });
     themeObserver.observe(doc.head, { childList: true, subtree: true, characterData: true,
       attributes: true, attributeFilter: ["href", "media", "disabled"] });
-    // Each open session also watches its own source node for inline style/class.
     for (const s of sessions.values()) {
       if (s.source.isConnected) themeObserver.observe(s.source, { attributes: true, attributeFilter: ["style", "class"] });
     }
@@ -3661,8 +3396,6 @@ export function createFloatingEditorController({
       return;
     }
     cleanupLaunchers();
-    // Full discovery only on explicit host/settings refresh, never per input or
-    // unrelated page mutation. Re-enable needs to find controls added while off.
     discover(doc);
     if (!observing) {
       observer.observe(doc.body, { childList: true, subtree: true, attributes: true,
@@ -3674,8 +3407,12 @@ export function createFloatingEditorController({
     syncTheme();
   }
 
+  function refreshTokenCounts(options) {
+    for (const s of sessions.values()) s.tokenCounter?.refresh(options);
+  }
+
   function onBeforeUnload(event) {
-    if (!sessionList().some(s => s.characterDraft?.saving || characterDraftDirty(s))) return;
+    if (!sessionList().some(s => s.characterDraft?.saving || s.presetDraft?.saving || hasRecoverableDraft(s))) return;
     event.preventDefault();
     event.returnValue = "";
   }
@@ -3706,7 +3443,6 @@ export function createFloatingEditorController({
         }
         for (const node of m.addedNodes) {
           if (node.nodeType !== 1 || node.closest?.(".ih-floating-editor")) continue;
-          // Ignore the controller's own wrapping, insertion and movement.
           if (ownedButtons.has(node) || ownedPairs.has(node)) continue;
           if (buttons.has(node) && node.previousElementSibling === buttons.get(node) &&
               (node.parentElement.matches(PAIR) || node.hasAttribute(EXTENSION_EDITOR_TARGET))) continue;
@@ -3721,9 +3457,6 @@ export function createFloatingEditorController({
         }
         for (const node of m.removedNodes) {
           if (node.nodeType !== 1 || node.isConnected) continue;
-          // A framework may remove only the backing field, leaving its toolbar
-          // mounted. Retire that launch icon too; a later source insertion retries
-          // the tracked control without scanning the whole document.
           if (node.matches(EDITABLE) || node.querySelector(EDITABLE)) scheduleDiscovery();
           for (const s of sessions.values()) {
             if (node === s.source || node.contains(s.source) ||
@@ -3731,7 +3464,6 @@ export function createFloatingEditorController({
           }
           if (node.matches(MAXIMIZE + ", " + LAUNCH + ", " + PAIR) || node.querySelector(MAXIMIZE + ", " + LAUNCH)) {
             scheduleDiscovery();
-            // Restore a launcher removed independently of its native control.
             for (const [maximize, button] of buttons) {
               if (maximize.isConnected && !button.isConnected) scheduleDiscovery(maximize);
             }
@@ -3769,9 +3501,8 @@ export function createFloatingEditorController({
   }
 
   return {
-    start, refresh, syncTheme, open, close, closeAll, flushAndCloseAll, destroy,
+    start, refresh, syncTheme, open, close, closeAll, flushAndCloseAll, destroy, refreshTokenCounts,
     getToolTarget: element => toolTargets.get(element) || null,
-    // Backwards-compatible: `active` is the active (most recently focused) window.
     get active() { return activeSession(); },
     get sessions() { return sessionList(); },
     get count() { return sessions.size; },

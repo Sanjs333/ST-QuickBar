@@ -14,9 +14,15 @@ import { extension_settings } from "../../../extensions.js";
 import * as STExtensions from "../../../extensions.js";
 import { power_user } from "../../../power-user.js";
 import * as SlashCommands from "../../../slash-commands.js";
-import { createFloatingEditorController } from "./floating-editor.js";
-import { createCharacterFieldStore } from "./character-description-store.js";
+import { createFloatingEditorController, createFloatingEditorAdapter, resolveCodeMirrorForSource } from "./floating-editor.js";
+import * as STTokenizers from "../../../tokenizers.js";
+import * as TextGenerationSettings from "../../../textgen-settings.js";
+import {
+  supportsEditorTokenCount, createTokenCountBinding, createNativePromptTokenCounter,
+} from "./editor-token-counter.js";
+import { createCharacterFieldStore, createPresetEntryStore, createPresetSwitchGuard } from "./editor-stores.js";
 import { getPresetManager } from "../../../preset-manager.js";
+import * as OpenAISettings from "../../../openai.js";
 
 const openCharacterChat = SillyTavernScript.openCharacterChat;
 const executeSlashCommandsWithOptions = (...args) => {
@@ -35,8 +41,6 @@ let floatingEditorEpoch = 0;
 let floatingPresetEpoch = 0;
 const characterFieldStore = createCharacterFieldStore({ getRequestHeaders });
 
-// Patch only the saved scalar field in cached/raw data. Do not reload another
-// character or replace the whole form: it may contain unrelated unsaved edits.
 function acceptSavedCharacterField({ avatar, field, value }) {
   if (!["description", "personality", "scenario", "first_mes"].includes(field) || typeof value !== "string") {
     throw new Error("已保存字段的标识或内容无效，未同步到本地角色数据。");
@@ -64,8 +68,44 @@ function acceptSavedCharacterField({ avatar, field, value }) {
   }
 }
 
+const floatingPresetSwitch = createPresetSwitchGuard({
+  getApplicationPromise: typeof OpenAISettings.getPresetApplicationPromise === "function"
+    ? () => OpenAISettings.getPresetApplicationPromise() : undefined,
+});
+const presetEntryStore = createPresetEntryStore({
+  getManager: () => OpenAISettings.promptManager,
+  getPresetName: () => floatingPresetSwitch.isPending()
+    ? "" : getPresetManager("openai")?.getSelectedPresetName() || "",
+});
+
+let editorTokenContextEpoch = 0;
+function editorTokenContextKey() {
+  const api = SillyTavernScript.main_api;
+  return JSON.stringify([
+    editorTokenContextEpoch, api, power_user.tokenizer,
+    api === "openai" ? STTokenizers.getTokenizerModel() : STTokenizers.getTokenizerBestMatch(api),
+    api === "textgenerationwebui" ? [
+      TextGenerationSettings.textgenerationwebui_settings?.type,
+      TextGenerationSettings.getTextGenModel?.(),
+    ] : null,
+    SillyTavernScript.online_status,
+  ]);
+}
+const countEditorTokens = text => STTokenizers.getTokenCountAsync(text);
+const nativePromptTokenCounter = createNativePromptTokenCounter({
+  document, countTokens: countEditorTokens, createAdapter: createFloatingEditorAdapter,
+  resolveCodeMirror: resolveCodeMirrorForSource, getContextKey: editorTokenContextKey,
+  getIdentity: () => JSON.stringify([floatingPresetEpoch, getPresetManager("openai")?.getSelectedPresetName()]),
+  isEnabled: () => getSettings().enabled,
+  isContextReady: () => !floatingPresetSwitch.isPending(),
+});
+
 const floatingEditorController = createFloatingEditorController({
+  createTokenCounter: ({ source, ...options }) => supportsEditorTokenCount(source)
+    ? createTokenCountBinding({ ...options, countTokens: countEditorTokens, getContextKey: editorTokenContextKey })
+    : null,
   characterFieldStore,
+  presetEntryStore,
   onCharacterFieldSaved: acceptSavedCharacterField,
   getContext: () => ({
     ...STExtensions.getContext(),
@@ -80,8 +120,6 @@ const floatingEditorController = createFloatingEditorController({
   openFindReplace: (options) => findReplaceController.toggleForTarget(options),
   onHistoryChange: (target) => {
     historyManager.updateButtons();
-    // Controller writes do not synthesize a second input event on the proxy.
-    // Keep the one shared find UI current for local, toolbar and keyboard edits.
     if (
       findReplaceController.active &&
       !findReplaceController._isReplacing &&
@@ -384,8 +422,6 @@ function shouldIgnoreFocusedElement(el) {
 }
 
 function getInsertionTarget() {
-  // A focused floating editor is explicit intent, even while a chat floor is
-  // being edited. Retain retired ownership so commands cannot fall back to chat.
   if (getFloatingEditorToolTarget(_lastFocusedEditable))
     return _lastFocusedEditable;
   const editingTextarea = $("#chat .mes textarea:visible").first();
@@ -436,8 +472,6 @@ function getCodeMirrorView(el) {
   return null;
 }
 
-// Search-only bridge: keep other tools and all existing search behavior intact.
-// BaiBai's newer CM6 uses cmTile instead of the legacy cmView DOM property.
 function getFindReplaceCodeMirrorView(el) {
   const legacyView = getCodeMirrorView(el);
   if (legacyView) return legacyView;
@@ -463,8 +497,6 @@ function getFindReplaceCodeMirrorView(el) {
   return null;
 }
 
-// One bridge for the existing toolbar and find UI. Owned-but-closed targets
-// still return a rejecting descriptor; never reinterpret them as ordinary fields.
 function getFloatingEditorToolTarget(el) {
   return typeof floatingEditorController !== "undefined"
     ? floatingEditorController.getToolTarget?.(el) || null
@@ -1991,7 +2023,6 @@ const findReplaceController = {
       this._targetTextarea = $(this._floatingTarget.target);
       _lastFocusedEditable = this._floatingTarget.target;
     } else if (target) {
-      // Explicit targets never resolve through the chat-floor fallback.
       const cmView = getFindReplaceCodeMirrorView(target);
       this._cmView = cmView;
       this._targetTextarea = cmView ? null : $(target);
@@ -2045,7 +2076,6 @@ const findReplaceController = {
         }
       } catch (e) {}
     }, 50);
-    // Closing a former owner must not close a newer window's search.
     return () => {
       if (this._ownerToken === ownerToken) this.close();
     };
@@ -2227,7 +2257,6 @@ const findReplaceController = {
       dialogHost.addEventListener("close", this._dialogCloseHandler);
     }
     if (this._floatingTarget) {
-      // The shared bar remains the existing UI, just above the max-three windows.
       bar[0].style.zIndex = "10034";
       bar[0].classList.add("ih-find-floating-target");
       bar[0].setAttribute("aria-label", "在当前悬浮编辑器中查找和替换");
@@ -2371,7 +2400,6 @@ const findReplaceController = {
       this._doSearch();
     });
     bar.find('[data-action="close"]').on("click", (event) => {
-      // jQuery.remove() tears down the root handler before this click bubbles.
       event.stopPropagation();
       this.close();
     });
@@ -2442,7 +2470,7 @@ const findReplaceController = {
       if (!self.active || !self._barEl || !self._barEl[0]) return;
       if (self._floatingTarget) {
         self._checkTarget();
-        return; // Never move a target-bound bar into an unrelated modal.
+        return;
       }
       const openDialogs = document.querySelectorAll("dialog[open]");
       const topHost =
@@ -2539,8 +2567,6 @@ const findReplaceController = {
   _makeLiveInputHandler() {
     const self = this;
     return function (immediate = false) {
-      // Native proxy input and controller notifications describe the same edit.
-      // Batch them; ordinary non-floating search keeps its existing behavior.
       if (self._floatingTarget && immediate !== true) {
         if (immediate?.isComposing) return;
         self._scheduleFloatingInputRefresh();
@@ -2575,8 +2601,6 @@ const findReplaceController = {
   _scanMatches(text, term) {
     const matches = [];
     if (!term) return { matches, truncated: false };
-    // Match in the ORIGINAL string. Lowercasing can expand characters (e.g. İ)
-    // and corrupt offsets; use the same literal/case rules as replace-all.
     const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const regex = new RegExp(escaped, this._caseSensitive ? "g" : "gi");
     const MAX_MATCHES = 10000;
@@ -2594,7 +2618,6 @@ const findReplaceController = {
 
   _flushPendingSearch() {
     if (!this.active || !this._barEl || this._composingInput) return false;
-    // Navigation/replacement must see the newest text even inside the debounce.
     if (this._floatingInputTimer) {
       clearTimeout(this._floatingInputTimer);
       this._floatingInputTimer = null;
@@ -2636,8 +2659,6 @@ const findReplaceController = {
     clearTimeout(this._searchDebounceTimer);
     this._searchDebounceTimer = null;
     if (this._floatingTarget && !this._checkTarget()) return;
-    // Floating search is pinned to its owner. Focus in a second window is not
-    // permission to move a pending replacement there.
     try {
       if (!this._floatingTarget) {
         const _editingTA = $("#chat .mes textarea:visible").first();
@@ -2949,7 +2970,7 @@ const findReplaceController = {
     if (field?.readOnly || field?.disabled) return false;
     if (this._floatingTarget && this._matchesText !== field.value) {
       this._rebuildMatchesWithoutHighlight();
-      return false; // Offsets were calculated from an older document.
+      return false;
     }
     return true;
   },
@@ -3067,7 +3088,6 @@ const findReplaceController = {
     const text = ta.value;
     const escaped = this._searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const regex = new RegExp(escaped, this._caseSensitive ? "g" : "gi");
-    // Function replacements insert dollar signs literally without interpolation.
     const newText = text.replace(regex, () => replaceWith);
     const selection = {
       from: Math.min(ta.selectionStart, newText.length),
@@ -3537,10 +3557,6 @@ function openColorPicker(options = {}) {
     const owner = target.closest(".ih-floating-editor");
     if (owner) {
       portal.addClass("ih-floating-editor-color-picker");
-      // Clear the whole floating-editor window band (floating-editor.js
-      // MIN/MAX_LAYER = 10030–10032), not just this one owner window: a picker
-      // pinned to owner+1 could tie the active window's layer and get covered.
-      // Floor at 10033 keeps it above every window, below the find bar (10034).
       portal.css(
         "z-index",
         Math.max(
@@ -5808,9 +5824,70 @@ async function doPaste() {
   insertTag(clipText);
 }
 
-function doScrollToTop() {
-  const scrollEl = findActiveScrollContainer();
-  if (!scrollEl) return;
+function getFocusedScrollEditable() {
+  let active = document.activeElement;
+  try {
+    while (active?.tagName === "IFRAME" && active.contentDocument) {
+      active = active.contentDocument.activeElement;
+    }
+  } catch (e) {}
+  return isEditableElement(active) && !shouldIgnoreFocusedElement(active)
+    ? active
+    : null;
+}
+
+function rememberScrollNavigationFocus() {
+  const target = getFocusedScrollEditable();
+  if (target) _lastFocusedForScroll = target;
+}
+
+function isScrollNavigationTargetAvailable(el) {
+  try {
+    while (el) {
+      const doc = el.ownerDocument;
+      if (!doc?.contains(el) || !el.getClientRects().length) return false;
+      if (doc.defaultView.getComputedStyle(el).visibility === "hidden")
+        return false;
+      const frame = doc.defaultView.frameElement;
+      if (frame && frame.contentDocument !== doc) return false;
+      el = frame;
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function findScrollNavigationContainer() {
+  const target =
+    getFocusedScrollEditable() || _lastFocusedForScroll || _lastFocusedEditable;
+  if (!target) return findActiveScrollContainer();
+  if (!isScrollNavigationTargetAvailable(target)) return null;
+
+  const cmScroller =
+    getCodeMirrorView(target)?.scrollDOM || target.closest(".cm-scroller");
+  if (cmScroller)
+    return isScrollNavigationTargetAvailable(cmScroller) ? cmScroller : null;
+  if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") return target;
+
+  let root = target;
+  const doc = target.ownerDocument;
+  while (root.parentElement?.isContentEditable && root.parentElement !== doc.body)
+    root = root.parentElement;
+  for (let el = root; el && el !== doc.body; el = el.parentElement) {
+    if (el.id === "chat" || el.tagName === "DIALOG") break;
+    const overflow = doc.defaultView.getComputedStyle(el).overflowY;
+    if (
+      el.scrollHeight > el.clientHeight + 2 &&
+      (overflow === "auto" || overflow === "scroll" || overflow === "hidden")
+    )
+      return el;
+  }
+  return root;
+}
+
+function doScrollToTop(scrollEl = findScrollNavigationContainer()) {
+  if (!scrollEl || !isScrollNavigationTargetAvailable(scrollEl)) return;
   const isTextLike =
     scrollEl.tagName === "TEXTAREA" || scrollEl.tagName === "INPUT";
   const isCmScroller = !!(
@@ -5839,9 +5916,8 @@ function doScrollToLastAi() {
   messageNavigation._lastNavTime = Date.now();
 }
 
-function doScrollToBottom() {
-  const scrollEl = findActiveScrollContainer();
-  if (!scrollEl) return;
+function doScrollToBottom(scrollEl = findScrollNavigationContainer()) {
+  if (!scrollEl || !isScrollNavigationTargetAvailable(scrollEl)) return;
   const isTextLike =
     scrollEl.tagName === "TEXTAREA" || scrollEl.tagName === "INPUT";
   const isCmScroller = !!(
@@ -7036,7 +7112,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.3.3";
+const EXTENSION_VERSION = "3.3.4";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -7870,12 +7946,13 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.3</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.4</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>适配打字指示器</b>：配合打字指示器 4.6.3，预设、主题、播放器和气泡样式的多行编辑框均可使用悬浮编辑，原放大及 JSON 格式化按钮保留。</li>
-  <li><b>扩展第三方插件兼容</b>：使用酒馆标准放大按钮的文本框继续自动支持；自制放大按钮可由插件作者添加对应标记进行适配，不改变原按钮功能。</li>
-  <li><b>防止切换后误改内容</b>：在打字指示器及已适配切换保护的编辑框中，更换主题、方案或重新加载后，旧窗口会锁定并保留文字供复制，不会将旧内容或撤销记录写入新对象。</li>
-  <li><b>完善按钮清理</b>：原编辑框或放大按钮移除、更换后，悬浮入口同步更新，避免留下无效按钮。</li>
+  <li><b>修复回顶 / 回底错位</b>：光标在编辑框内时，优先滚动该框内容；点击悬浮按钮、移动端收起键盘或正文较短时，不再误跳到聊天顶部 / 底部。</li>
+  <li><b>修复预设悬浮窗内容丢失</b>：关闭原编辑面板或切换条目不再清空旧窗口；A、B 条目可分别开窗，再次打开同一条目回到已有草稿，不自动替换或保存。</li>
+  <li><b>完善预设草稿保存</b>：预设悬浮窗新增「保存条目」及 Ctrl/⌘+S；冲突或保存失败时保留草稿，关闭未保存内容前确认。整份预设仍需使用酒馆原生按钮保存。</li>
+  <li><b>新增 Token 计数</b>：预设正文的「提示词」标题，以及角色设定、世界书、预设等指定悬浮窗增加 Token 数，沿用原生小字样式；世界书和角色卡原有计数不重复添加。</li>
+  <li><b>调整设置入口</b>：「悬浮编辑窗」开关移入「更多设置」，原有设置和开关行为保持不变。</li>
 </ul>
 `;
 
@@ -7966,15 +8043,17 @@ function openHelpPanel() {
 <p>滚动类功能（跳转顶部/底部、翻页等）会自动作用于光标所在的可滚动容器，而非默认的聊天区。</p>
 
 <div class="ih-help-h4"><i class="fa-solid fa-up-right-from-square"></i> 悬浮编辑窗</div>
-<p>点击放大图标左侧的悬浮编辑图标，可独立编辑角色描述、性格、场景、主开场白、世界书条目、自定义 CSS，以及打字指示器等已适配插件的文本框。默认启用，可在设置中的<q>「悬浮编辑窗」</q>关闭；与下文的悬浮球 / 按钮面板是不同功能。</p><p>使用酒馆标准放大按钮的插件会自动显示悬浮入口；自制按钮需要插件作者适配。打字指示器及已适配切换保护的编辑框，在更换主题或方案后会锁定旧窗口，原内容仍可复制。修改仍需按原插件的方式保存。</p>
+<p>点击放大图标左侧的悬浮编辑图标，可独立编辑角色描述、性格、场景、主开场白、世界书条目、自定义 CSS，以及打字指示器等已适配插件的文本框。默认启用，可在设置 → 更多设置中的<q>「悬浮编辑窗」</q>关闭；与下文的悬浮球 / 按钮面板是不同功能。</p><p>使用酒馆标准放大按钮的插件会自动显示悬浮入口；自制按钮需要插件作者适配。打字指示器及已适配切换保护的编辑框，在更换主题或方案后会锁定旧窗口，原内容仍可复制。修改仍需按原插件的方式保存。</p>
 <ul>
+    <li><b>Token 计数</b>：只给原生预设正文的「提示词」标题补上原生小字计数，不重复添加世界书或角色卡已有的计数。角色设定、世界书、预设 / 系统提示词等指定悬浮窗在标题下方显示 (Tokens: 数字)，与保存状态同一行，不占用标题空间，也不加背景边框。按酒馆当前分词器统计各窗口原文，不展开宏；停下输入后更新，切换模型后重算，不触发保存。CSS 和普通插件配置框不显示。</li>
     <li><b>多窗与布局</b>：最多同时打开 3 个字段 / 角色草稿窗口；再次打开同一目标会聚焦已有窗口。支持拖拽、折叠、缩放及位置尺寸记忆；图钉固定位置和大小，窗口外观跟随酒馆主题。</li>
     <li><b>多角色多字段</b>：已保存角色的描述、性格、场景、主开场白按角色与字段独立绑定，标题标明编辑目标。切换 A/B 后仍可编辑；同一角色的不同字段也能分别开窗，重复打开同一角色同一字段会回到已有草稿，总窗口上限仍为 3 个。停止输入约 700 毫秒后自动保存到对应角色与字段，不需要保存或重新读取按钮，不跟随当前选中的角色，也不覆盖其他字段。主开场白只改角色卡，不改已有聊天消息和备用开场白。未保存内容不会跨刷新保留。</li>
-    <li><b>保存与冲突</b>：保存前检查服务器和原框是否被其他操作修改；发生冲突则暂停同步并保留文字，可复制后关闭并重新打开。临时失败会有限次自动重试。关闭或停用时先完成待保存内容，只有保存未成功时才询问是否放弃；刷新离页也会提示尚未保存的内容。</li>
+    <li><b>预设条目独立草稿</b>：已有条目按预设名与条目标识绑定。原面板关闭、保存或切换 A/B 不会清空悬浮窗；再次打开同条目会回到已有草稿。点底部「保存条目」或按 Ctrl/⌘+S 只保存正文，整份命名预设仍需在酒馆保存。切到其他预设后需切回原预设再保存；原框并发修改、删除或保存失败时保留草稿。有未保存内容时关闭会确认，刷新有离页提示，但不跨刷新恢复。尚未保存的新条目需先原生保存一次。</li>
+    <li><b>角色字段保存与冲突</b>：保存前检查服务器和原框是否被其他操作修改；发生冲突则暂停同步并保留文字，可复制后关闭并重新打开。临时失败会有限次自动重试。关闭或停用时先完成待保存内容，只有保存未成功时才询问是否放弃；刷新离页也会提示尚未保存的内容。</li>
     <li><b>其他字段实时同步</b>：未适配的其他角色字段、世界书、CSS、插件文本框及尚未保存的新角色表单，仍立即写回原编辑框，关闭不撤销修改。底部<q>「变更历史」</q>可预览并回到历史状态，回退本身也可撤销；角色字段的撤销、重做和历史恢复也会自动保存。</li>
-    <li><b>底部工具</b>：左侧为变更历史、撤销、重做，右侧为查找和 CSS 专属取色器，与缩放图标水平对齐。角色字段与其他窗口使用相同的底部工具，不再增加保存、重新读取按钮。底栏、工具栏和正文快捷键共用撤销重做处理，每个窗口的历史独立。</li>
+    <li><b>底部工具</b>：左侧为变更历史、撤销、重做，右侧为查找和 CSS 专属取色器，与缩放图标水平对齐。角色字段仍自动保存；预设草稿额外提供「保存条目」，其他实时同步窗口不增加保存按钮。底栏、工具栏和正文快捷键共用撤销重做处理，每个窗口的历史独立。</li>
     <li><b>查找替换</b>：调用插件现有查找栏，明确绑定当前窗口；聚焦其他输入框不会转移替换目标。通过另一窗口的查找按钮切换目标；折叠、关闭或锁定原窗口会关闭其查找栏。</li>
-    <li><b>对象保护</b>：独立角色字段草稿在切换角色后仍可编辑，其他实时同步字段在绑定对象变化时锁定旧窗，保留可复制内容。只读或输入法组字期间不执行写入操作。</li>
+    <li><b>对象保护</b>：独立角色字段 / 预设草稿在切换对象后仍可编辑，其他实时同步字段在绑定对象变化时锁定旧窗，保留可复制内容；关闭锁定窗口也会确认。只读或输入法组字期间不执行写入操作。</li>
 </ul>
 <p><b>正文快捷键</b>：Ctrl/⌘+F 查找，Ctrl/⌘+H 替换，Ctrl/⌘+Z 撤销，Ctrl+Y 或 Ctrl/⌘+Shift+Z 重做。CSS 可用 Ctrl/⌘+Alt+Backspace 请求恢复；Ctrl/⌘+Alt+Esc 关闭目标窗口。</p>
 
@@ -8355,13 +8434,13 @@ function openHelpPanel() {
 }
 
 const _IH_SEARCH_CACHE = new Map();
-const _IH_SEARCH_CACHE_TTL = 30 * 60 * 1000; // 缓存有效期：30 分钟，想更久就调大（单位毫秒），越久越占内存
-const _IH_SEARCH_CACHE_MAX = 300; // 最多缓存多少个聊天档（只管份数，不管每份多大）
-const _IH_SEARCH_CACHE_MAX_CHARS = 60000000; // 缓存总字数上限，约 120MB 内存；内存吃紧调小，聊天档特别长可调大
+const _IH_SEARCH_CACHE_TTL = 30 * 60 * 1000;
+const _IH_SEARCH_CACHE_MAX = 300;
+const _IH_SEARCH_CACHE_MAX_CHARS = 60000000;
 let _IH_SEARCH_CACHE_CHARS = 0;
 const _IH_BRANCH_CACHE_LS_KEY = "ih_branch_cache";
-const _IH_BRANCH_CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 分支扫描缓存有效期：3 天
-const _IH_BRANCH_CACHE_MAX_CHARS = 5; // 最多缓存几个角色的扫描结果
+const _IH_BRANCH_CACHE_TTL = 3 * 24 * 60 * 60 * 1000;
+const _IH_BRANCH_CACHE_MAX_CHARS = 5;
 
 function _ihGetBranchCacheKey() {
   try {
@@ -8820,10 +8899,8 @@ function ihInstallGenerationInfoTracking({
     if (record(Number(messageId))) pending = null;
   });
   on(eventTypes.GENERATION_ENDED, () => {
-    // 续写失败也可能改变计时，只在收到流式内容后保存。
     if (pending?.streamRecorded) record(pending.chat.length - 1);
     else pending = null;
-    // 流式结束事件早于消息接收事件，快照需保留到后者。
   });
   on(eventTypes.CHAT_CHANGED, () => { pending = null; });
 }
@@ -21783,6 +21860,11 @@ function bindButtonAction(btn, key) {
   const action = getActionForKey(key);
   if (!action) return;
 
+  const isBoundaryScroll = key === "scrollToTop" || key === "scrollToBottom";
+  if (isBoundaryScroll) {
+    btn.on("pointerdown mousedown touchstart", rememberScrollNavigationFocus);
+  }
+
   if (key === "cursorLeft" || key === "cursorRight") {
     bindRepeatableButton(btn, action);
     return;
@@ -21813,12 +21895,16 @@ function bindButtonAction(btn, key) {
 
         const isScrollKey = scrollKeys.has(key);
         const refocusTarget = getInsertionTarget();
+        const scrollTarget = isBoundaryScroll
+          ? findScrollNavigationContainer()
+          : undefined;
 
         if (isScrollKey) {
           ihBlurIfKeyboardAlreadyDismissed();
         }
 
-        action();
+        if (isBoundaryScroll) action(scrollTarget);
+        else action();
 
         if (!isScrollKey && isInputButton(key)) {
           setTimeout(() => {
@@ -21836,7 +21922,7 @@ function bindButtonAction(btn, key) {
         }
       });
   } else {
-    btn.on("click", action);
+    btn.on("click", isBoundaryScroll ? () => action() : action);
   }
 }
 
@@ -25933,8 +26019,6 @@ function setupToolbarSwipeCollapse() {
   );
 }
 
-// Startup focus is not evidence of user intent (including restored iframe/CM
-// focus). Only gate toolbar visibility; never blur or intercept editor events.
 const toolbarStartupGuard = {
   _userInteracted: false,
   _documents: new WeakSet(),
@@ -25956,8 +26040,6 @@ const toolbarStartupGuard = {
       this._userInteracted = true;
       const el = event.target;
       if (!isEditableElement(el) || shouldIgnoreFocusedElement(el)) return;
-      // A restored editor may already have focus, so tapping/typing in it need
-      // not generate another focus event. Show the matching toolbar state now.
       const active = el.ownerDocument?.activeElement;
       if (active !== el && !active?.contains?.(el)) return;
       const sendForm = document.getElementById("send_form");
@@ -26123,6 +26205,7 @@ function setupGlobalFocusTracking() {
     if (isOurUiElement(target)) return;
     if (target === sendTextarea) return;
     _lastFocusedEditable = null;
+    _lastFocusedForScroll = null;
     clearExternalFocused();
   }
 
@@ -26133,21 +26216,10 @@ function setupGlobalFocusTracking() {
       if (!isEditableElement(el)) {
         return;
       }
-      try {
-        const $el = $(el);
-        if (
-          !$el.closest(
-            ".ih-dialog-overlay, #input_helper_toolbar, " +
-              ".ih-find-bar, .ih-folder-dropdown-portal, .ih-floating-panel, " +
-              ".shortcut-input",
-          ).length
-        ) {
-          _lastFocusedForScroll = el;
-        }
-      } catch (ex) {}
       if (shouldIgnoreFocusedElement(el)) {
         return;
       }
+      _lastFocusedForScroll = el;
       if (el === sendTextarea) {
         _lastFocusedEditable = null;
         clearExternalFocused();
@@ -26176,7 +26248,6 @@ function setupGlobalFocusTracking() {
         }
       }
       if (findReplaceController.active && findReplaceController._barEl) {
-        // Only skip the synchronous focus event from our own CM navigation.
         if (findReplaceController._cmNavigationFocusTarget === el) return;
         if (findReplaceController._floatingNavigationFocusTarget === el) return;
         setTimeout(() => {
@@ -26217,6 +26288,7 @@ function setupGlobalFocusTracking() {
     true,
   );
 
+  document.addEventListener("pointerdown", handleOutsideInteraction, true);
   document.addEventListener("mousedown", handleOutsideInteraction, true);
   document.addEventListener("touchstart", handleOutsideInteraction, {
     capture: true,
@@ -26236,6 +26308,7 @@ function setupGlobalFocusTracking() {
           const el = e.target;
           if (!isEditableElement(el)) return;
           _lastFocusedEditable = el;
+          _lastFocusedForScroll = el;
           markExternalFocused();
           historyManager.ensureExternalHistory(el);
           historyManager.updateButtons();
@@ -26269,6 +26342,7 @@ function setupGlobalFocusTracking() {
           if (!target) return;
           if (isEditableElement(target)) return;
           _lastFocusedEditable = null;
+          _lastFocusedForScroll = null;
           clearExternalFocused();
         },
         true,
@@ -26280,6 +26354,7 @@ function setupGlobalFocusTracking() {
           if (!target) return;
           if (isEditableElement(target)) return;
           _lastFocusedEditable = null;
+          _lastFocusedForScroll = null;
           clearExternalFocused();
         },
         { capture: true, passive: true },
@@ -26981,7 +27056,21 @@ jQuery(async () => {
       document.head.appendChild(stylesheet);
     }
     floatingEditorController.start();
-    const refreshFloatingEditor = () => floatingEditorController.refresh();
+    nativePromptTokenCounter.start();
+    const refreshEditorTokenCounts = () => {
+      editorTokenContextEpoch++;
+      nativePromptTokenCounter.refresh({ force: true });
+      floatingEditorController.refreshTokenCounts({ force: true });
+    };
+    for (const name of ["MAIN_API_CHANGED", "CHATCOMPLETION_MODEL_CHANGED", "CONNECTION_PROFILE_LOADED"]) {
+      if (event_types[name]) eventSource.on(event_types[name], refreshEditorTokenCounts);
+    }
+    $(document).on("change.ihEditorTokenCounter", "#tokenizer", refreshEditorTokenCounts);
+    window.addEventListener("online", refreshEditorTokenCounts);
+    const refreshFloatingEditor = () => {
+      floatingEditorController.refresh();
+      nativePromptTokenCounter.refresh();
+    };
     const switchEditorContext = () => {
       floatingEditorEpoch++;
       refreshFloatingEditor();
@@ -27002,9 +27091,16 @@ jQuery(async () => {
     for (const name of ["PRESET_CHANGED", "OAI_PRESET_CHANGED_BEFORE"]) {
       if (event_types[name])
         eventSource.on(event_types[name], () => {
+          if (name === "OAI_PRESET_CHANGED_BEFORE") floatingPresetSwitch.begin();
           floatingPresetEpoch++;
           refreshFloatingEditor();
         });
+    }
+    if (event_types.OAI_PRESET_CHANGED_AFTER) {
+      eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, () => {
+        floatingPresetSwitch.settled();
+        refreshFloatingEditor();
+      });
     }
     for (const name of [
       "CHAT_CHANGED",
@@ -27165,6 +27261,7 @@ jQuery(async () => {
                     const el = e.target;
                     if (!isEditableElement(el)) return;
                     _lastFocusedEditable = el;
+                    _lastFocusedForScroll = el;
                     if (
                       toolbarStartupGuard.canExpand() &&
                       document.getElementById("send_form")
@@ -27204,6 +27301,7 @@ jQuery(async () => {
                     const target = e.target;
                     if (!target || isEditableElement(target)) return;
                     _lastFocusedEditable = null;
+                    _lastFocusedForScroll = null;
                     const sf = document.getElementById("send_form");
                     if (sf) sf.classList.remove("ih-external-focused");
                   },
@@ -27215,6 +27313,7 @@ jQuery(async () => {
                     const target = e.target;
                     if (!target || isEditableElement(target)) return;
                     _lastFocusedEditable = null;
+                    _lastFocusedForScroll = null;
                     const sf = document.getElementById("send_form");
                     if (sf) sf.classList.remove("ih-external-focused");
                   },

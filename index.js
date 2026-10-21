@@ -385,6 +385,24 @@ function getFeatherSendSvg() {
 let _lastFocusedEditable = null;
 let _savedRange = null;
 let _lastFocusedForScroll = null;
+let _lastEditTarget = null;
+function isToolUiElement(el) {
+  try {
+    return !!$(el).closest(
+      "#input_helper_toolbar, .ih-find-bar, .ih-folder-dropdown-portal, .ih-floating-panel, .shortcut-input",
+    ).length;
+  } catch (e) {
+    return true;
+  }
+}
+function getEditTarget(noFallback) {
+  for (const el of [_lastEditTarget, _lastFocusedEditable])
+    if (el?.isConnected && el.ownerDocument?.defaultView && isEditableElement(el))
+      return el;
+  return noFallback
+    ? null
+    : $("#chat .mes textarea:visible")[0] || getMessageInput()[0];
+}
 function isEditableElement(el) {
   if (!el || !el.tagName) return false;
   const tag = el.tagName;
@@ -440,61 +458,26 @@ function getInsertionTarget() {
 }
 
 function getCodeMirrorView(el) {
-  if (!el) return null;
-  let node = el;
-  while (node) {
-    try {
-      if (
-        node.classList &&
-        node.classList.contains("cm-content") &&
-        node.cmView
-      ) {
-        const v =
-          node.cmView.view ||
-          (node.cmView.rootView && node.cmView.rootView.view);
-        if (v) return v;
-      }
-      if (node.classList && node.classList.contains("cm-editor")) {
-        const content = node.querySelector(".cm-content");
-        if (content && content.cmView) {
-          const v =
-            content.cmView.view ||
-            (content.cmView.rootView && content.cmView.rootView.view);
-          if (v) return v;
-        }
-        return null;
-      }
-    } catch (e) {
-      return null;
-    }
-    node = node.parentElement;
-  }
-  return null;
-}
-
-function getFindReplaceCodeMirrorView(el) {
-  const legacyView = getCodeMirrorView(el);
-  if (legacyView) return legacyView;
-
   try {
-    const element = el && (el.nodeType === 3 ? el.parentElement : el);
-    const host = element?.closest?.(".cm-content, .cm-editor");
-    if (!host) return null;
-    const content = host.classList.contains("cm-content")
+    const node = el && (el.nodeType === 3 ? el.parentElement : el);
+    const host = node?.closest?.(".cm-content, .cm-editor");
+    const content = host?.classList.contains("cm-content")
       ? host
-      : host.querySelector(".cm-content");
-    const view = content?.cmTile?.root?.view;
-    if (
-      view &&
-      !view.destroyed &&
-      view.contentDOM === content &&
-      view.state?.doc &&
-      typeof view.dispatch === "function"
-    ) {
-      return view;
-    }
-  } catch (e) {}
-  return null;
+      : host?.querySelector(".cm-content");
+    const v =
+      content?.cmView?.view ||
+      content?.cmView?.rootView?.view ||
+      content?.cmTile?.root?.view;
+    return v &&
+      !v.destroyed &&
+      v.contentDOM === content &&
+      v.state?.doc &&
+      typeof v.dispatch === "function"
+      ? v
+      : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 function getFloatingEditorToolTarget(el) {
@@ -1852,7 +1835,7 @@ const streamScrollController = {
     }
     this.reset();
     setTimeout(() => {
-      doScrollToLastAi();
+      doScrollToLastAi(document.getElementById("chat"));
     }, 400);
   },
 
@@ -1982,7 +1965,7 @@ const findReplaceController = {
   _dialogCloseHandler: null,
 
   toggle() {
-    const target = getFloatingEditorToolTarget(_lastFocusedEditable);
+    const target = getFloatingEditorToolTarget(getEditTarget(true));
     if (target) return target.find();
     this.active ? this.close() : this.open();
   },
@@ -2013,41 +1996,21 @@ const findReplaceController = {
     focusInput = null,
   } = {}) {
     if (this.active || this._barEl) this.close();
-    this._cmView = null;
-    this._floatingTarget = getFloatingEditorToolTarget(
-      target || _lastFocusedEditable,
-    );
-    const editTextarea = $("#chat .mes textarea:visible").first();
+    let el = target || getEditTarget();
+    this._floatingTarget = getFloatingEditorToolTarget(el);
     if (this._floatingTarget) {
       if (!this._floatingTarget.isValid()) return null;
-      this._targetTextarea = $(this._floatingTarget.target);
-      _lastFocusedEditable = this._floatingTarget.target;
-    } else if (target) {
-      const cmView = getFindReplaceCodeMirrorView(target);
-      this._cmView = cmView;
-      this._targetTextarea = cmView ? null : $(target);
-    } else if (editTextarea.length) {
-      this._targetTextarea = editTextarea;
-    } else if (
-      _lastFocusedEditable &&
-      _lastFocusedEditable.ownerDocument &&
-      _lastFocusedEditable.ownerDocument.contains(_lastFocusedEditable)
-    ) {
-      const cmView = getFindReplaceCodeMirrorView(_lastFocusedEditable);
-      if (cmView) {
-        this._cmView = cmView;
-        this._targetTextarea = null;
-      } else if (
-        _lastFocusedEditable.tagName === "TEXTAREA" ||
-        _lastFocusedEditable.tagName === "INPUT"
-      ) {
-        this._targetTextarea = $(_lastFocusedEditable);
-      } else {
-        this._targetTextarea = getMessageInput();
-      }
-    } else {
-      this._targetTextarea = getMessageInput();
+      el = _lastFocusedEditable = this._floatingTarget.target;
     }
+    this._cmView = this._floatingTarget ? null : getCodeMirrorView(el);
+    if (
+      !target &&
+      !this._floatingTarget &&
+      !this._cmView &&
+      !/^(TEXTAREA|INPUT)$/.test(el?.tagName)
+    )
+      el = $("#chat .mes textarea:visible")[0] || getMessageInput()[0];
+    this._targetTextarea = this._cmView ? null : $(el);
     if (
       !this._cmView &&
       (!this._targetTextarea || !this._targetTextarea.length)
@@ -2519,6 +2482,9 @@ const findReplaceController = {
         const dt = _focusGuardLastDown.target;
         if (dt === target || (target.contains && target.contains(dt))) return;
       }
+      _lastEditTarget = _self._cmView
+        ? _self._cmView.contentDOM
+        : _self._targetTextarea?.[0] || _lastEditTarget;
       setTimeout(() => {
         if (!_self.active || !_self._barEl) return;
         if (_self._suspendFocusGuard) return;
@@ -2661,18 +2627,13 @@ const findReplaceController = {
     if (this._floatingTarget && !this._checkTarget()) return;
     try {
       if (!this._floatingTarget) {
-        const _editingTA = $("#chat .mes textarea:visible").first();
-        let _candidate = null;
-        if (_editingTA.length) {
-          _candidate = _editingTA[0];
-        } else if (
-          _lastFocusedEditable &&
-          _lastFocusedEditable.ownerDocument &&
-          _lastFocusedEditable.ownerDocument.contains(_lastFocusedEditable) &&
-          !$(_lastFocusedEditable).closest(".ih-find-bar").length
-        ) {
-          _candidate = _lastFocusedEditable;
-        }
+        let _candidate = getEditTarget(true);
+        if (
+          _candidate &&
+          !getCodeMirrorView(_candidate) &&
+          !/^(TEXTAREA|INPUT)$/.test(_candidate.tagName)
+        )
+          _candidate = null;
         if (_candidate && !getFloatingEditorToolTarget(_candidate)) {
           const _curEl = this._cmView
             ? this._cmView.contentDOM
@@ -2702,7 +2663,7 @@ const findReplaceController = {
                 );
               } catch (e) {}
             }
-            const _cm = getFindReplaceCodeMirrorView(_candidate);
+            const _cm = getCodeMirrorView(_candidate);
             if (_cm) {
               this._cmView = _cm;
               this._targetTextarea = null;
@@ -2813,62 +2774,63 @@ const findReplaceController = {
   },
 
   _scrollTextareaToPos(textarea, pos) {
-    const fullText = textarea.value;
-    const textBefore = fullText.substring(0, pos);
-    const style = window.getComputedStyle(textarea);
-    let targetPixelTop;
+    const doc = textarea.ownerDocument;
+    const win = doc.defaultView || window;
+    const cs = win.getComputedStyle(textarea);
+    const lh =
+      parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) || 14) * 1.4;
+    let top;
     try {
-      const mirror = document.createElement("div");
-      mirror.style.cssText =
-        "position:absolute;visibility:hidden;pointer-events:none;" +
-        "white-space:pre-wrap;word-wrap:break-word;overflow:hidden;" +
-        "width:" +
-        textarea.clientWidth +
-        "px;" +
-        "padding:" +
-        style.padding +
-        ";" +
-        "font:" +
-        style.font +
-        ";" +
-        "line-height:" +
-        style.lineHeight +
-        ";" +
-        "letter-spacing:" +
-        style.letterSpacing +
-        ";" +
-        "border:none;margin:0;box-sizing:border-box;";
-      mirror.textContent = textBefore;
-      document.body.appendChild(mirror);
-      targetPixelTop = mirror.offsetHeight;
-      document.body.removeChild(mirror);
+      const m = doc.createElement("div");
+      for (const p of "fontFamily fontSize fontWeight fontStyle fontVariant fontStretch lineHeight letterSpacing wordSpacing textTransform textIndent tabSize whiteSpace wordBreak overflowWrap paddingTop paddingRight paddingBottom paddingLeft".split(
+        " ",
+      ))
+        m.style[p] = cs[p];
+      Object.assign(m.style, {
+        position: "absolute",
+        visibility: "hidden",
+        left: "-9999px",
+        top: "0",
+        height: "auto",
+        border: "0",
+        boxSizing: "border-box",
+        width: textarea.clientWidth + "px",
+        whiteSpace: m.style.whiteSpace || "pre-wrap",
+      });
+      m.textContent = textarea.value.slice(0, pos);
+      const mark = m.appendChild(doc.createElement("span"));
+      mark.innerHTML = "&#8203;";
+      doc.body.appendChild(m);
+      top = mark.offsetTop;
+      m.remove();
     } catch (e) {
-      const linesBefore = (textBefore.match(/\n/g) || []).length;
-      let lineHeight = parseFloat(style.lineHeight);
-      if (isNaN(lineHeight) || lineHeight <= 0) {
-        const fontSize = parseFloat(style.fontSize);
-        lineHeight = (isNaN(fontSize) ? 14 : fontSize) * 1.4;
-      }
-      targetPixelTop = linesBefore * lineHeight;
+      return;
     }
-    let _findBarH = 0;
-    if (this._barEl && this._barEl[0]) {
-      const _isCollapsed = this._barEl[0].classList.contains(
-        "ih-find-bar-collapsed",
-      );
-      if (_isCollapsed) {
-        _findBarH = 0;
-      } else {
-        _findBarH = this._barEl[0].offsetHeight || 0;
-      }
-    }
-    const desiredScroll =
-      targetPixelTop - Math.max(textarea.clientHeight * 0.4, _findBarH + 20);
-    const clampedScroll = Math.max(
+    const barH = this._barEl?.[0]?.offsetHeight || 0;
+    textarea.scrollTop = Math.max(
       0,
-      Math.min(desiredScroll, textarea.scrollHeight - textarea.clientHeight),
+      Math.min(
+        top - Math.max(textarea.clientHeight * 0.4, barH + 20),
+        textarea.scrollHeight - textarea.clientHeight,
+      ),
     );
-    textarea.scrollTop = clampedScroll;
+    let y =
+      textarea.getBoundingClientRect().top +
+      textarea.clientTop +
+      top -
+      textarea.scrollTop;
+    for (let p = textarea.parentElement; p; p = p.parentElement) {
+      if (
+        p.scrollHeight <= p.clientHeight ||
+        !/auto|scroll|overlay/.test(win.getComputedStyle(p).overflowY)
+      )
+        continue;
+      const r = p.getBoundingClientRect();
+      if (y >= r.top && y + lh <= r.bottom) continue;
+      const before = p.scrollTop;
+      p.scrollTop += y - r.top - r.height * 0.4;
+      y -= p.scrollTop - before;
+    }
   },
 
   _highlightMatch(shouldFocus) {
@@ -2903,7 +2865,7 @@ const findReplaceController = {
 
     if (shouldFocus) {
       this._suspendFocusGuard = true;
-      if (this._floatingTarget) this._floatingNavigationFocusTarget = textarea;
+      this._floatingNavigationFocusTarget = textarea;
       try {
         textarea.focus();
       } finally {
@@ -4744,7 +4706,7 @@ const shiftMode = {
   },
 
   activate(silent = false) {
-    const target = getInsertionTarget();
+    const target = getEditTarget();
     if (!target) return;
     if (target.isContentEditable) {
       const cmView = getCodeMirrorView(target);
@@ -5886,7 +5848,7 @@ function findScrollNavigationContainer() {
   return root;
 }
 
-function doScrollToTop(scrollEl = findScrollNavigationContainer()) {
+function ihScrollBoxToTop(scrollEl) {
   if (!scrollEl || !isScrollNavigationTargetAvailable(scrollEl)) return;
   const isTextLike =
     scrollEl.tagName === "TEXTAREA" || scrollEl.tagName === "INPUT";
@@ -5908,7 +5870,26 @@ function doScrollToTop(scrollEl = findScrollNavigationContainer()) {
   }
 }
 
-function doScrollToLastAi() {
+function doScrollToTop() {
+  ihScrollBoxToTop(document.getElementById("chat"));
+}
+
+function ihGetTopScrollTarget() {
+  const target =
+    getFocusedScrollEditable() || _lastFocusedForScroll || _lastFocusedEditable;
+  if (!target || target === getMessageInput()[0]) {
+    return document.getElementById("chat");
+  }
+  return findScrollNavigationContainer();
+}
+
+function doScrollToLastAi(scrollEl = ihGetTopScrollTarget()) {
+  const chatEl = document.getElementById("chat");
+  if (!scrollEl) return;
+  if (scrollEl !== chatEl) {
+    ihScrollBoxToTop(scrollEl);
+    return;
+  }
   const messages = $("#chat .mes[is_user='false']:visible");
   if (messages.length === 0) return;
   scrollChatToElement(messages.last()[0]);
@@ -7112,7 +7093,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.3.4";
+const EXTENSION_VERSION = "3.3.5";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -7946,13 +7927,13 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.4</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.5</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>修复回顶 / 回底错位</b>：光标在编辑框内时，优先滚动该框内容；点击悬浮按钮、移动端收起键盘或正文较短时，不再误跳到聊天顶部 / 底部。</li>
-  <li><b>修复预设悬浮窗内容丢失</b>：关闭原编辑面板或切换条目不再清空旧窗口；A、B 条目可分别开窗，再次打开同一条目回到已有草稿，不自动替换或保存。</li>
-  <li><b>完善预设草稿保存</b>：预设悬浮窗关闭时自动保存，成功后直接收起；纯图标保存按钮及 Ctrl/⌘+S 可保存而不关闭。仅冲突或保存失败时询问是否放弃，整份预设仍需使用酒馆原生按钮保存。</li>
-  <li><b>新增 Token 计数</b>：预设正文的「提示词」标题，以及角色设定、世界书、预设等指定悬浮窗增加 Token 数，沿用原生小字样式；世界书和角色卡原有计数不重复添加。</li>
-  <li><b>调整设置入口</b>：「悬浮编辑窗」开关移入「更多设置」，原有设置和开关行为保持不变。</li>
+  <li><b>新增批量替换</b>：搜索标签可展开替换栏，对当前、指定或全部聊天档中的匹配统一替换。执行前显示替换数量与涉及的聊天档，5 分钟内可撤回；搜索按钮改为图标按钮，样式与搜索栏其他按钮一致。</li>
+  <li><b>调整定位高亮</b>：消息编辑子页面的定位按钮移至顶栏，编辑模式下同样可用，直接选中编辑框内的匹配文字；进入编辑时自动聚焦编辑框，并保留预览中的定位位置。</li>
+  <li><b>修复查找替换与选中模式</b>：以光标所在的编辑框为目标，支持消息管理等弹层、iframe、悬浮窗与发送框；修复「下一个」始终停在第 1 处、替换时提示未选中，以及新版 CodeMirror 无法识别的问题。</li>
+  <li><b>修复定位滚动</b>：修复 Firefox 下定位位置偏移，以及编辑框自动撑高时匹配项未滚动到可见区域的问题。</li>
+  <li><b>调整跳转按钮</b>：光标在编辑框内时，「跳转 AI 消息顶部」回到框内开头，与「跳转聊天底部」成对使用；「跳转聊天顶部」固定回到聊天区顶部。</li>
 </ul>
 `;
 
@@ -8039,8 +8020,8 @@ function openHelpPanel() {
     <li>CodeMirror 代码编辑器</li>
     <li>contentEditable 区域</li>
 </ul>
-<p>聊天楼层处于编辑状态时，普通编辑操作优先作用于该楼层；已聚焦的悬浮正文优先于聊天楼层。悬浮窗的查找目标单独绑定，不随其他输入框的焦点变化。</p>
-<p>滚动类功能（跳转顶部/底部、翻页等）会自动作用于光标所在的可滚动容器，而非默认的聊天区。</p>
+<p>聊天楼层处于编辑状态时，符号插入等编辑操作优先作用于该楼层；已聚焦的悬浮正文优先于聊天楼层。查找替换与选中模式以光标最后所在的编辑框为准。悬浮窗的查找目标单独绑定，不随其他输入框的焦点变化。</p>
+<p>光标位于编辑框内时，「跳转 AI 消息顶部」与「跳转聊天底部」分别回到框内开头与末尾，翻页、自动滚动同样作用于光标所在的可滚动容器；「跳转聊天顶部」始终作用于聊天区。</p>
 
 <div class="ih-help-h4"><i class="fa-solid fa-up-right-from-square"></i> 悬浮编辑窗</div>
 <p>点击放大图标左侧的悬浮编辑图标，可独立编辑角色描述、性格、场景、主开场白、世界书条目、自定义 CSS，以及打字指示器等已适配插件的文本框。默认启用，可在设置 → 更多设置中的<q>「悬浮编辑窗」</q>关闭；与下文的悬浮球 / 按钮面板是不同功能。</p><p>使用酒馆标准放大按钮的插件会自动显示悬浮入口；自制按钮需要插件作者适配。打字指示器及已适配切换保护的编辑框，在更换主题或方案后会锁定旧窗口，原内容仍可复制。修改仍需按原插件的方式保存。</p>
@@ -8088,7 +8069,7 @@ function openHelpPanel() {
 <p>工具栏中的取色按钮默认关闭，可在<q>「按钮管理」</q>中启用，也支持绑定快捷键。自定义 CSS 悬浮窗底部另有同一取色器的入口，无需先启用工具栏按钮。</p>
 
 <p class="ih-help-sub"><i class="fa-solid fa-magnifying-glass"></i> 查找替换</p>
-<p>在输入框、正在编辑的消息以及当前聚焦的外部输入框（包括 CodeMirror 编辑器）中查找和替换文本。</p>
+<p>在光标最后所在的编辑框中查找和替换文本，支持发送框、正在编辑的消息、消息管理等弹层、iframe 内的输入框以及 CodeMirror 编辑器。光标不在任何编辑框时，优先搜索正在编辑的消息，其次为发送框。</p>
 <p>桌面键盘操作（移动端使用栏内按钮）：</p>
 <ul>
     <li>查找框内 Enter / Shift+Enter：跳转至下一个 / 上一个匹配项</li>
@@ -8116,9 +8097,9 @@ function openHelpPanel() {
 
 <p class="ih-help-sub">跳转按钮</p>
 <ul>
-    <li><i class="fa-solid fa-angles-up"></i> 跳转聊天顶部</li>
-    <li><i class="fa-solid fa-arrow-down"></i> 跳转聊天底部</li>
-    <li><i class="fa-solid fa-arrow-up"></i> 跳转 AI 消息顶部：滚动至最新一条 AI 回复的顶部</li>
+    <li><i class="fa-solid fa-angles-up"></i> 跳转聊天顶部：始终回到聊天区顶部</li>
+    <li><i class="fa-solid fa-arrow-down"></i> 跳转聊天底部：光标在编辑框内时回到框内末尾</li>
+    <li><i class="fa-solid fa-arrow-up"></i> 跳转 AI 消息顶部：滚动至最新一条 AI 回复的顶部；光标在编辑框内（发送框除外）时回到框内开头</li>
     <li><i class="fa-solid fa-chevron-up"></i> / <i class="fa-solid fa-chevron-down"></i> 上 / 下一条 AI 消息</li>
 </ul>
 
@@ -8203,6 +8184,7 @@ function openHelpPanel() {
 <p class="ih-help-sub">搜索</p>
 <p>按关键词检索聊天消息，支持当前聊天档、指定聊天档和同一角色的全部聊天档三种范围，并可通过 <q>Aa</q> 按钮切换是否区分大小写。</p>
 <p>搜索栏另有三个按钮：<b>备选</b>（洗牌图标，当前显示内容没命中时继续搜该楼的其他备选回复）、<b>合并重复</b>（叠层图标，跨聊天档内容完全相同的消息只显示一条并标注<q>「N 档共有」</q>，点开可看是哪几个档的第几楼）、<b>说明</b>（问号图标，展开搜索标签内所有按钮与徽章的含义）。</p>
+<p><b>批量替换</b>：点击搜索框左侧的箭头展开替换栏，填写替换内容后点击全部替换按钮，可对当前搜索范围（当前聊天档、指定聊天档或全部聊天档）内的所有匹配统一替换。执行前会重新搜索，并显示替换数量与涉及的聊天档；开启<q>「搜索备选回复」</q>时各消息的所有备选一并替换，否则仅替换当前显示的内容。替换内容留空即删除匹配文字。执行后 5 分钟内可通过<q>「撤回删除」</q>按钮还原。</p>
 <p>有结果后会出现<b>结果排列</b>栏：可按最后修改 / 创建时间 / 消息数 / 档名排序，切换升降序，切换时间显示方式（完整时间 / xx 天前），以及切换<b>分支视图</b>与<b>平铺视图</b>。分支视图会按聊天档的血缘关系缩进显示，需要先到<q>「分支」</q>标签扫描一次；自身没搜到结果但处在血缘链中间的档，会以灰色删除线占位显示。</p>
 <p>搜索结果会按聊天档分组显示命中楼层、发送者、匹配次数和上下文摘要。当前显示内容未命中时，会继续检索该楼的其他备选回复，命中后标注为「备选 N」。点击结果右侧的定位按钮可打开对应聊天并跳转至命中楼层；眼睛按钮以子页面形式预览完整消息，可依次定位其中的所有匹配位置并随时返回结果列表。分组标题右侧提供转存、重命名、删除三个操作按钮。</p>
 <p>搜索结果右侧的转存按钮可将消息加入转存篮。转存篮支持收集多个聊天档中的消息，再统一复制或移动至指定聊天档。</p>
@@ -8248,6 +8230,7 @@ function openHelpPanel() {
 
 <p class="ih-help-sub">消息编辑子页面</p>
 <p>列表中每条消息的眼睛按钮都会在面板内原地翻页打开编辑子页面，不再弹出遮罩窗口。子页面集成预览与编辑切换、上一条/下一条跳转、加入转存篮；若该楼有多个备选回复，可切换查看并分别编辑，当前显示的那条带勾选标记。</p>
+<p><b>定位高亮</b>：存在搜索关键词且本条消息有命中时，顶栏的上一条 / 下一条按钮左侧会显示定位按钮与命中计数。预览模式下依次高亮匹配位置；编辑模式下直接选中编辑框内的匹配文字并滚动至可见处，移动端会同时弹出键盘。从预览切换至编辑时，编辑框自动获得焦点，并选中预览中当前定位的匹配项。</p>
 <p><b>生成配置</b>：备选栏下方独立显示该条备选生成时的 API 档案、预设与模型，切换备选时同步更新。新生成的消息会保存名称快照；旧消息缺少的档案或预设显示「未记录」，不会使用当前设置补填。</p>
 <p><b>追加备选</b>：备选行最右侧的加号按钮会给这一楼追加一条空白备选，追加后自动切到它并进入编辑。</p>
 <p><b>删除备选</b>：该楼存在多个备选时，底部会出现<q>「删除备选」</q>按钮，可删除当前查看的这条，删除后自动切换至相邻备选。若该消息属于当前聊天档，5 分钟内可通过<q>「撤回删除」</q>还原。</p>
@@ -10479,6 +10462,7 @@ function openHideManagerPanel() {
               <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_search_clear_selected" title="清除已选聊天档"><i class="fa-solid fa-eraser"></i></button>
             </div>
           <div class="ih-mgr-search-input-row">
+            <button class="ih-mgr-search-rtoggle" id="ih_mgr_search_replace_toggle" title="展开 / 收起替换" aria-expanded="false"><i class="fa-solid fa-chevron-right"></i></button>
             <div class="ih-mgr-search-input-wrap">
               <input type="text" id="ih_mgr_search_input" class="ih-mgr-search-input ih-fp-transparent-input" placeholder="输入关键词…" />
               <button class="ih-mgr-search-input-clear" id="ih_mgr_search_clear" title="清空"><i class="fa-solid fa-xmark"></i></button>
@@ -10487,7 +10471,14 @@ function openHideManagerPanel() {
             <button class="ih-mgr-search-case-btn ih-mgr-btn-active" id="ih_mgr_search_swipe" title="搜索备选回复：当前显示内容没命中时，继续搜这一楼的其他备选回复"><i class="fa-solid fa-shuffle"></i></button>
             <button class="ih-mgr-search-case-btn ih-mgr-btn-active" id="ih_mgr_search_merge" title="合并重复：跨聊天档内容完全相同的消息只显示一条"><i class="fa-solid fa-layer-group"></i></button>
             <button class="ih-mgr-search-case-btn" id="ih_mgr_search_legend" title="搜索标签的按钮与徽章含义"><i class="fa-solid fa-circle-question"></i></button>
-            <button class="ih-mgr-btn ih-mgr-btn-ok ih-mgr-btn-primary" id="ih_mgr_search_go"><i class="fa-solid fa-magnifying-glass"></i> 搜索</button>
+            <button class="ih-mgr-search-case-btn" id="ih_mgr_search_go" title="搜索（回车）"><i class="fa-solid fa-magnifying-glass"></i></button>
+          </div>
+          <div class="ih-mgr-search-replace-row" id="ih_mgr_search_replace_row" style="display:none;">
+            <div class="ih-mgr-search-input-wrap">
+              <input type="text" id="ih_mgr_search_replace_input" class="ih-mgr-search-input ih-fp-transparent-input" placeholder="替换为…（留空即删除）" />
+              <button class="ih-mgr-search-input-clear" id="ih_mgr_search_replace_clear" title="清空"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <button class="ih-mgr-search-case-btn ih-mgr-search-replace-all" id="ih_mgr_search_replace_all" title="全部替换：作用于本次搜索范围内的所有匹配"><i class="fa-solid fa-repeat"></i></button>
           </div>
         </div>
         <div class="ih-mgr-search-status" id="ih_mgr_search_status" style="display:none;"></div>
@@ -10502,6 +10493,9 @@ function openHideManagerPanel() {
           <div class="ih-br-lg-row"><span class="ih-br-lg-badge"><span class="ih-br-src ih-br-src-sure">Aa</span></span><span class="ih-br-lg-desc">区分大小写，按下后 abc 与 ABC 视为不同</span></div>
           <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-shuffle"></i></span><span class="ih-br-lg-desc">搜索备选回复：开启后，某一楼当前显示的内容没命中时，会继续翻这一楼的其他备选回复，命中的结果会标「备选 N」；关掉则只搜当前显示的那条</span></div>
           <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-layer-group"></i></span><span class="ih-br-lg-desc">合并重复：分支会复制父档的前史，同一条早期消息常在整条血缘链上重复出现，开启后内容完全相同的只显示一条</span></div>
+          <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-magnifying-glass"></i></span><span class="ih-br-lg-desc">执行搜索，在输入框内按回车效果相同</span></div>
+          <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-chevron-right"></i></span><span class="ih-br-lg-desc">展开替换栏，填写替换内容后可对本次搜索范围内的所有匹配统一替换</span></div>
+          <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-repeat"></i></span><span class="ih-br-lg-desc">全部替换：执行前会重新搜索并确认替换数量；开启「搜索备选回复」时所有备选一并替换，否则仅替换当前显示的内容；执行后 5 分钟内可通过「撤回删除」还原</span></div>
           <div class="ih-br-lg-sec">结果排列（有结果后才出现）</div>
           <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-arrow-down-wide-short"></i></span><span class="ih-br-lg-desc">切换升序 / 降序</span></div>
           <div class="ih-br-lg-row"><span class="ih-br-lg-badge ih-br-lg-icon"><i class="fa-solid fa-clock"></i></span><span class="ih-br-lg-desc">时间在「完整时间」和「xx 天前」之间切换</span></div>
@@ -14253,6 +14247,30 @@ function openHideManagerPanel() {
     );
   }
 
+  function _meFocusEditor() {
+    const ta = content.find("#ih_me_textarea")[0];
+    if (!ta) return;
+    const ev = sharedState.editView;
+    const kw = sharedState.searchQuery || "";
+    let start = 0;
+    let end = 0;
+    if (ev && ev.hlIndex >= 0 && kw) {
+      const pos = _searchScanMsg(ta.value, kw, sharedState.searchCaseSensitive);
+      if (pos[ev.hlIndex] !== undefined) {
+        start = pos[ev.hlIndex];
+        end = start + kw.length;
+      }
+    }
+    try {
+      ta.focus({ preventScroll: true });
+      ta.setSelectionRange(start, end);
+    } catch (e) {}
+    if (end > start) {
+      try {
+        findReplaceController._scrollTextareaToPos(ta, start);
+      } catch (e) {}
+    }
+  }
   function _meSyncView() {
     const host = content.find("#ih_mgr_edit_view")[0];
     if (!host) return;
@@ -14278,6 +14296,15 @@ function openHideManagerPanel() {
     const text = _meCurText();
     const fp = ihBranchFingerprint(m);
     const inBasket = _basketHas(ev.file, ev.floor, fp);
+    const _meKw = sharedState.searchQuery || "";
+    const _mePos =
+      _meKw && text
+        ? _searchScanMsg(text, _meKw, sharedState.searchCaseSensitive)
+        : [];
+    const _mePosCount = _mePos.length;
+    if (typeof ev.hlIndex !== "number" || ev.hlIndex >= _mePosCount) {
+      ev.hlIndex = -1;
+    }
     let html = "";
     html += '<div class="ih-me-top">';
     html +=
@@ -14291,6 +14318,17 @@ function openHideManagerPanel() {
       ihEscapeHtml(_meLabel(ev.file)) +
       "</span></span>";
     html += '<span class="ih-me-nav">';
+    if (_mePosCount > 0) {
+      const _meLocCur = ev.hlIndex >= 0 ? ev.hlIndex + 1 : 0;
+      html +=
+        '<button class="ih-me-nav-btn ih-me-locate-btn" id="ih_me_locate" title="依次定位关键词「' +
+        ihEscapeAttr(_meKw) +
+        '」的命中位置"><i class="fa-solid fa-crosshairs"></i><span class="ih-me-locate-count">' +
+        _meLocCur +
+        "/" +
+        _mePosCount +
+        "</span></button>";
+    }
     html +=
       '<button class="ih-me-nav-btn" id="ih_me_prev"' +
       (nb.prev === null ? " disabled" : "") +
@@ -14361,17 +14399,10 @@ function openHideManagerPanel() {
       html += "</div>";
     }
     html += ihRenderGenerationInfo(m, ev.swipeIdx);
-    let _mePosCount = 0;
     if (ev.mode === "edit") {
       html +=
         '<textarea class="ih-me-textarea" id="ih_me_textarea" placeholder="在此编辑消息内容…"></textarea>';
     } else {
-      const _meKw = sharedState.searchQuery || "";
-      let _mePos = [];
-      if (_meKw && text) {
-        _mePos = _searchScanMsg(text, _meKw, sharedState.searchCaseSensitive);
-      }
-      _mePosCount = _mePos.length;
       let _meBody;
       if (!text) {
         _meBody = '<span class="ih-me-empty">（空消息）</span>';
@@ -14428,16 +14459,6 @@ function openHideManagerPanel() {
     if (ev.dirty) {
       html += '<span class="ih-me-dirty">未保存</span>';
     }
-    if (_mePosCount > 0) {
-      const _meCur =
-        typeof ev.hlIndex === "number" && ev.hlIndex >= 0 ? ev.hlIndex + 1 : 0;
-      html +=
-        '<button class="ih-mgr-btn ih-mgr-btn-mini" id="ih_me_locate" title="依次跳转到搜索关键词命中的位置"><i class="fa-solid fa-crosshairs"></i> 定位高亮 <span class="ih-search-locate-count">' +
-        _meCur +
-        "/" +
-        _mePosCount +
-        "</span></button>";
-    }
     if (!m.is_user && _meSwipeArr.length > 1) {
       html +=
         '<button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-warn" id="ih_me_swipe_del" title="删除当前查看的这条备选，删除后自动切到相邻备选"><i class="fa-solid fa-trash"></i> 删除备选</button>';
@@ -14470,6 +14491,9 @@ function openHideManagerPanel() {
     if (ev.mode === "edit") {
       const ta = host.querySelector("#ih_me_textarea");
       if (ta) ta.value = text;
+    } else if (ev.hlIndex >= 0) {
+      const _mk = host.querySelectorAll(".ih-search-hl")[ev.hlIndex];
+      if (_mk) _mk.classList.add("ih-search-hl-active");
     }
     syncDialogTheme(host);
     generateFaIconProtectionCSS();
@@ -16358,6 +16382,383 @@ function openHideManagerPanel() {
     renderSearchResults();
   }
 
+  function _srBuildRegex(kw, caseSensitive) {
+    const escaped = String(kw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(escaped, caseSensitive ? "g" : "gi");
+  }
+
+  function _srReplaceInMsg(m, re, rep, allSwipes) {
+    if (!m) return 0;
+    const run = (str) => {
+      let n = 0;
+      const out = String(str == null ? "" : str).replace(re, () => {
+        n++;
+        return rep;
+      });
+      return { out: out, n: n };
+    };
+    let total = 0;
+    const oldMes = String(m.mes == null ? "" : m.mes);
+    const rm = run(oldMes);
+    if (rm.n > 0) {
+      m.mes = rm.out;
+      total += rm.n;
+    }
+    if (Array.isArray(m.swipes)) {
+      const live = typeof m.swipe_id === "number" ? m.swipe_id : 0;
+      for (let s = 0; s < m.swipes.length; s++) {
+        if (!allSwipes && s !== live) continue;
+        const cur = String(m.swipes[s] == null ? "" : m.swipes[s]);
+        if (s === live && cur === oldMes) {
+          if (rm.n > 0) m.swipes[s] = m.mes;
+          continue;
+        }
+        const rs = run(cur);
+        if (rs.n > 0) {
+          m.swipes[s] = rs.out;
+          total += rs.n;
+        }
+      }
+    }
+    return total;
+  }
+
+  function _srProbe(m, re, rep, allSwipes) {
+    if (!m) return 0;
+    return _srReplaceInMsg(
+      {
+        mes: m.mes,
+        swipe_id: m.swipe_id,
+        swipes: Array.isArray(m.swipes) ? m.swipes.slice() : undefined,
+      },
+      re,
+      rep,
+      allSwipes,
+    );
+  }
+
+  function _srCount(msgs, re, rep, allSwipes) {
+    let hits = 0;
+    let floors = 0;
+    (msgs || []).forEach(function (m) {
+      const n = _srProbe(m, re, rep, allSwipes);
+      if (n > 0) {
+        hits += n;
+        floors++;
+      }
+    });
+    return { hits: hits, floors: floors };
+  }
+
+  function _srDefaultHeader(info) {
+    return {
+      user_name: name1 || "User",
+      character_name: info && info.character ? info.character.name : "",
+      create_date: new Date().toISOString(),
+      chat_metadata: {},
+    };
+  }
+
+  async function _srSaveFile(info, nameNoExt, header, msgs) {
+    if (!info || info.group) return false;
+    try {
+      const resp = await fetch("/api/chats/save", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        cache: "no-cache",
+        body: JSON.stringify({
+          ch_name: info.character.name,
+          file_name: nameNoExt,
+          chat: [header || _srDefaultHeader(info), ...msgs],
+          avatar_url: info.avatar,
+          force: true,
+        }),
+      });
+      return resp.ok;
+    } catch (e) {
+      console.error("快捷工具栏: 批量替换写入聊天档失败 " + nameNoExt, e);
+      return false;
+    }
+  }
+
+  async function _srReplaceAll() {
+    if (sharedState._srBusy) return;
+    const kw = String(content.find("#ih_mgr_search_input").val() || "").trim();
+    if (!kw) {
+      toastr.warning("请先输入要查找的关键词", "", { timeOut: 1500 });
+      return;
+    }
+    const rep = String(
+      content.find("#ih_mgr_search_replace_input").val() || "",
+    );
+    if (rep === kw && sharedState.searchCaseSensitive) {
+      toastr.info("替换内容与查找内容相同，无需替换", "", { timeOut: 1500 });
+      return;
+    }
+    const btn = content.find("#ih_mgr_search_replace_all");
+    sharedState._srBusy = true;
+    btn.prop("disabled", true);
+    try {
+      await runSearch();
+      const groups = (sharedState.searchResults || []).slice();
+      if (groups.length === 0) return;
+      const caseSensitive = sharedState.searchCaseSensitive;
+      const allSwipes = !!sharedState.searchSwipes;
+      const re = _srBuildRegex(kw, caseSensitive);
+      const info = ihBranchGetChar();
+      let curChatId = "";
+      try {
+        curChatId = String(SillyTavern.getContext().getCurrentChatId() || "");
+      } catch (e) {}
+      const plan = [];
+      let hits = 0;
+      let floors = 0;
+      for (const g of groups) {
+        if (!g.fileName) {
+          const c = _srCount(chat, re, rep, allSwipes);
+          if (c.hits > 0) {
+            plan.push({ cur: true, label: g.label + "（当前）" });
+            hits += c.hits;
+            floors += c.floors;
+          }
+          continue;
+        }
+        if (!info || info.group) continue;
+        const nameNoExt = String(g.fileName).replace(/\.jsonl$/i, "");
+        let fresh;
+        try {
+          fresh = await ihBranchFetchChat(
+            info.character.name,
+            nameNoExt,
+            info.avatar,
+          );
+        } catch (e) {
+          console.error("快捷工具栏: 批量替换读取聊天档失败 " + nameNoExt, e);
+          toastr.error(`读取聊天档「${nameNoExt}」失败，批量替换已取消`, "", {
+            timeOut: 2500,
+          });
+          return;
+        }
+        const c = _srCount(fresh.messages, re, rep, allSwipes);
+        if (c.hits > 0) {
+          plan.push({
+            cur: false,
+            file: g.fileName,
+            name: nameNoExt,
+            label: nameNoExt,
+            fresh: fresh,
+          });
+          hits += c.hits;
+          floors += c.floors;
+        }
+      }
+      if (plan.length === 0) {
+        toastr.info("没有可替换的内容", "", { timeOut: 1500 });
+        return;
+      }
+      const labels = plan.map((p) => ihEscapeHtml(p.label));
+      const labelText =
+        labels.length > 6
+          ? labels.slice(0, 6).join("、") + ` 等 ${labels.length} 个聊天档`
+          : labels.join("、");
+      const okReplace = await ihConfirmDialog({
+        title: "批量替换",
+        icon: "fa-repeat",
+        lines: [
+          `将「<b>${ihEscapeHtml(kw)}</b>」替换为「<b>${rep ? ihEscapeHtml(rep) : "（空，即删除）"}</b>」，共 <b>${hits}</b> 处，涉及 <b>${floors}</b> 条消息。`,
+          `<span class="ih-cf-dim">涉及：${labelText}</span>`,
+          `<span class="ih-cf-dim">${allSwipes ? "已开启「搜索备选回复」，各消息的所有备选将一并替换。" : "仅替换各消息当前显示的内容，其他备选不受影响。"}${caseSensitive ? "区分大小写。" : "不区分大小写。"}</span>`,
+          `<span class="ih-cf-warn">执行后 5 分钟内可通过「撤回删除」按钮还原。</span>`,
+        ],
+        okText: "全部替换",
+        okIcon: "fa-repeat",
+        cancelText: "取消",
+        danger: true,
+      });
+      if (!okReplace) return;
+      const backups = [];
+      let curBackup = null;
+      let done = 0;
+      let doneFloors = 0;
+      const failed = [];
+      for (const p of plan) {
+        if (p.cur) {
+          let nowId = "";
+          try {
+            nowId = String(SillyTavern.getContext().getCurrentChatId() || "");
+          } catch (e) {}
+          if (nowId !== curChatId) {
+            failed.push(p.label);
+            continue;
+          }
+          const snaps = [];
+          let n = 0;
+          for (let i = 0; i < chat.length; i++) {
+            const m = chat[i];
+            if (_srProbe(m, re, rep, allSwipes) === 0) continue;
+            snaps.push({ floor: i, msg: JSON.parse(JSON.stringify(m)) });
+            n += _srReplaceInMsg(m, re, rep, allSwipes);
+          }
+          if (snaps.length === 0) continue;
+          let ctx = null;
+          try {
+            ctx = SillyTavern.getContext();
+          } catch (e) {}
+          for (const s of snaps) {
+            try {
+              await eventSource.emit(event_types.MESSAGE_EDITED, s.floor);
+            } catch (e) {}
+            try {
+              if (ctx && typeof ctx.updateMessageBlock === "function") {
+                ctx.updateMessageBlock(s.floor, chat[s.floor]);
+              }
+            } catch (e) {}
+          }
+          ihMarkChatTainted();
+          const saved = await ihSaveCurrentChat();
+          if (!saved) {
+            snaps.forEach((s) => {
+              chat[s.floor] = s.msg;
+              try {
+                if (ctx && typeof ctx.updateMessageBlock === "function") {
+                  ctx.updateMessageBlock(s.floor, chat[s.floor]);
+                }
+              } catch (e) {}
+            });
+            failed.push(p.label);
+            continue;
+          }
+          for (const s of snaps) {
+            try {
+              await eventSource.emit(event_types.MESSAGE_UPDATED, s.floor);
+            } catch (e) {}
+          }
+          const full = chat.slice();
+          snaps.forEach((s) => {
+            full[s.floor] = s.msg;
+          });
+          curBackup = {
+            name: curChatId,
+            avatar: info && !info.group ? info.avatar : "",
+            messages: full,
+          };
+          done += n;
+          doneFloors += snaps.length;
+          continue;
+        }
+        const orig = JSON.parse(JSON.stringify(p.fresh.messages));
+        let n = 0;
+        let f = 0;
+        p.fresh.messages.forEach((m) => {
+          const k = _srReplaceInMsg(m, re, rep, allSwipes);
+          if (k > 0) {
+            n += k;
+            f++;
+          }
+        });
+        const header = p.fresh.header || _srDefaultHeader(info);
+        const okSave = await _srSaveFile(
+          info,
+          p.name,
+          header,
+          p.fresh.messages,
+        );
+        if (!okSave) {
+          failed.push(p.label);
+          continue;
+        }
+        done += n;
+        doneFloors += f;
+        backups.push({ name: p.name, header: header, messages: orig });
+        _ihSetSearchCache(p.file, p.fresh.messages);
+        if (
+          sharedState.transferTargetChat &&
+          _getTransferTargetValue() === p.file
+        ) {
+          sharedState.transferTargetChat = p.fresh.messages;
+          sharedState.transferTargetHeader = header;
+        }
+        if (sharedState.branchPreviewName === p.name) {
+          sharedState.branchPreviewMsgs = p.fresh.messages;
+        }
+      }
+      if (done > 0) {
+        _ihInvalidateBranchCache();
+        const undoInfo = info && !info.group ? info : null;
+        const restore = async () => {
+          for (const b of backups) {
+            const okB = await _srSaveFile(
+              undoInfo,
+              b.name,
+              b.header,
+              b.messages,
+            );
+            if (!okB) throw new Error("写回失败 " + b.name);
+            _ihDeleteSearchCache(b.name + ".jsonl");
+          }
+          if (curBackup) {
+            let nowId = "";
+            try {
+              nowId = String(
+                SillyTavern.getContext().getCurrentChatId() || "",
+              );
+            } catch (e) {}
+            const nowChar = ihBranchGetChar();
+            const sameChar =
+              !curBackup.avatar ||
+              !!(nowChar && nowChar.avatar === curBackup.avatar);
+            if (nowId === curBackup.name && sameChar) {
+              chat.length = 0;
+              curBackup.messages.forEach((m) => chat.push(m));
+              ihMarkChatTainted();
+              await ihSaveCurrentChat();
+              await executeSlashCommandsWithOptions("/chat-reload");
+            } else if (undoInfo) {
+              const freshCur = await ihBranchFetchChat(
+                undoInfo.character.name,
+                curBackup.name,
+                undoInfo.avatar,
+              );
+              const okC = await _srSaveFile(
+                undoInfo,
+                curBackup.name,
+                freshCur.header,
+                curBackup.messages,
+              );
+              if (!okC) throw new Error("写回失败 " + curBackup.name);
+              _ihDeleteSearchCache(curBackup.name + ".jsonl");
+            } else {
+              throw new Error("聊天已切换，无法撤回群聊中的替换");
+            }
+          }
+          _ihInvalidateBranchCache();
+        };
+        ihNotifyChatUndo(
+          `已替换 ${done} 处，涉及 ${doneFloors} 条消息，可通过「撤回删除」按钮还原（5 分钟内有效）`,
+          restore,
+          "已撤回批量替换",
+        );
+      }
+      if (failed.length > 0) {
+        toastr.error(
+          `以下聊天档写入失败，内容未修改：${failed.join("、")}`,
+          "",
+          { timeOut: 4000 },
+        );
+      }
+      sharedState.tokenCache.clear();
+      refreshList();
+      renderTransferTarget();
+      if (sharedState.branchPreviewName) _bpRenderRows();
+      await _mgrRefreshSearchOnly();
+    } catch (e) {
+      console.error("快捷工具栏: 批量替换失败", e);
+      toastr.error("批量替换失败，详情见浏览器控制台", "", { timeOut: 2500 });
+    } finally {
+      sharedState._srBusy = false;
+      btn.prop("disabled", false);
+    }
+  }
   async function _mgrRefreshSearchOnly() {
     if (!sharedState.searchDone) {
       renderSearchResults();
@@ -16502,6 +16903,45 @@ function openHideManagerPanel() {
     $(this).removeClass("ih-visible");
     inp.focus();
   });
+  content.find("#ih_mgr_search_replace_toggle").on("click", function () {
+    const row = content.find("#ih_mgr_search_replace_row");
+    const on = row.css("display") === "none";
+    row.css("display", on ? "flex" : "none");
+    $(this)
+      .toggleClass("ih-mgr-search-rtoggle-on", on)
+      .attr("aria-expanded", String(on));
+    $(this)
+      .find("i")
+      .attr(
+        "class",
+        on ? "fa-solid fa-chevron-down" : "fa-solid fa-chevron-right",
+      );
+    generateFaIconProtectionCSS();
+    if (on && !ihIsMobileDevice()) {
+      setTimeout(() => {
+        const el = content.find("#ih_mgr_search_replace_input")[0];
+        if (el) el.focus();
+      }, 30);
+    }
+  });
+  content.find("#ih_mgr_search_replace_input").on("input", function () {
+    content
+      .find("#ih_mgr_search_replace_clear")
+      .toggleClass("ih-visible", !!String($(this).val()).length);
+  });
+  content.find("#ih_mgr_search_replace_input").on("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      _srReplaceAll();
+    }
+  });
+  content.find("#ih_mgr_search_replace_clear").on("click", function () {
+    const inp = content.find("#ih_mgr_search_replace_input");
+    inp.val("");
+    $(this).removeClass("ih-visible");
+    inp.focus();
+  });
+  content.find("#ih_mgr_search_replace_all").on("click", () => _srReplaceAll());
   let _searchAllOptions = [];
   let _searchS2Loaded = false;
 
@@ -17315,6 +17755,11 @@ function openHideManagerPanel() {
     sharedState.searchPreview = null;
     _searchSyncView();
     _meOpen(file, floor, sib, { mode: "edit", swipeIdx: swipeIdx });
+    if (sharedState.editView && p.hlIndex >= 0) {
+      sharedState.editView.hlIndex = p.hlIndex;
+      _meSyncView();
+    }
+    _meFocusEditor();
   });
 
   content.on("click", "#ih_sp_locate", function () {
@@ -19021,6 +19466,7 @@ function openHideManagerPanel() {
     if (_ev2) {
       _ev2.mode = "edit";
       _meSyncView();
+      _meFocusEditor();
     }
     if (!ev.file) {
       _ihSyncSwipeCounter(ev.floor);
@@ -19189,20 +19635,26 @@ function openHideManagerPanel() {
     if (!ev) return;
     ev.mode = "edit";
     _meSyncView();
-    setTimeout(() => {
-      const ta = content.find("#ih_me_textarea")[0];
-      if (ta) {
-        try {
-          ta.focus();
-        } catch (e) {}
-      }
-    }, 50);
+    _meFocusEditor();
   });
 
   content.on("input", "#ih_me_textarea", function () {
     const ev = sharedState.editView;
     if (!ev) return;
     ev.draft = this.value;
+    const _lb = content.find("#ih_me_locate");
+    if (_lb.length) {
+      const _kw = sharedState.searchQuery || "";
+      const _n = _kw
+        ? _searchScanMsg(this.value, _kw, sharedState.searchCaseSensitive)
+            .length
+        : 0;
+      if (typeof ev.hlIndex !== "number" || ev.hlIndex >= _n) ev.hlIndex = -1;
+      _lb.prop("disabled", _n === 0);
+      _lb
+        .find(".ih-me-locate-count")
+        .text((ev.hlIndex >= 0 ? ev.hlIndex + 1 : 0) + "/" + _n);
+    }
     if (!ev.dirty) {
       ev.dirty = true;
       content.find(".ih-me-actions").each(function () {
@@ -19235,13 +19687,48 @@ function openHideManagerPanel() {
     _meSyncView();
     _updateBasketBanner();
   });
+  content.on("mousedown", "#ih_me_locate", function (e) {
+    if (content.find("#ih_me_textarea").length) e.preventDefault();
+  });
   content.on("click", "#ih_me_locate", function () {
     const ev = sharedState.editView;
     if (!ev) return;
+    const btn = $(this);
+    const prev = typeof ev.hlIndex === "number" ? ev.hlIndex : -1;
+    const ta = content.find("#ih_me_textarea")[0];
+    if (ev.mode === "edit" && ta) {
+      const kw = sharedState.searchQuery || "";
+      const pos = kw
+        ? _searchScanMsg(ta.value, kw, sharedState.searchCaseSensitive)
+        : [];
+      if (!pos.length) {
+        ev.hlIndex = -1;
+        btn.prop("disabled", true);
+        btn.find(".ih-me-locate-count").text("0/0");
+        return;
+      }
+      ev.hlIndex = (prev + 1) % pos.length;
+      const start = pos[ev.hlIndex];
+      const end = start + kw.length;
+      const _meSelect = () => {
+        try {
+          if (document.activeElement !== ta) ta.focus({ preventScroll: true });
+          ta.setSelectionRange(start, end);
+        } catch (e) {}
+        try {
+          findReplaceController._scrollTextareaToPos(ta, start);
+        } catch (e) {}
+      };
+      _meSelect();
+      requestAnimationFrame(_meSelect);
+      btn
+        .find(".ih-me-locate-count")
+        .text(ev.hlIndex + 1 + "/" + pos.length);
+      return;
+    }
     const marks = content.find("#ih_mgr_edit_view .ih-search-hl");
     if (!marks.length) return;
-    const _prev = typeof ev.hlIndex === "number" ? ev.hlIndex : -1;
-    ev.hlIndex = (_prev + 1) % marks.length;
+    ev.hlIndex = (prev + 1) % marks.length;
     marks.removeClass("ih-search-hl-active");
     const target = marks[ev.hlIndex];
     target.classList.add("ih-search-hl-active");
@@ -19251,8 +19738,8 @@ function openHideManagerPanel() {
         behavior: ihGetScrollBehavior(),
       });
     } catch (e) {}
-    $(this)
-      .find(".ih-search-locate-count")
+    btn
+      .find(".ih-me-locate-count")
       .text(ev.hlIndex + 1 + "/" + marks.length);
   });
 
@@ -21860,7 +22347,7 @@ function bindButtonAction(btn, key) {
   const action = getActionForKey(key);
   if (!action) return;
 
-  const isBoundaryScroll = key === "scrollToTop" || key === "scrollToBottom";
+  const isBoundaryScroll = key === "scrollToLastAi" || key === "scrollToBottom";
   if (isBoundaryScroll) {
     btn.on("pointerdown mousedown touchstart", rememberScrollNavigationFocus);
   }
@@ -21894,10 +22381,16 @@ function bindButtonAction(btn, key) {
         ]);
 
         const isScrollKey = scrollKeys.has(key);
-        const refocusTarget = getInsertionTarget();
-        const scrollTarget = isBoundaryScroll
-          ? findScrollNavigationContainer()
-          : undefined;
+        const refocusTarget =
+          key === "shift" || key === "findReplace"
+            ? getEditTarget()
+            : getInsertionTarget();
+        const scrollTarget =
+          key === "scrollToLastAi"
+            ? ihGetTopScrollTarget()
+            : isBoundaryScroll
+              ? findScrollNavigationContainer()
+              : undefined;
 
         if (isScrollKey) {
           ihBlurIfKeyboardAlreadyDismissed();
@@ -21938,7 +22431,8 @@ const IH_PLAIN_ICON_BTN_SEL =
   ".ih-bd-basket, .ih-bd-edit, .ih-bd-selall, " +
   ".ih-bp-jump, .ih-bp-edit, .ih-bp-basket, " +
   ".ih-basket-jump, .ih-basket-view, .ih-basket-remove, .ih-basket-gap-fill, " +
-  ".ih-me-swipe, .ih-mgr-seg-btn, .ih-mgr-jump-go";
+  ".ih-me-swipe, .ih-mgr-seg-btn, .ih-mgr-jump-go, " +
+  ".ih-mgr-search-rtoggle, .ih-mgr-search-replace-all";
 let _cachedThemeSample = null;
 let _cachedThemeSampleTime = 0;
 const _THEME_SAMPLE_TTL = 60000;
@@ -26206,6 +26700,7 @@ function setupGlobalFocusTracking() {
     if (target === sendTextarea) return;
     _lastFocusedEditable = null;
     _lastFocusedForScroll = null;
+    _lastEditTarget = null;
     clearExternalFocused();
   }
 
@@ -26213,40 +26708,34 @@ function setupGlobalFocusTracking() {
     "focusin",
     function (e) {
       const el = e.target;
-      if (!isEditableElement(el)) {
-        return;
-      }
-      if (shouldIgnoreFocusedElement(el)) {
-        return;
-      }
-      _lastFocusedForScroll = el;
-      if (el === sendTextarea) {
-        _lastFocusedEditable = null;
-        clearExternalFocused();
+      if (!isEditableElement(el) || isToolUiElement(el)) return;
+      _lastEditTarget = el;
+      if (!shouldIgnoreFocusedElement(el)) {
+        _lastFocusedForScroll = el;
+        if (el === sendTextarea) {
+          _lastFocusedEditable = null;
+          clearExternalFocused();
+        } else {
+          _lastFocusedEditable = el;
+          markExternalFocused();
+          historyManager.ensureExternalHistory(el);
+        }
         historyManager.updateButtons();
-        return;
       }
-      _lastFocusedEditable = el;
-      markExternalFocused();
-      historyManager.ensureExternalHistory(el);
-      historyManager.updateButtons();
-      if (shiftMode.active) {
+      if (shiftMode.active && el !== sendTextarea) {
         const cmView = getCodeMirrorView(el);
         const nextTarget = cmView ? cmView.contentDOM : el;
         if (shiftMode._targetEl && shiftMode._targetEl !== nextTarget) {
           shiftMode.deactivate(true);
           setTimeout(() => {
-            if (
-              el.ownerDocument &&
-              el.ownerDocument.contains(el) &&
-              !shouldIgnoreFocusedElement(el)
-            ) {
-              _lastFocusedEditable = el;
+            if (el.isConnected) {
+              _lastEditTarget = el;
               shiftMode.activate(true);
             }
           }, 0);
         }
       }
+      if (el === sendTextarea) return;
       if (findReplaceController.active && findReplaceController._barEl) {
         if (findReplaceController._cmNavigationFocusTarget === el) return;
         if (findReplaceController._floatingNavigationFocusTarget === el) return;
@@ -26254,7 +26743,6 @@ function setupGlobalFocusTracking() {
           try {
             if (!findReplaceController.active) return;
             if (!el.ownerDocument || !el.ownerDocument.contains(el)) return;
-            if (shouldIgnoreFocusedElement(el)) return;
             findReplaceController._doSearch();
           } catch (e) {}
         }, 0);
@@ -26309,6 +26797,7 @@ function setupGlobalFocusTracking() {
           if (!isEditableElement(el)) return;
           _lastFocusedEditable = el;
           _lastFocusedForScroll = el;
+          _lastEditTarget = el;
           markExternalFocused();
           historyManager.ensureExternalHistory(el);
           historyManager.updateButtons();
@@ -26343,6 +26832,7 @@ function setupGlobalFocusTracking() {
           if (isEditableElement(target)) return;
           _lastFocusedEditable = null;
           _lastFocusedForScroll = null;
+          _lastEditTarget = null;
           clearExternalFocused();
         },
         true,
@@ -26355,6 +26845,7 @@ function setupGlobalFocusTracking() {
           if (isEditableElement(target)) return;
           _lastFocusedEditable = null;
           _lastFocusedForScroll = null;
+          _lastEditTarget = null;
           clearExternalFocused();
         },
         { capture: true, passive: true },
@@ -27262,6 +27753,7 @@ jQuery(async () => {
                     if (!isEditableElement(el)) return;
                     _lastFocusedEditable = el;
                     _lastFocusedForScroll = el;
+                    _lastEditTarget = el;
                     if (
                       toolbarStartupGuard.canExpand() &&
                       document.getElementById("send_form")
@@ -27302,6 +27794,7 @@ jQuery(async () => {
                     if (!target || isEditableElement(target)) return;
                     _lastFocusedEditable = null;
                     _lastFocusedForScroll = null;
+                    _lastEditTarget = null;
                     const sf = document.getElementById("send_form");
                     if (sf) sf.classList.remove("ih-external-focused");
                   },
@@ -27314,6 +27807,7 @@ jQuery(async () => {
                     if (!target || isEditableElement(target)) return;
                     _lastFocusedEditable = null;
                     _lastFocusedForScroll = null;
+                    _lastEditTarget = null;
                     const sf = document.getElementById("send_form");
                     if (sf) sf.classList.remove("ih-external-focused");
                   },
@@ -27397,6 +27891,7 @@ jQuery(async () => {
       setupInputTracking();
       _lastFocusedEditable = null;
       _lastFocusedForScroll = null;
+      _lastEditTarget = null;
       _savedRange = null;
       closeAllFolderDropdowns();
       floatingPanelController.refresh();

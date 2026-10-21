@@ -143,7 +143,7 @@ export function createNativePromptTokenCounter({
 
     function sourceIdentity() {
         const saveId = source.id.replace(/_prompt$/, '_save');
-        return JSON.stringify([getIdentity(), doc.getElementById(saveId)?.dataset.pmPrompt ?? '']);
+        return JSON.stringify([getIdentity(), (saveId ? doc.getElementById(saveId) : null)?.dataset.pmPrompt ?? '']);
     }
 
     function read() {

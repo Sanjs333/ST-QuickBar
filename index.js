@@ -3754,7 +3754,7 @@ const historyManager = {
   isPerformingUndoRedo: false,
   inputDebounceTimer: null,
   externalHistories: new WeakMap(),
-  _sharedHistoriesByKey: new Map(),
+  _sharedHistoriesByKey: new WeakMap(),
 
   init() {
     const textarea = getMessageInput();
@@ -3767,18 +3767,12 @@ const historyManager = {
 
   _getExternalHistory(el, opts = {}) {
     if (!el || getFloatingEditorToolTarget(el)) return null;
-    const shareKey =
-      el.classList &&
-      el.classList.contains("maximized_textarea") &&
-      el.dataset &&
-      el.dataset.for
-        ? el.dataset.for
-        : el.id || "";
-    let h = this.externalHistories.get(el);
-    if (!h && shareKey) {
-      h = this._sharedHistoriesByKey.get(shareKey);
-      if (h) this.externalHistories.set(el, h);
-    }
+    // Share only with the actual source element, never with unrelated fields
+    // that happen to reuse an id (including fields in another document).
+    const shareKey = this._getLogicalSource(el) || el;
+    let h = this.externalHistories.get(shareKey) ||
+      this._sharedHistoriesByKey.get(shareKey);
+    if (h) this.externalHistories.set(el, h);
     const currentText = el.value || "";
     const cursorPos = el.selectionStart || 0;
 
@@ -3788,27 +3782,33 @@ const historyManager = {
         pointer: 0,
         isPerformingUndoRedo: false,
         inputDebounceTimer: null,
-        lastInputAt: 0,
+        pendingState: null,
       };
+      this.externalHistories.set(shareKey, h);
       this.externalHistories.set(el, h);
-      if (shareKey) this._sharedHistoriesByKey.set(shareKey, h);
+      this._sharedHistoriesByKey.set(shareKey, h);
       return h;
     }
 
     const pointerState = h.states[h.pointer];
     const pointerText = pointerState ? pointerState.text : "";
-    const recentlyTyped = Date.now() - (h.lastInputAt || 0) < 500;
 
     if (
       !opts.fromInput &&
       !h.isPerformingUndoRedo &&
-      !recentlyTyped &&
       pointerText !== currentText
     ) {
-      clearTimeout(h.inputDebounceTimer);
-      h.states = [{ text: currentText, cursorPos }];
-      h.pointer = 0;
-      h.inputDebounceTimer = null;
+      if (h.pendingState && h.pendingState.text === currentText) {
+        // A recorded input is not a different editing context. Commit it before
+        // focus/undo, even if its originating popup has already been removed.
+        this._pushExternalState(h, currentText, cursorPos);
+      } else {
+        clearTimeout(h.inputDebounceTimer);
+        h.states = [{ text: currentText, cursorPos }];
+        h.pointer = 0;
+        h.inputDebounceTimer = null;
+        h.pendingState = null;
+      }
     }
 
     return h;
@@ -3835,14 +3835,14 @@ const historyManager = {
       el.dataset &&
       el.dataset.for
     ) {
-      return document.getElementById(el.dataset.for) || null;
+      return el.ownerDocument?.getElementById(el.dataset.for) || null;
     }
     if (!el.isContentEditable) return null;
     const dialog = el.closest && el.closest("dialog");
     if (!dialog) return null;
     const ta = dialog.querySelector("textarea.maximized_textarea[data-for]");
     if (!ta || !ta.dataset.for) return null;
-    return document.getElementById(ta.dataset.for) || null;
+    return el.ownerDocument?.getElementById(ta.dataset.for) || null;
   },
 
   pushState(textarea) {
@@ -3866,23 +3866,27 @@ const historyManager = {
       this.updateButtons();
     } else {
       const h = this._getExternalHistory(el, { fromInput: true });
-      if (h.isPerformingUndoRedo) return;
-      clearTimeout(h.inputDebounceTimer);
-      const text = el.value || "";
-      const cursorPos = el.selectionStart || 0;
-      if (h.pointer >= 0 && h.states[h.pointer].text === text) return;
-      if (h.pointer < h.states.length - 1) {
-        h.states = h.states.slice(0, h.pointer + 1);
-      }
-      h.states.push({ text, cursorPos });
-      if (h.states.length > this.maxHistory) h.states.shift();
-      h.pointer = h.states.length - 1;
-      this.updateButtons();
+      this._pushExternalState(h, el.value || "", el.selectionStart || 0);
     }
   },
 
+  _pushExternalState(h, text, cursorPos) {
+    if (!h || h.isPerformingUndoRedo) return;
+    clearTimeout(h.inputDebounceTimer);
+    h.inputDebounceTimer = null;
+    h.pendingState = null;
+    if (h.pointer >= 0 && h.states[h.pointer].text === text) return;
+    if (h.pointer < h.states.length - 1) {
+      h.states = h.states.slice(0, h.pointer + 1);
+    }
+    h.states.push({ text, cursorPos });
+    if (h.states.length > this.maxHistory) h.states.shift();
+    h.pointer = h.states.length - 1;
+    this.updateButtons();
+  },
+
   undo() {
-    const target = getInsertionTarget();
+    const target = getEditTarget();
     if (!target) return;
     const floatingTarget = getFloatingEditorToolTarget(target);
     if (floatingTarget) {
@@ -3896,10 +3900,11 @@ const historyManager = {
         const src = this._getLogicalSource(target);
         const sharedH = src
           ? this.externalHistories.get(src) ||
-            this._sharedHistoriesByKey.get(src.id || "")
+            this._sharedHistoriesByKey.get(src)
           : null;
         if (sharedH && sharedH.states && sharedH.states.length > 0) {
           clearTimeout(sharedH.inputDebounceTimer);
+          sharedH.pendingState = null;
           const curText = cmView.state.doc.toString();
           if (
             sharedH.pointer < 0 ||
@@ -3997,14 +4002,12 @@ const historyManager = {
     } else {
       const h = this._getExternalHistory(target);
       clearTimeout(h.inputDebounceTimer);
+      h.pendingState = null;
       if (h.pointer < 0 || h.states[h.pointer].text !== target.value) {
         this.pushState($(target));
       }
       if (h.pointer <= 0) {
-        target.focus();
-        try {
-          document.execCommand("undo");
-        } catch (e) {}
+        this.updateButtons();
         return;
       }
       h.isPerformingUndoRedo = true;
@@ -4048,7 +4051,7 @@ const historyManager = {
   },
 
   redo() {
-    const target = getInsertionTarget();
+    const target = getEditTarget();
     if (!target) return;
     const floatingTarget = getFloatingEditorToolTarget(target);
     if (floatingTarget) {
@@ -4062,7 +4065,7 @@ const historyManager = {
         const src = this._getLogicalSource(target);
         const sharedH = src
           ? this.externalHistories.get(src) ||
-            this._sharedHistoriesByKey.get(src.id || "")
+            this._sharedHistoriesByKey.get(src)
           : null;
         if (
           sharedH &&
@@ -4071,6 +4074,7 @@ const historyManager = {
           sharedH.pointer < sharedH.states.length - 1
         ) {
           clearTimeout(sharedH.inputDebounceTimer);
+          sharedH.pendingState = null;
           sharedH.isPerformingUndoRedo = true;
           sharedH.pointer++;
           const state = sharedH.states[sharedH.pointer];
@@ -4164,14 +4168,12 @@ const historyManager = {
     } else {
       const h = this._getExternalHistory(target);
       clearTimeout(h.inputDebounceTimer);
+      h.pendingState = null;
       if (h.pointer >= 0 && h.states[h.pointer].text !== target.value) {
         this.pushState($(target));
       }
       if (h.pointer >= h.states.length - 1) {
-        target.focus();
-        try {
-          document.execCommand("redo");
-        } catch (e) {}
+        this.updateButtons();
         return;
       }
       h.isPerformingUndoRedo = true;
@@ -4284,10 +4286,11 @@ const historyManager = {
     if (getFloatingEditorToolTarget(el)) return;
     const h = this._getExternalHistory(el, { fromInput: true });
     if (!h) return;
-    h.lastInputAt = Date.now();
     if (h.isPerformingUndoRedo) return;
 
     const text = el.value || "";
+    const pending = { text, cursorPos: el.selectionStart || 0 };
+    h.pendingState = pending;
     if (
       h.pointer >= 0 &&
       h.states.length <= 1 &&
@@ -4300,8 +4303,8 @@ const historyManager = {
     clearTimeout(h.inputDebounceTimer);
     h.inputDebounceTimer = setTimeout(() => {
       try {
-        if (!el || !el.ownerDocument || !el.ownerDocument.contains(el)) return;
-        this.pushState($(el));
+        if (h.pendingState !== pending) return;
+        this._pushExternalState(h, pending.text, pending.cursorPos);
       } catch (e) {
         console.warn("快捷工具栏: 保存外部输入状态失败", e);
       }
@@ -4309,7 +4312,7 @@ const historyManager = {
   },
 
   updateButtons() {
-    const target = getInsertionTarget();
+    const target = getEditTarget();
     let undoDisabled = true;
     let redoDisabled = true;
     if (target) {
@@ -4325,7 +4328,7 @@ const historyManager = {
         const src = this._getLogicalSource(target);
         const sharedH = src
           ? this.externalHistories.get(src) ||
-            this._sharedHistoriesByKey.get(src.id || "")
+            this._sharedHistoriesByKey.get(src)
           : null;
         if (sharedH && sharedH.states && sharedH.states.length > 0) {
           undoDisabled = sharedH.pointer <= 0;
@@ -10233,6 +10236,7 @@ function openHideManagerPanel() {
     editView: null,
     branchData: null,
     branchExpanded: {},
+    branchTreeScroll: null,
     branchLoading: false,
     branchProgress: "",
     branchScanned: false,
@@ -18406,6 +18410,7 @@ function openHideManagerPanel() {
   }
 
   function _branchDropState() {
+    sharedState.branchTreeScroll = null;
     sharedState.branchData = null;
     sharedState.branchScanned = false;
     sharedState._spCacheNodes = undefined;
@@ -18414,11 +18419,23 @@ function openHideManagerPanel() {
     sharedState.branchPreviewName = null;
     sharedState.branchPreviewMsgs = null;
   }
+  function _branchRememberTreeScroll() {
+    if (sharedState.branchPreviewName || sharedState.branchDetailName) return;
+    const host = content.find("#ih_mgr_branch_tree")[0];
+    if (!host) return;
+    sharedState.branchTreeScroll = {
+      top: host.scrollTop,
+      outerTop: content[0].scrollTop,
+    };
+  }
+
   function _branchSyncView() {
     const inPreview = !!sharedState.branchPreviewName;
     const inDetail = !inPreview && !!sharedState.branchDetailName;
-    content
-      .find('.ih-mgr-tab-panel[data-panel="branch"]')
+    const panel = content.find('.ih-mgr-tab-panel[data-panel="branch"]');
+    const wasSubview = panel.hasClass("ih-br-in-detail") ||
+      panel.hasClass("ih-br-in-preview");
+    panel
       .toggleClass("ih-br-in-detail", inDetail)
       .toggleClass("ih-br-in-preview", inPreview);
     if (!inDetail) {
@@ -18427,7 +18444,23 @@ function openHideManagerPanel() {
     }
     if (inPreview) renderBranchPreview();
     else if (inDetail) renderBranchDetail();
-    else renderBranchTree();
+    else {
+      renderBranchTree();
+      const saved = sharedState.branchTreeScroll;
+      if (wasSubview && saved) {
+        const restore = () => {
+          if (!content[0].isConnected || sharedState.activeTab !== "branch" ||
+              sharedState.branchPreviewName || sharedState.branchDetailName ||
+              sharedState.branchTreeScroll !== saved) return;
+          const host = content.find("#ih_mgr_branch_tree")[0];
+          if (host) host.scrollTop = saved.top;
+          content[0].scrollTop = saved.outerTop;
+        };
+        restore();
+        // Reapply after the restored tree has completed its first layout.
+        requestAnimationFrame(restore);
+      }
+    }
   }
 
   function _bpFile() {
@@ -18438,6 +18471,7 @@ function openHideManagerPanel() {
   }
 
   async function _branchOpenPreview(name) {
+    _branchRememberTreeScroll();
     sharedState.branchDetailName = null;
     sharedState.branchDetailData = null;
     sharedState.branchPreviewName = name;
@@ -18705,6 +18739,7 @@ function openHideManagerPanel() {
       toastr.info("这是主线，没有父档可以对比", "", { timeOut: 1500 });
       return;
     }
+    _branchRememberTreeScroll();
     sharedState.branchDetailName = name;
     sharedState.branchDetailData = null;
     sharedState.branchDetailLoading = true;
@@ -27856,12 +27891,12 @@ jQuery(async () => {
   try {
     if (event_types.CHARACTER_EDITED) {
       eventSource.on(event_types.CHARACTER_EDITED, function () {
-        historyManager._sharedHistoriesByKey.clear();
+        historyManager._sharedHistoriesByKey = new WeakMap();
       });
     }
     eventSource.on(event_types.CHAT_CHANGED, function () {
       historyManager.clear();
-      historyManager._sharedHistoriesByKey.clear();
+      historyManager._sharedHistoriesByKey = new WeakMap();
       let currentChatIdForUndo = null;
       try {
         currentChatIdForUndo = SillyTavern.getContext().getCurrentChatId();

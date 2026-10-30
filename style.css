@@ -261,10 +261,21 @@
 .input-helper-settings textarea {
   min-width: 0;
 }
+/* Margins avoid an extra flex gap for collapsed folder/character children. */
 #integrated_button_settings {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
+}
+#integrated_button_settings > .integrated-button-row {
+  margin-top: 4px;
+}
+#integrated_button_settings > .ih-char-row,
+#integrated_button_settings > .ih-external-section {
+  margin-top: 8px;
+}
+#integrated_button_settings > :first-child {
+  margin-top: 0;
 }
 .integrated-button-row {
   display: flex;
@@ -404,6 +415,12 @@
 .ih-folder-chevron:hover {
   opacity: 1;
 }
+.ih-folder-collapse-icon {
+  transition: transform 0.25s;
+}
+.ih-folder-chevron[aria-expanded="false"] > .ih-folder-collapse-icon {
+  transform: rotate(-90deg);
+}
 .ih-folder-children {
   display: flex;
   flex-direction: column;
@@ -424,7 +441,7 @@
     padding 0.25s ease;
   max-height: 2000px;
   opacity: 1;
-  margin-top: 2px;
+  margin-top: 6px;
   margin-bottom: 2px;
 }
 .ih-folder-children.ih-collapsed {
@@ -8374,7 +8391,7 @@ body.ih-cp-selecting input::-moz-selection {
     padding 0.25s ease;
   max-height: 2000px;
   opacity: 1;
-  margin-top: 2px;
+  margin-top: 6px;
   margin-bottom: 2px;
 }
 .ih-char-children.ih-collapsed,

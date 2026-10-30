@@ -23784,10 +23784,7 @@ function toggleFolderCollapse(fi) {
   const childrenDiv = $(`.ih-folder-children[data-folder-index="${fi}"]`);
   const chevronBtn = $(`.ih-folder-chevron[data-folder-index="${fi}"]`);
   childrenDiv.toggleClass("ih-collapsed", folder.collapsed);
-  const icon = chevronBtn.find("i");
-  if (folder.collapsed)
-    icon.removeClass("fa-chevron-down").addClass("fa-chevron-right");
-  else icon.removeClass("fa-chevron-right").addClass("fa-chevron-down");
+  chevronBtn.attr("aria-expanded", String(!folder.collapsed));
 }
 
 function makeSettingsRow(key, opts) {
@@ -23954,15 +23951,14 @@ function renderSettingsPanel() {
           : '<i class="fa-solid fa-folder"></i>';
       const safeFolderNameText = ihEscapeHtml(folder.name || "文件夹");
       const isCollapsed = folder.collapsed === true;
-      const chevronIcon = isCollapsed ? "fa-chevron-right" : "fa-chevron-down";
       const folderRow = $(`
                 <div class="integrated-button-row ih-folder-row" data-button-key="${key}" data-folder-row="true" data-folder-index="${fi}">
                     <span class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></span>
                     <input id="enable_${key}_btn" type="checkbox" ${isChecked} />
                     <div class="button-preview">${iconDisplay}</div>
                     <span class="ih-folder-label-text" data-folder-index="${fi}"><i class="fa-solid fa-folder" style="margin-right:4px;opacity:0.5;"></i>${safeFolderNameText}</span>
-                    <button class="ih-folder-chevron" data-folder-index="${fi}" title="展开/收起">
-                        <i class="fa-solid ${chevronIcon}"></i>
+                    <button type="button" class="ih-folder-chevron" data-folder-index="${fi}" title="展开/收起" aria-expanded="${!isCollapsed}">
+                        <i class="fa-solid fa-chevron-down ih-folder-collapse-icon"></i>
                     </button>
                 </div>
             `);
@@ -25728,7 +25724,7 @@ function ihRenderExternalEntrySections(container) {
       <div class="integrated-button-row ih-folder-row ih-external-header">
         <div class="button-preview"><i class="${def.icon}"></i></div>
         <span class="ih-folder-label-text ih-external-label" role="button" tabindex="0" aria-expanded="${!collapsed}">${def.label}<span class="ih-char-badge" title="${entries.length} 个快捷入口，${hiddenOnly.length} 个仅隐藏入口">${entries.length + hiddenOnly.length}</span></span>
-        <button type="button" class="ih-folder-chevron ih-external-chevron" title="展开/收起" aria-expanded="${!collapsed}"><i class="fa-solid ${collapsed ? "fa-chevron-right" : "fa-chevron-down"}"></i></button>
+        <button type="button" class="ih-folder-chevron ih-external-chevron" title="展开/收起" aria-expanded="${!collapsed}"><i class="fa-solid fa-chevron-down ih-folder-collapse-icon"></i></button>
       </div>
       <div class="ih-external-children ${collapsed ? "ih-collapsed" : ""}" data-external-source="${source}" ${collapsed ? "inert" : ""}></div>
     </div>`);
@@ -25738,7 +25734,6 @@ function ihRenderExternalEntrySections(container) {
       ExternalEntries.getExternalEntrySettings(getSettings()).collapsed[source] = next;
       children.toggleClass("ih-collapsed", next).prop("inert", next);
       section.find("[aria-expanded]").attr("aria-expanded", String(!next));
-      section.find(".ih-external-chevron i").toggleClass("fa-chevron-right", next).toggleClass("fa-chevron-down", !next);
       saveSettingsDebounced();
     };
     section.find(".ih-external-label, .ih-external-chevron").on("click", toggle);
@@ -25845,7 +25840,6 @@ function ihRenderCharSettingsSection(container) {
       ? ihEscapeHtml(cb.display)
       : '<i class="fa-solid fa-user-tag"></i>';
   const isCollapsed = cb.collapsed === true;
-  const chevronIcon = isCollapsed ? "fa-chevron-right" : "fa-chevron-down";
   const badge = charKey
     ? `<span class="ih-char-badge">${ihEscapeHtml(charName)} · ${boundList.length}</span>`
     : `<span class="ih-char-badge ih-char-badge-none">未选择单人角色</span>`;
@@ -25865,7 +25859,7 @@ function ihRenderCharSettingsSection(container) {
             <span class="ih-folder-chevron ih-char-mini-btn ih-char-icon-btn" role="button" tabindex="0" title="选择图标 / 显示文字"><i class="fa-solid fa-icons"></i></span>
             <span class="ih-folder-chevron ih-char-mini-btn ih-char-layout-btn" role="button" tabindex="0" title="展开方向（横向/竖向）"><i class="fa-solid ${layoutIcon}"></i></span>
             <span class="ih-folder-chevron ih-char-mini-btn ih-char-persist-btn${cb.dropdownPersist ? " ih-char-persist-on" : ""}" role="button" tabindex="0" title="${ihEscapeAttr(persistTitle)}"><i class="fa-solid fa-thumbtack"></i></span>
-            <span class="ih-folder-chevron ih-char-chevron" role="button" tabindex="0" title="展开/收起"><i class="fa-solid ${chevronIcon}"></i></span>
+            <span class="ih-folder-chevron ih-char-chevron" role="button" tabindex="0" title="展开/收起" aria-expanded="${!isCollapsed}"><i class="fa-solid fa-chevron-down ih-folder-collapse-icon"></i></span>
         </div>
     `);
   const bindTap = function (el, fn) {
@@ -25891,10 +25885,7 @@ function ihRenderCharSettingsSection(container) {
     bar.collapsed = !bar.collapsed;
     saveSettingsDebounced();
     $(".ih-char-children").toggleClass("ih-collapsed", bar.collapsed);
-    const icon = $(".ih-char-chevron i");
-    if (bar.collapsed)
-      icon.removeClass("fa-chevron-down").addClass("fa-chevron-right");
-    else icon.removeClass("fa-chevron-right").addClass("fa-chevron-down");
+    row.find(".ih-char-chevron").attr("aria-expanded", String(!bar.collapsed));
   };
   bindTap(row.find(".ih-char-label-text"), toggleCollapse);
   bindTap(row.find(".ih-char-chevron"), toggleCollapse);

@@ -8326,6 +8326,7 @@ function openHelpPanel() {
 <p class="ih-help-sub">快捷入口可用时隐藏原入口</p>
 <p>在<q>「更多设置 → 快捷入口可用时隐藏原入口」</q>统一开启或关闭已收录入口的隐藏偏好，初始默认关闭；新加入的入口沿用最后一次统一设置。每行的眼睛按钮仍可独立切换，混合选择时统一开关显示半选；升级不会覆盖已保存的单项偏好。</p>
 <p>已添加快捷入口只有在工具栏按钮、文件夹 / 当前角色入口或悬浮面板 / 悬浮球实际可访问时，才会隐藏原入口。禁用快捷按钮、关闭 QuickBar、移除入口或失去可用布局时恢复原入口；关闭悬浮面板后若按钮回到可用工具栏，仍保持隐藏。仅保存布局或快捷键不算可访问入口。</p>
+<p>从 QuickBar 快捷入口打开扩展面板时，默认临时显示该面板的原生标题头，保留标题上的按钮与折叠功能；收起该面板或关闭扩展页后按原隐藏偏好恢复，再次打开扩展页不会自动显示。此行为不增加设置项，不影响魔法棒入口或<q>「仅隐藏原入口」</q>规则。</p>
 <p>隐藏只控制显示，不删除、移动原节点，也不绕过原插件自己的隐藏或禁用状态。第三方入口可能有额外点击限制，建议先保留原入口，确认兼容后再开启。来源脚本直接注册的运行时按钮不参与扫描、按钮管理或此隐藏设置，其位置与备用入口由来源脚本管理。</p>
 
 <div class="ih-help-h4"><i class="fa-solid fa-folder"></i> 按钮分组</div>
@@ -25640,6 +25641,7 @@ async function ihActivateExternalEntry(key) {
         return block.classList.contains("openDrawer");
       },
       afterLayout: () => new Promise(resolve => setTimeout(resolve, 250)),
+      onPanelOpened: entry => ihSourceVisibility.revealPanel(entry),
     });
     if (!success) toastr.warning(`「${entry.label}」入口暂不可用，请确认原插件或脚本已加载。已保留快捷入口配置。`, "", { timeOut: 3000 });
   } catch (error) {

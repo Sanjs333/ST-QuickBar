@@ -4,15 +4,17 @@ import {
 } from "./external-entries.js";
 
 const RELATED_ATTRIBUTE = "data-quickbar-source-for";
-const LAYOUT_ROOTS = "#input_helper_toolbar, .ih-floating-panel, .ih-floating-ball, #extensionsMenu, #extensions_settings, #extensions_settings2, .ih-folder-dropdown-portal, [data-quickbar-source-for]";
+const LAYOUT_ROOTS = "#rm_extensions_block, #input_helper_toolbar, .ih-floating-panel, .ih-floating-ball, #extensionsMenu, #extensions_settings, #extensions_settings2, .ih-folder-dropdown-portal, [data-quickbar-source-for]";
 
 // Display policy only: native nodes, handlers and source-owned attributes stay
 // untouched. Shortcuts need a reachable replacement; explicit hidden-only
 // rules are independent of layouts, button switches and the unified eye.
+// Panel shortcuts temporarily reveal only their native header while in use;
+// this session state never changes saved preferences or reveals wand entries.
 export function createSourceVisibilityController({ doc = globalThis.document, getSettings, getReachableKeys, onChange = () => {}, onError = () => {} }) {
   const win = doc.defaultView;
   let started = false, destroyed = false, syncing = false, timer = null, observer = null, style = null;
-  let owned = new Set();
+  let owned = new Set(), openedPanels = new Set();
   const report = error => { try { onError(error); } catch {} };
   const notify = () => { try { onChange(); } catch (error) { report(error); } };
   function restore() {
@@ -20,7 +22,7 @@ export function createSourceVisibilityController({ doc = globalThis.document, ge
     for (const node of owned) {
       if (node.getAttribute(SOURCE_HIDDEN_ATTRIBUTE) === "true") node.removeAttribute(SOURCE_HIDDEN_ATTRIBUTE);
     }
-    owned.clear();
+    owned.clear(); openedPanels.clear();
     return changed;
   }
   function ensureStyle() {
@@ -37,6 +39,23 @@ export function createSourceVisibilityController({ doc = globalThis.document, ge
     if (node?.tagName === "STYLE") node.remove();
     style = null;
   }
+  function isPanelOpen(header) {
+    const host = header?.closest("#rm_extensions_block");
+    if (!host?.isConnected || !host.classList.contains("openDrawer") || host.hidden
+      || win.getComputedStyle(host).display === "none") return false;
+    const drawer = header.closest(".inline-drawer");
+    const content = [...drawer.children].find(node => node.matches(".inline-drawer-content"));
+    // Native slideToggle changes the chevron before its closing animation
+    // finishes, so display alone would keep the header revealed too long.
+    return !!content && !content.hidden && win.getComputedStyle(content).display !== "none"
+      && !header.querySelector(".inline-drawer-icon")?.classList.contains("down");
+  }
+  function revealPanel(entry) {
+    if (!started || destroyed || entry?.source !== "panel") return;
+    openedPanels.add(entry.key);
+    // Apply before activation scrolls to the header, not on the next observer tick.
+    sync();
+  }
   function sync() {
     if (!started || destroyed || syncing) return;
     syncing = true;
@@ -49,19 +68,31 @@ export function createSourceVisibilityController({ doc = globalThis.document, ge
       }
       ensureStyle();
       const desired = withUnmaskedSourceVisibility(doc, () => {
-        const next = new Set(), ids = new Set();
-        const collect = entry => {
+        const next = new Set(), ids = new Set(), activePanels = new Set(), revealedHeaders = new Set();
+        const entries = getExternalEntries(settings);
+        for (const entry of entries) {
+          if (entry.source !== "panel" || !openedPanels.has(entry.key) || settings.buttons?.[entry.key] === false) continue;
+          const node = resolveExternalEntry(doc, entry);
+          if (!isPanelOpen(node)) continue;
+          activePanels.add(entry.key); revealedHeaders.add(node);
+        }
+        // Closing the extension host or a panel ends its reveal session. A later
+        // native reopen must not reveal it again without a QuickBar activation.
+        openedPanels = activePanels;
+        const collect = (entry, allowReveal = false) => {
           const node = resolveExternalEntry(doc, entry);
           if (!node?.isConnected) return;
-          next.add(node);
+          if (!allowReveal || !revealedHeaders.has(node)) next.add(node);
+          // Related/alternate entry points remain masked even while the native
+          // panel header is revealed. Hidden-only rules never use this exception.
           if (node.id) ids.add(node.id);
         };
         for (const entry of getHiddenOnlyEntries(settings)) collect(entry);
-        const shortcuts = getExternalEntries(settings)
+        const shortcuts = entries
           .filter(entry => entry.hideOriginal === true && settings.buttons?.[entry.key] !== false);
         // Hidden-only use must work without a shortcut layout provider at all.
         const reachable = new Set(shortcuts.length && typeof getReachableKeys === "function" ? getReachableKeys() || [] : []);
-        for (const entry of shortcuts) if (reachable.has(entry.key)) collect(entry);
+        for (const entry of shortcuts) if (reachable.has(entry.key)) collect(entry, true);
         if (ids.size) for (const node of doc.querySelectorAll(`[${RELATED_ATTRIBUTE}]`)) {
           if (node.isConnected && ids.has(node.getAttribute(RELATED_ATTRIBUTE))) next.add(node);
         }
@@ -129,5 +160,5 @@ export function createSourceVisibilityController({ doc = globalThis.document, ge
     removeStyle();
     if (changed) notify();
   }
-  return Object.freeze({ start, schedule, sync, destroy });
+  return Object.freeze({ start, schedule, sync, revealPanel, destroy });
 }

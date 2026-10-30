@@ -333,7 +333,7 @@ export function removeExternalEntry(settings, key) {
   return true;
 }
 
-export async function activateExternalEntry(doc, entry, { openPanelHost, afterLayout } = {}) {
+export async function activateExternalEntry(doc, entry, { openPanelHost, afterLayout, onPanelOpened } = {}) {
   let target = resolveExternalEntry(doc, entry);
   if (!target) return false;
   if (entry.source === "wand") {
@@ -347,11 +347,19 @@ export async function activateExternalEntry(doc, entry, { openPanelHost, afterLa
   const content = [...target.closest(".inline-drawer").children].find(node => node.matches(".inline-drawer-content"));
   if (!content) return false;
   if (content.hidden || doc.defaultView?.getComputedStyle(content).display === "none") target.click();
+  // Native expansion starts synchronously. Reveal its header now, without
+  // waiting for the positioning delay; re-resolve in case the click rebuilt UI.
+  const openingTarget = resolveExternalEntry(doc, entry);
+  const openingContent = openingTarget && [...openingTarget.closest(".inline-drawer").children]
+    .find(node => node.matches(".inline-drawer-content"));
+  if (openingContent && !openingContent.hidden && doc.defaultView?.getComputedStyle(openingContent).display !== "none") onPanelOpened?.(entry);
   if (afterLayout) await afterLayout();
   target = resolveExternalEntry(doc, entry);
   if (!target) return false;
   const currentContent = [...target.closest(".inline-drawer").children].find(node => node.matches(".inline-drawer-content"));
   if (!currentContent || currentContent.hidden || doc.defaultView?.getComputedStyle(currentContent).display === "none") return false;
+  // Confirm again after layout in case expansion was asynchronous or rebuilt UI.
+  onPanelOpened?.(entry);
   target.scrollIntoView?.({ behavior: "smooth", block: "nearest", inline: "nearest" });
   return true;
 }

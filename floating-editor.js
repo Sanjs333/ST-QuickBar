@@ -2109,6 +2109,7 @@ export function createFloatingEditorController({
         s.history.accept(value);
         s.window.setValue(value);
         s.lastValue = value;
+        s.syncedValue = value;
         if (valueChanged) s.timeline.queue(value);
         s.revision = revision;
         s.lastSelection = selectedRange(s);
@@ -2139,6 +2140,9 @@ export function createFloatingEditorController({
       const result = s.adapter.write(value, {
         userEvent: options.userEvent || "input.type", addToHistory: options.addToHistory,
       });
+      // A source input handler can close/switch its panel during a successful
+      // write. Remember accepted text before checking the binding again.
+      if (!s.characterDraft && !s.presetDraft) s.syncedValue = result.value;
       if (!valid(s)) return;
       const valueChanged = result.value !== s.lastValue;
       if (options.historyDirection) s.history.accept(result.value, options.historyDirection);
@@ -2238,6 +2242,7 @@ export function createFloatingEditorController({
     try {
       s.writing = true;
       const result = s.adapter.history(direction);
+      s.syncedValue = result.value;
       if (!valid(s)) return false;
       if (!result.changed) {
         if (result.unhandled) {
@@ -2664,7 +2669,10 @@ export function createFloatingEditorController({
 
   function hasRecoverableDraft(s) {
     return characterDraftDirty(s) || presetDraftDirty(s) ||
-      (!s.characterDraft && !s.presetDraft && s.invalid && !!s.window.textarea.value);
+      // Live-sync editors have no separate save step. Losing the source does
+      // not make already synchronized (or untouched) text an unsaved draft.
+      (!s.characterDraft && !s.presetDraft &&
+        s.window.textarea.value !== s.syncedValue.replace(/\r\n?/g, "\n"));
   }
 
   function updatePresetDraft(s) {
@@ -2864,8 +2872,14 @@ export function createFloatingEditorController({
       notify("编辑内容正在保存，请等待结果后再关闭。");
       return false;
     }
+    for (const s of list) {
+      if (!s.characterDraft && !s.presetDraft && s.composing && !s.invalid) {
+        s.composing = false;
+        write(s, s.window.textarea.value);
+      }
+    }
     const dirty = list.filter(hasRecoverableDraft);
-    return !dirty.length || win.confirm("「" + dirty.map(s => s.title).join("、") + "」有未保存、尚未确认保存或已脱离原框的内容。取消关闭后可继续编辑、保存或复制；确定丢弃并关闭？");
+    return !dirty.length || win.confirm("「" + dirty.map(s => s.title).join("、") + "」有未自动保存或未同步到原编辑框的内容。取消关闭后可重试或复制保留；确定丢弃并关闭？");
   }
 
   function closeSession(s, confirmed = false) {
@@ -3035,7 +3049,7 @@ export function createFloatingEditorController({
       id: ++nextSessionId, generation: 0, openedAt: Date.now(),
       source, maximize, adapter, identity, characterDraft, presetDraft, logicalKey: key,
       title: presetDraft ? presetDraft.name + " · 预设「" + presetDraft.preset + "」" : characterDraft ? characterDraft.name + " · " + characterDraft.label : editorTitle(source, maximize),
-      initialValue: value, lastValue: value, revision: adapter.getRevision(),
+      initialValue: value, lastValue: value, syncedValue: value, revision: adapter.getRevision(),
       invalid: false, composing: false, sourceComposing: false, writing: false,
       syncQueued: false,
       button: buttons.get(maximize), window: null, tools: null, colorClose: null,

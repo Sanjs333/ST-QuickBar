@@ -8353,7 +8353,8 @@ body.ih-cp-selecting input::-moz-selection {
   color: var(--SmartThemeQuoteColor, cornflowerblue);
 }
 
-.ih-char-children {
+.ih-char-children,
+.ih-external-children {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -8376,7 +8377,8 @@ body.ih-cp-selecting input::-moz-selection {
   margin-top: 2px;
   margin-bottom: 2px;
 }
-.ih-char-children.ih-collapsed {
+.ih-char-children.ih-collapsed,
+.ih-external-children.ih-collapsed {
   max-height: 0;
   opacity: 0;
   margin-top: 0;
@@ -9059,4 +9061,179 @@ body.ih-no-anim *::after {
 .ih-mgr-content .ih-me-textarea::-moz-selection {
   background-color: var(--SmartThemeQuoteColor, cornflowerblue) !important;
   color: var(--SmartThemeBodyColor) !important;
+}
+
+/* External entry management: reuse character-section rows and picker styling. */
+.ih-external-section {
+  min-width: 0;
+}
+.ih-external-header > .button-preview {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.ih-external-entry-row label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ih-external-scan-btn {
+  width: 100%;
+  justify-content: center;
+  margin-top: 2px;
+  box-sizing: border-box;
+}
+.ih-external-picker-header,
+.ih-external-picker-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ih-external-picker-header {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.ih-external-picker-header h4 {
+  margin: 0;
+  min-width: 0;
+}
+.ih-external-picker-footer {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.ih-external-picker-item input {
+  margin: 0;
+  flex-shrink: 0;
+}
+.ih-external-candidate-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ih-external-selected {
+  background-color: color-mix(in srgb, var(--SmartThemeQuoteColor, cornflowerblue) 15%, transparent);
+}
+.ih-external-added {
+  opacity: 0.6;
+  cursor: default;
+}
+.ih-external-picker .ih-picker-confirm-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+.ih-external-remove-btn:hover {
+  color: var(--SmartThemeEmColor, orange);
+}
+@media (max-width: 768px) {
+  .ih-external-children {
+    margin-left: 12px;
+    padding-left: 8px;
+  }
+}
+
+/* Source visibility is managed in its own removable stylesheet; this is only
+   the per-entry preference indicator and never hides native plugin UI. */
+.ih-external-hide-btn[aria-pressed="true"] { color: var(--SmartThemeQuoteColor); }
+
+/* Unified source-visibility switch: mixed per-entry choices remain visible. */
+#ih_hide_original_entries:indeterminate + .ih-toggle-slider {
+  background-color: color-mix(in srgb, var(--SmartThemeQuoteColor, cornflowerblue) 25%, transparent);
+}
+#ih_hide_original_entries:indeterminate + .ih-toggle-slider::before {
+  transform: translateX(8px);
+  opacity: 1;
+}
+
+/* Hidden-only sources stay in the existing category, not the shortcut layout. */
+.ih-external-hidden-only {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  margin-top: 4px;
+}
+.ih-external-hidden-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 6px;
+}
+.ih-external-hidden-summary {
+  min-width: 0;
+  font-size: 11px;
+  opacity: 0.6;
+}
+.ih-external-restore-all {
+  min-height: 28px;
+  padding: 2px 4px;
+  white-space: nowrap;
+}
+.ih-external-hidden-row {
+  min-width: 0;
+  padding: 2px 6px;
+}
+.ih-external-hidden-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  font-size: 11px;
+  opacity: 0.65;
+}
+.ih-external-hidden-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.ih-external-restore-btn {
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  color: var(--SmartThemeQuoteColor, cornflowerblue);
+  opacity: 0.75;
+}
+.ih-external-restore-all:focus-visible,
+.ih-external-restore-btn:focus-visible {
+  opacity: 1;
+  outline: 1px solid var(--SmartThemeQuoteColor, cornflowerblue);
+  outline-offset: 1px;
+}
+.ih-external-picker-footer {
+  flex-wrap: wrap;
+}
+.ih-external-picker-footer .menu_button {
+  min-width: 0;
+  gap: 4px;
+  padding: 5px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ih-picker-hide-only-btn {
+  opacity: 0.75;
+}
+.ih-picker-hide-only-btn:hover:not(:disabled) {
+  opacity: 1;
+}
+.ih-external-picker .ih-picker-hide-only-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+.ih-external-hidden-state {
+  flex-shrink: 0;
+  font-size: 10px;
+  opacity: 0.6;
+}
+@media (max-width: 360px) {
+  .ih-external-picker {
+    padding: 16px;
+  }
 }

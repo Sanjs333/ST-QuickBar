@@ -23,6 +23,10 @@ import {
 import { createCharacterFieldStore, createPresetEntryStore, createPresetSwitchGuard } from "./editor-stores.js";
 import { getPresetManager } from "../../../preset-manager.js";
 import * as OpenAISettings from "../../../openai.js";
+import * as ExternalEntries from "./external-entries.js";
+import { createScriptButtonRegistry } from "./script-buttons.js";
+import { createSourceVisibilityController } from "./source-visibility.js";
+import { createChatTopNavigator, getLoadedChatTopOffset } from "./chat-top-navigation.js";
 
 const openCharacterChat = SillyTavernScript.openCharacterChat;
 const executeSlashCommandsWithOptions = (...args) => {
@@ -5328,6 +5332,8 @@ async function ihSaveCurrentChat() {
 }
 
 function getButtonIdFromKey(key) {
+  if (ihScriptButtons.get(key)) return `input_${key}_btn`;
+  if (ExternalEntries.findExternalEntry(getSettings(), key)) return `input_${key}_btn`;
   if (key.startsWith("custom_"))
     return `input_custom_${key.replace("custom_", "")}_btn`;
   if (key.startsWith("folder_"))
@@ -5387,6 +5393,13 @@ function getButtonIdFromKey(key) {
 }
 
 function getButtonDisplayHtml(key) {
+  const scriptButton = ihScriptButtons.get(key);
+  if (scriptButton) return `<i class="${ihEscapeAttr(scriptButton.icon)}"></i>`;
+  const external = ExternalEntries.findExternalEntry(getSettings(), key);
+  if (external) {
+    const icon = ExternalEntries.normalizeEntryIcon(external.icon || external.defaultIcon) || ExternalEntries.EXTERNAL_ENTRY_SOURCES[external.source].icon;
+    return `<i class="${ihEscapeAttr(icon)}"></i>`;
+  }
   if (key.startsWith("custom_")) {
     const idx = parseInt(key.replace("custom_", ""));
     const sym = getSettings().customSymbols[idx];
@@ -5418,6 +5431,10 @@ function getButtonDisplayHtml(key) {
 }
 
 function getButtonLabel(key) {
+  const scriptButton = ihScriptButtons.get(key);
+  if (scriptButton) return scriptButton.label;
+  const external = ExternalEntries.findExternalEntry(getSettings(), key);
+  if (external) return external.label;
   if (key.startsWith("custom_")) {
     const idx = parseInt(key.replace("custom_", ""));
     const sym = getSettings().customSymbols[idx];
@@ -5851,8 +5868,21 @@ function findScrollNavigationContainer() {
   return root;
 }
 
+function ihGetLoadedChatTopOffset(chatEl) { return getLoadedChatTopOffset(chatEl); }
+const ihChatTopNavigator = createChatTopNavigator({
+  // Read-only optional compatibility. Never toggle or save another plugin's settings.
+  getBackfillThreshold: () => {
+    const settings = globalThis.__stChatRenderOptimizer?.settings;
+    if (!settings || settings.enabled === false || settings.autoLoadMore !== true) return null;
+    const threshold = Number(settings.autoLoadThresholdPx);
+    return Number.isFinite(threshold) && threshold >= 0 ? threshold : null;
+  },
+  onError: error => console.warn("QuickBar chat-top navigation failed", error),
+});
+
 function ihScrollBoxToTop(scrollEl) {
   if (!scrollEl || !isScrollNavigationTargetAvailable(scrollEl)) return;
+  const isChat = scrollEl === document.getElementById("chat");
   const isTextLike =
     scrollEl.tagName === "TEXTAREA" || scrollEl.tagName === "INPUT";
   const isCmScroller = !!(
@@ -5864,9 +5894,10 @@ function ihScrollBoxToTop(scrollEl) {
   } else if (isCmScroller) {
     ihSmoothScrollTo(scrollEl, 0, 320);
   } else {
-    scrollEl.scrollTo({ top: 0, behavior: ihGetScrollBehavior() });
+    if (isChat) ihChatTopNavigator.scrollToTop(scrollEl, ihGetScrollBehavior());
+    else scrollEl.scrollTo({ top: 0, behavior: ihGetScrollBehavior() });
   }
-  if (scrollEl === document.getElementById("chat")) {
+  if (isChat) {
     messageNavigation._currentAiIndex = -1;
     messageNavigation._lastNavTime = Date.now();
     messageNavigation._pendingJump = "top";
@@ -7096,7 +7127,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.3.5";
+const EXTENSION_VERSION = "3.3.6";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -7930,13 +7961,14 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.5</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.6</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>新增批量替换</b>：搜索标签可展开替换栏，对当前、指定或全部聊天档中的匹配统一替换。执行前显示替换数量与涉及的聊天档，5 分钟内可撤回；搜索按钮改为图标按钮，样式与搜索栏其他按钮一致。</li>
-  <li><b>调整定位高亮</b>：消息编辑子页面的定位按钮移至顶栏，编辑模式下同样可用，直接选中编辑框内的匹配文字；进入编辑时自动聚焦编辑框，并保留预览中的定位位置。</li>
-  <li><b>修复查找替换与选中模式</b>：以光标所在的编辑框为目标，支持消息管理等弹层、iframe、悬浮窗与发送框；修复「下一个」始终停在第 1 处、替换时提示未选中，以及新版 CodeMirror 无法识别的问题。</li>
-  <li><b>修复定位滚动</b>：修复 Firefox 下定位位置偏移，以及编辑框自动撑高时匹配项未滚动到可见区域的问题。</li>
-  <li><b>调整跳转按钮</b>：光标在编辑框内时，「跳转 AI 消息顶部」回到框内开头，与「跳转聊天底部」成对使用；「跳转聊天顶部」固定回到聊天区顶部。</li>
+  <li><b>新增外部入口（实验性）</b>：按钮管理可扫描魔法棒、扩展面板入口，选择加入快捷工具栏或仅隐藏原入口。快捷入口支持图标、快捷键、排序及各类布局；仅隐藏项使用精简列表，可单项或按分类恢复，不生成快捷按钮。</li>
+  <li><b>新增原入口隐藏设置</b>：「更多设置」统一管理已添加快捷入口的隐藏偏好，单项眼睛按钮仍可独立调整，新快捷入口沿用最近一次统一设置。仅在快捷布局可访问时隐藏原入口，不可用时自动恢复。</li>
+  <li><b>新增脚本快捷入口接口</b>：来源脚本可将运行时按钮注册到工具栏或悬浮面板，不写入已保存布局，也不参与扫描与按钮管理。</li>
+  <li><b>调整悬浮球大小</b>：最低值由 32px 降至 24px，圆形与方形均可使用；默认 48px、最大值 80px 及图片显示方式不变。</li>
+  <li><b>修复聊天回顶</b>：定位到当前已加载的第一条可见消息，兼容已识别的近顶自动加载逻辑，避免回顶误触历史补载；不重新加载聊天或修改历史加载设置。</li>
+  <li><b>修复悬浮窗关闭提示</b>：已同步或未修改的实时同步窗口，关闭、刷新时不再误报未保存；关闭前尝试写回输入法组字内容，未保存或未同步的修改仍保留确认提示。</li>
 </ul>
 `;
 
@@ -8035,9 +8067,10 @@ function openHelpPanel() {
     <li><b>预设条目独立草稿</b>：已有条目按预设名与条目标识绑定。原面板关闭、保存或切换 A/B 不会清空悬浮窗；再次打开同条目会回到已有草稿。关闭悬浮窗时自动保存正文，成功后直接收起；底部纯 FA 保存图标或 Ctrl/⌘+S 可保存而不关闭，整份命名预设仍需在酒馆保存。切到其他预设后需切回原预设再保存；原框并发修改、删除或保存失败时保留草稿。只有保存失败、结果未确认或冲突时，关闭才询问是否放弃；刷新有离页提示，但不跨刷新恢复。尚未保存的新条目需先原生保存一次。</li>
     <li><b>角色字段保存与冲突</b>：保存前检查服务器和原框是否被其他操作修改；发生冲突则暂停同步并保留文字，可复制后关闭并重新打开。临时失败会有限次自动重试。关闭或停用时先完成待保存内容，只有保存未成功时才询问是否放弃；刷新离页也会提示尚未保存的内容。</li>
     <li><b>其他字段实时同步</b>：未适配的其他角色字段、世界书、CSS、插件文本框及尚未保存的新角色表单，仍立即写回原编辑框，关闭不撤销修改。底部<q>「变更历史」</q>可预览并回到历史状态，回退本身也可撤销；角色字段的撤销、重做和历史恢复也会自动保存。</li>
+    <li><b>实时同步窗口的关闭提示</b>：已写回或未修改的内容，即使原框关闭、切换后窗口锁定，关闭或刷新也不再提示未保存。仅尚未同步到原框的本地修改需要确认；这不代表原插件已完成保存，仍需按其原有方式保存。</li>
     <li><b>底部工具</b>：左侧为变更历史、撤销、重做，右侧为查找和 CSS 专属取色器，与缩放图标水平对齐。角色字段仍自动保存；预设草稿关闭时自动保存，并额外提供纯 FA 保存图标供继续编辑时使用，其他实时同步窗口不增加保存按钮。底栏、工具栏和正文快捷键共用撤销重做处理，每个窗口的历史独立。</li>
     <li><b>查找替换</b>：调用插件现有查找栏，明确绑定当前窗口；聚焦其他输入框不会转移替换目标。通过另一窗口的查找按钮切换目标；折叠、关闭或锁定原窗口会关闭其查找栏。</li>
-    <li><b>对象保护</b>：独立角色字段 / 预设草稿在切换对象后仍可编辑，其他实时同步字段在绑定对象变化时锁定旧窗，保留可复制内容；关闭锁定窗口也会确认。只读或输入法组字期间不执行写入操作。</li>
+    <li><b>对象保护</b>：独立角色字段 / 预设草稿在切换对象后仍可编辑，其他实时同步字段在绑定对象变化时锁定旧窗，保留可复制内容。只读窗口不接受写入；输入法组字期间暂缓同步，关闭前会尝试写回当前组字内容，无法同步时提示保留。</li>
 </ul>
 <p><b>正文快捷键</b>：Ctrl/⌘+F 查找，Ctrl/⌘+H 替换，Ctrl/⌘+Z 撤销，Ctrl+Y 或 Ctrl/⌘+Shift+Z 重做。CSS 可用 Ctrl/⌘+Alt+Backspace 请求恢复；Ctrl/⌘+Alt+Esc 关闭目标窗口。</p>
 
@@ -8100,11 +8133,13 @@ function openHelpPanel() {
 
 <p class="ih-help-sub">跳转按钮</p>
 <ul>
-    <li><i class="fa-solid fa-angles-up"></i> 跳转聊天顶部：始终回到聊天区顶部</li>
+    <li><i class="fa-solid fa-angles-up"></i> 跳转聊天顶部：始终定位到聊天区当前已加载的第一条可见消息，不重新加载聊天或调整加载条数</li>
     <li><i class="fa-solid fa-arrow-down"></i> 跳转聊天底部：光标在编辑框内时回到框内末尾</li>
     <li><i class="fa-solid fa-arrow-up"></i> 跳转 AI 消息顶部：滚动至最新一条 AI 回复的顶部；光标在编辑框内（发送框除外）时回到框内开头</li>
     <li><i class="fa-solid fa-chevron-up"></i> / <i class="fa-solid fa-chevron-down"></i> 上 / 下一条 AI 消息</li>
 </ul>
+
+<p>回顶自动兼容已识别的近顶历史加载逻辑，无需额外设置；只在本次导航期间临时隔离定位，不修改其他插件的设置。需要查看更早的历史时，仍使用酒馆或原插件的加载方式，正常滚轮、触摸和键盘操作不受影响。</p>
 
 <p class="ih-help-sub"><i class="fa-solid fa-book-open"></i> 翻页模式</p>
 <p>开启后，上/下一条按钮变为翻页操作。</p>
@@ -8274,6 +8309,25 @@ function openHelpPanel() {
 <p><b>删除聊天的撤回机制</b>：删除后会显示短暂通知，5 分钟内可点击工具栏的<q>「撤回删除」</q>按钮恢复。</p>
 <p><b>注意</b>：删除聊天会实际从酒馆中删除文件，5 分钟撤回窗口过期后无法恢复。重要聊天建议提前备份。</p>
 
+<div class="ih-help-h4"><i class="fa-solid fa-plug"></i> 外部入口（实验性）</div>
+<p>可把原插件的魔法棒按钮或扩展设置面板收录为 QuickBar 快捷入口。<q>「按钮管理」</q>中的<q>「魔法棒入口」</q>和<q>「扩展面板入口」</q>是独立折叠的管理区域，不是工具栏文件夹。</p>
+<p class="ih-help-sub">添加与管理</p>
+<ul>
+    <li><b>扫描添加</b>：先确认原插件或脚本已加载，展开对应区域，点击<q>「扫描入口」</q>，勾选后选择<q>「加入所选」</q>或<q>「仅隐藏原入口」</q>。扫描不会执行原功能；只保存确认选择的入口，不会后台自动收录。</li>
+    <li><b>入口行为</b>：魔法棒快捷入口转发原按钮点击；扩展面板快捷入口打开扩展抽屉、展开对应顶层面板并定位，不复制或移动原按钮、面板。</li>
+    <li><b>图标与快捷键</b>：勾选框控制启用，快捷键输入框沿用现有操作。点击图标选择按钮可更换 FA 图标，选择<q>「无图标」</q>恢复原入口图标；原入口无图标时使用通用图标。</li>
+    <li><b>布局与排序</b>：拖动行首手柄可在同类入口内排序；已收录入口可从文件夹、角色专属区域或悬浮面板的按钮选择器中加入。放入文件夹或角色区域后，到对应区域管理；移除快捷入口会清理其布局与快捷键，不影响原插件。</li>
+    <li><b>未找到或不可用</b>：仅识别当前页面的标准魔法棒入口和顶层扩展面板，不扫描额外顶栏、iframe / 沙盒或面板内的子操作。没有稳定标识且名称重复的入口不会列出。原入口暂未加载、被原插件隐藏或禁用时保留配置；确认来源恢复后重新点击，未收录的入口需重新扫描添加。</li>
+</ul>
+<p class="ih-help-sub">仅隐藏原入口</p>
+<p>不需要快捷按钮时，可在扫描弹窗勾选入口并点击<q>「仅隐藏原入口」</q>。分类下会出现精简列表：原图标、名称和眼睛恢复按钮，不生成工具栏按钮，也不进入文件夹、角色区域、悬浮面板或快捷键设置。点击眼睛恢复单项，<q>「全部恢复」</q>只恢复当前分类的仅隐藏项。</p>
+<p>仅隐藏不要求有可访问的快捷布局，也不受下方统一隐藏开关影响。关闭 QuickBar 时恢复原入口，重新启用后按保留规则隐藏；来源暂未加载时保留规则。若之后需要快捷按钮，重新扫描已标记<q>「仅隐藏」</q>的入口并选择<q>「加入所选」</q>，即可转换为快捷入口，隐藏方式改按快捷入口规则处理。</p>
+
+<p class="ih-help-sub">快捷入口可用时隐藏原入口</p>
+<p>在<q>「更多设置 → 快捷入口可用时隐藏原入口」</q>统一开启或关闭已收录入口的隐藏偏好，初始默认关闭；新加入的入口沿用最后一次统一设置。每行的眼睛按钮仍可独立切换，混合选择时统一开关显示半选；升级不会覆盖已保存的单项偏好。</p>
+<p>已添加快捷入口只有在工具栏按钮、文件夹 / 当前角色入口或悬浮面板 / 悬浮球实际可访问时，才会隐藏原入口。禁用快捷按钮、关闭 QuickBar、移除入口或失去可用布局时恢复原入口；关闭悬浮面板后若按钮回到可用工具栏，仍保持隐藏。仅保存布局或快捷键不算可访问入口。</p>
+<p>隐藏只控制显示，不删除、移动原节点，也不绕过原插件自己的隐藏或禁用状态。第三方入口可能有额外点击限制，建议先保留原入口，确认兼容后再开启。来源脚本直接注册的运行时按钮不参与扫描、按钮管理或此隐藏设置，其位置与备用入口由来源脚本管理。</p>
+
 <div class="ih-help-h4"><i class="fa-solid fa-folder"></i> 按钮分组</div>
 <p>可将按钮收纳至文件夹中，工具栏仅显示一个折叠按钮，点击后展开内部按钮。</p>
 <p><b>设置方式</b>：在设置中将按钮拖动至文件夹上方即可放入文件夹，从文件夹中的按钮拖出即可移回主工具栏。也可使用<q>「移出文件夹」</q>按钮快速移回。</p>
@@ -8304,7 +8358,7 @@ function openHelpPanel() {
     <li>支持自定义图片 URL（GIF / JPG / PNG）</li>
     <li>支持单独设置展开状态的图片，留空则使用默认图片</li>
     <li>形状可选圆形或方形</li>
-    <li>大小可在 32~80px 范围内调整</li>
+    <li>大小可在 24~80px 范围内调整，默认 48px；圆形与方形共用同一范围</li>
     <li><b>透明背景</b>：仅在上传了自定义图片时生效，开启后悬浮球的边框、阴影、背景色都将隐藏，只显示图片本身</li>
     <li><b>透明度</b>：可在 20%~100% 范围内调整，鼠标悬停时会在设定值基础上自动提亮 15%</li>
     <li><b>跟随美化</b>：开启后全局 CSS 可控制悬浮球外观；关闭后插件自定义设置优先于美化 CSS</li>
@@ -20757,13 +20811,14 @@ const floatingPanelController = {
       "top 0.1s ease-out, left 0.1s ease-out, max-height 0.1s ease-out",
       "important",
     );
-    const buttons = fp.buttons || [];
+    const buttons = [...(fp.buttons || []), ...ihScriptButtons.list("floating").map(entry => entry.key)];
     if (buttons.length === 0) {
       panel.append(
         `<div style="padding:8px;font-size:11px;opacity:0.5;white-space:nowrap;">请在设置中添加按钮</div>`,
       );
     }
     buttons.forEach((bKey) => {
+      if (ExternalEntries.findExternalEntry(getSettings(), bKey) && getSettings().buttons?.[bKey] === false) return;
       if (bKey === "charFolder") {
         if (ihGetCharVisibleButtons().length === 0) return;
         const cbar = ihGetCharBar();
@@ -20816,6 +20871,7 @@ const floatingPanelController = {
       const btn = $(
         `<button class="input-helper-btn ih-fp-btn" data-button-key="${ihEscapeAttr(bKey)}" title="${ihEscapeAttr(label)}">${displayHtml}</button>`,
       );
+      if (ihScriptButtons.get(bKey)) btn.attr({ "data-norefocus": "true", "data-quickbar-external": "true" });
       bindButtonAction(btn, bKey);
       this._applyButtonSize(btn[0], fp.buttonSize || 12);
       panel.append(btn);
@@ -20867,6 +20923,7 @@ const floatingPanelController = {
     });
     panel[0].addEventListener("mousedown", (e) => e.preventDefault(), false);
     this._panelEl = panel;
+    ihSourceVisibility.schedule();
     if (fp.displayMode === "ball") {
       panel.hide();
     } else {
@@ -22179,7 +22236,7 @@ const floatingPanelController = {
   getFloatingButtons() {
     const fp = getSettings().floatingPanel;
     if (!fp || !fp.enabled) return new Set();
-    return new Set(fp.buttons || []);
+    return new Set([...(fp.buttons || []), ...ihScriptButtons.list("floating").map(entry => entry.key)]);
   },
 
   refresh() {
@@ -22368,6 +22425,8 @@ function bindRepeatableButton(btn, action) {
 }
 
 function getActionForKey(key) {
+  if (ihScriptButtons.get(key)) return () => ihScriptButtons.activate(key);
+  if (ExternalEntries.findExternalEntry(getSettings(), key)) return () => ihActivateExternalEntry(key);
   if (shortcutFunctionMap[key]) return shortcutFunctionMap[key];
   if (key.startsWith("custom_")) {
     const idx = parseInt(key.replace("custom_", ""));
@@ -22886,7 +22945,7 @@ function ihIsButtonKeyAlive(bKey) {
     if (isNaN(idx)) return false;
     return !!(getSettings().customSymbols || [])[idx];
   }
-  return !!BUTTON_DEFS[bKey];
+  return !!BUTTON_DEFS[bKey] || !!ExternalEntries.findExternalEntry(getSettings(), bKey);
 }
 
 function ihGetCurrentCharKey() {
@@ -23035,7 +23094,7 @@ function ihPruneCharButtons() {
 }
 function ihIsOrderKeyValid(bKey) {
   if (typeof bKey !== "string" || !bKey) return false;
-  if (BUTTON_DEFS[bKey]) return true;
+  if (BUTTON_DEFS[bKey] || ExternalEntries.findExternalEntry(getSettings(), bKey)) return true;
   const mCustom = bKey.match(/^custom_(\d+)$/);
   if (mCustom) {
     return !!(getSettings().customSymbols || [])[parseInt(mCustom[1])];
@@ -23496,6 +23555,7 @@ function applyToolbarButtonSize() {
 }
 
 function toolbarHasVisibleButtons() {
+  if (ihScriptButtons.list("toolbar").length) return true;
   const settings = getSettings();
   const buttons = settings.buttons;
   const order = settings.buttonOrder || [];
@@ -23533,13 +23593,17 @@ function buildToolbar() {
   const toolbar = $("#input_helper_toolbar");
   const toolbarNext = toolbar.next();
   const toolbarParent = toolbar.parent();
-  toolbar.detach();
   const settings = getSettings();
+  ihSyncExternalToolbarButtons(toolbar);
+  ihSyncScriptToolbarButtons(toolbar);
   const buttons = settings.buttons;
-  const order = settings.buttonOrder || [];
+  const order = [...(settings.buttonOrder || []), ...ihScriptButtons.list("toolbar").map(entry => entry.key)];
   const folders = settings.folders || [];
   const folderedButtons = ihGetReservedButtons();
   const floatingButtons = floatingPanelController.getFloatingButtons();
+  // Resolve source-managed entries while their host is connected. Detaching
+  // first would make the registry suspend every script button during rebuild.
+  toolbar.detach();
 
   toolbar.find(".ih-folder-btn").remove();
   closeAllFolderDropdowns();
@@ -23708,6 +23772,7 @@ function buildToolbar() {
   } else {
     toolbar.addClass("input-helper-hidden");
   }
+  ihSourceVisibility.schedule();
 }
 
 function toggleFolderCollapse(fi) {
@@ -23729,7 +23794,8 @@ function makeSettingsRow(key, opts) {
   const isChecked = settings.buttons[key] !== false ? "checked" : "";
   const shortcutVal = settings.shortcuts[key] || "";
   const displayHtml = opts.displayHtml || getButtonDisplayHtml(key);
-  const label = opts.label || getButtonLabel(key);
+  const label = ihEscapeHtml(opts.label || getButtonLabel(key));
+  const external = ExternalEntries.findExternalEntry(settings, key);
   let extraBtns = "";
   if (opts.isCustom) {
     extraBtns = `
@@ -23737,13 +23803,18 @@ function makeSettingsRow(key, opts) {
             <button class="custom-delete-btn" title="删除" data-index="${opts.customIndex}"><i class="fa-solid fa-trash"></i></button>
         `;
   }
+  if (external) {
+    extraBtns += `<button type="button" class="ih-folder-chevron ih-char-mini-btn ih-external-icon-btn" title="更换 FA 图标（选择无图标可恢复默认）"><i class="fa-solid fa-icons"></i></button>
+      <button type="button" class="ih-folder-chevron ih-char-mini-btn ih-external-hide-btn" aria-pressed="${external.hideOriginal === true}" title="${external.hideOriginal === true ? "已开启" : "未开启"}：快捷入口可用时隐藏原入口，不可用时自动恢复"><i class="fa-solid ${external.hideOriginal === true ? "fa-eye-slash" : "fa-eye"}"></i></button>
+      <button type="button" class="ih-folder-chevron ih-char-mini-btn ih-external-remove-btn" title="移除快捷入口，不影响原插件"><i class="fa-solid fa-trash"></i></button>`;
+  }
   if (opts.isChild) {
     extraBtns += `<button class="ih-child-remove-btn" title="移出文件夹" data-button-key="${key}" data-folder-index="${opts.folderIndex}"><i class="fa-solid fa-right-from-bracket"></i></button>`;
   }
   if (opts.isCharChild) {
     extraBtns += `<span class="ih-child-remove-btn ih-char-unbind-btn" role="button" tabindex="0" title="解除角色绑定（按钮会回到通用工具栏）" data-button-key="${key}"><i class="fa-solid fa-link-slash"></i></span>`;
   }
-  const extraClass = opts.isChild || opts.isCharChild ? " ih-child-row" : "";
+  const extraClass = (opts.isChild || opts.isCharChild ? " ih-child-row" : "") + (external ? " ih-external-entry-row" : "");
   const row = $(`
         <div class="integrated-button-row${extraClass}" data-button-key="${key}" ${opts.isCustom ? 'data-custom="true"' : ""} ${opts.isChild ? 'data-is-child="true"' : ""}>
             <span class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></span>
@@ -23759,7 +23830,35 @@ function makeSettingsRow(key, opts) {
     getSettings().buttons[key] = $(this).prop("checked");
     saveSettingsDebounced();
     updateButtonVisibilityDebounced();
+    if (external) {
+      if (getSettings().floatingPanel?.enabled) floatingPanelController.refreshPanelOnly();
+      ihSourceVisibility.schedule();
+    }
   });
+  if (external) {
+    row.find("label").attr("title", external.label);
+    row.find(".ih-external-icon-btn").on("click", async function (e) {
+      e.stopPropagation();
+      const icon = await pickFaIcon();
+      if (icon === false) return;
+      // The row may have been removed while the native icon picker was open.
+      const entry = ExternalEntries.findExternalEntry(getSettings(), key);
+      if (!entry) return;
+      entry.icon = ExternalEntries.normalizeEntryIcon(icon);
+      ihRefreshExternalEntryUi();
+    });
+    row.find(".ih-external-hide-btn").on("click", function (e) {
+      e.stopPropagation();
+      const entry = ExternalEntries.findExternalEntry(getSettings(), key);
+      if (!entry) return;
+      entry.hideOriginal = entry.hideOriginal !== true;
+      ihRefreshExternalEntryUi();
+    });
+    row.find(".ih-external-remove-btn").on("click", function (e) {
+      e.stopPropagation();
+      if (ExternalEntries.removeExternalEntry(getSettings(), key)) ihRefreshExternalEntryUi();
+    });
+  }
   if (opts.isCustom) {
     row.find(".custom-edit-btn").on("click", function () {
       editCustomSymbol($(this).data("index"));
@@ -23812,6 +23911,7 @@ function makeSettingsRow(key, opts) {
 }
 
 function renderSettingsPanel() {
+  ihSyncOriginalEntryVisibilityControl();
   const container = $("#integrated_button_settings");
   container.empty();
   const settings = getSettings();
@@ -23903,11 +24003,13 @@ function renderSettingsPanel() {
       container.append(childrenDiv);
       return;
     }
+    if (ExternalEntries.findExternalEntry(settings, key)) return;
     const isCustom = key.startsWith("custom_");
     const customIdx = isCustom ? parseInt(key.replace("custom_", "")) : -1;
     const row = makeSettingsRow(key, { isCustom, customIndex: customIdx });
     container.append(row);
   });
+  ihRenderExternalEntrySections(container);
   setupShortcutInputs();
   initSortable();
   try {
@@ -24208,7 +24310,7 @@ function renderFloatingPanelSettings() {
   container.empty();
   const fp = getSettings().floatingPanel || {};
   const _ballOpacityPct = Math.round(ihGetBallOpacity() * 100);
-  const allKeys = [...ALL_BUTTON_KEYS];
+  const allKeys = [...ALL_BUTTON_KEYS, ...ExternalEntries.getExternalEntries(getSettings()).map(entry => entry.key)];
   const customSymbols = getSettings().customSymbols || [];
   customSymbols.forEach((_, i) => allKeys.push(`custom_${i}`));
   const allFolders = getSettings().folders || [];
@@ -24257,8 +24359,8 @@ function renderFloatingPanelSettings() {
                         <option value="square" ${fp.ballShape === "square" ? "selected" : ""}>方形</option>
                     </select>
                     <label style="font-size:11px;flex-shrink:0;margin-left:4px;">大小</label>
-                    <input type="range" id="ih_fp_ball_size" min="32" max="80" value="${fp.ballSize || 48}" style="flex:1;min-width:50px;accent-color:var(--SmartThemeQuoteColor,cornflowerblue);" />
-                    <input type="number" id="ih_fp_ball_size_input" min="32" max="80" value="${fp.ballSize || 48}" style="width:48px;padding:3px 4px;border:1px solid var(--SmartThemeBorderColor);border-radius:4px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;text-align:center;" />
+                    <input type="range" id="ih_fp_ball_size" min="24" max="80" value="${fp.ballSize || 48}" style="flex:1;min-width:50px;accent-color:var(--SmartThemeQuoteColor,cornflowerblue);" />
+                    <input type="number" id="ih_fp_ball_size_input" min="24" max="80" value="${fp.ballSize || 48}" style="width:48px;padding:3px 4px;border:1px solid var(--SmartThemeBorderColor);border-radius:4px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);font-size:11px;text-align:center;" />
                     <span style="font-size:11px;flex-shrink:0;opacity:0.6;">px</span>
                 </div>
                 <div class="ih-hm-row" style="margin-top:6px;">
@@ -24379,7 +24481,7 @@ function renderFloatingPanelSettings() {
                         (bKey) => `
                         <span class="ih-folder-chip ih-fp-sortable-chip" data-button-key="${bKey}">
                             <i class="fa-solid fa-grip-vertical ih-fp-chip-drag"></i>
-                            ${getButtonDisplayHtml(bKey)} ${getButtonLabel(bKey)}
+                            ${getButtonDisplayHtml(bKey)} ${ihEscapeHtml(getButtonLabel(bKey))}
                             <i class="fa-solid fa-xmark ih-fp-chip-remove" data-button-key="${bKey}"></i>
                         </span>
                     `,
@@ -24440,7 +24542,7 @@ function renderFloatingPanelSettings() {
   function _applyBallSizeLive(rawVal) {
     let val = parseInt(rawVal);
     if (isNaN(val)) val = 48;
-    val = Math.max(32, Math.min(80, val));
+    val = Math.max(24, Math.min(80, val));
     getSettings().floatingPanel.ballSize = val;
     $("#ih_fp_ball_size").val(val);
     $("#ih_fp_ball_size_input").val(val);
@@ -24736,7 +24838,7 @@ function renderFloatingPanelSettings() {
           <div class="ih-picker-item" data-key="${k}" data-selected="false">
             <input type="checkbox" style="margin:0;flex-shrink:0;pointer-events:none;" />
             <span class="bp-preview">${getButtonDisplayHtml(k)}</span>
-            <span>${getButtonLabel(k)}</span>
+            <span>${ihEscapeHtml(getButtonLabel(k))}</span>
           </div>
         `,
       )
@@ -24766,7 +24868,7 @@ function renderFloatingPanelSettings() {
               <div class="ih-picker-item ih-picker-sub-item" data-key="${ihEscapeAttr(subKey)}" data-parent-folder="${key}" data-selected="false" ${disabledAttr} ${styleAttr}>
                 <input type="checkbox" ${cbDisabled} style="margin:0;flex-shrink:0;pointer-events:none;" />
                 <span class="bp-preview" style="margin-left:14px;">${getButtonDisplayHtml(subKey)}</span>
-                <span>${getButtonLabel(subKey)}</span>
+                <span>${ihEscapeHtml(getButtonLabel(subKey))}</span>
                 ${addedTag}
               </div>
             `;
@@ -25037,7 +25139,7 @@ function renderFolderSettings() {
                         (bKey) => `
                         <span class="ih-folder-chip ih-folder-sortable-chip" data-button-key="${bKey}" data-folder-index="${fi}">
                             <i class="fa-solid fa-grip-vertical ih-fp-chip-drag"></i>
-                            ${getButtonDisplayHtml(bKey)} ${getButtonLabel(bKey)}
+                            ${getButtonDisplayHtml(bKey)} ${ihEscapeHtml(getButtonLabel(bKey))}
                             <i class="fa-solid fa-xmark ih-chip-remove" data-button-key="${bKey}" data-folder-index="${fi}"></i>
                         </span>
                     `,
@@ -25271,7 +25373,7 @@ function renderFolderSettings() {
 
 function showButtonPicker(folderIndex) {
   const folderedButtons = ihGetReservedButtons();
-  const allKeys = [...ALL_BUTTON_KEYS].filter((k) => k !== "charFolder");
+  const allKeys = [...ALL_BUTTON_KEYS, ...ExternalEntries.getExternalEntries(getSettings()).map(entry => entry.key)].filter((k) => k !== "charFolder");
   const customSymbols = getSettings().customSymbols || [];
   customSymbols.forEach((_, i) => allKeys.push(`custom_${i}`));
   const available = allKeys.filter((k) => !folderedButtons.has(k));
@@ -25293,7 +25395,7 @@ function showButtonPicker(folderIndex) {
                     <div class="ih-picker-item" data-key="${k}" data-selected="false">
                         <input type="checkbox" style="margin:0;flex-shrink:0;pointer-events:none;" />
                         <span class="bp-preview">${getButtonDisplayHtml(k)}</span>
-                        <span>${getButtonLabel(k)}</span>
+                        <span>${ihEscapeHtml(getButtonLabel(k))}</span>
                     </div>
                 `,
                   )
@@ -25384,13 +25486,348 @@ function updateButtonVisibility() {
     const btnId = getButtonIdFromKey(key);
     if (btnId) $(`#${btnId}`).hide();
   });
-  const allHidden = Object.keys(buttons).every((k) => buttons[k] === false);
+  const allHidden = Object.keys(buttons).every((k) => buttons[k] === false) && !ihScriptButtons.list("toolbar").length;
   if (!settings.enabled || allHidden) {
     $("#input_helper_toolbar").addClass("input-helper-hidden");
   } else {
     $("#input_helper_toolbar").removeClass("input-helper-hidden");
     buildToolbar();
   }
+}
+
+// Script-owned entries deliberately bypass QuickBar settings and scanning.
+let ihScriptRefreshPending = false;
+const ihScriptButtons = createScriptButtonRegistry({
+  isAvailable: entry => !!getSettings()?.enabled && !!document.getElementById("input_helper_toolbar")
+    && (entry.placement !== "floating" || !!getSettings().floatingPanel?.enabled),
+  onChange: ihScheduleScriptButtonRefresh,
+  onError: error => { console.warn("QuickBar script button failed", error); toastr.warning("脚本入口调用失败，请从原入口重试。"); },
+});
+function ihScheduleScriptButtonRefresh() {
+  if (ihScriptRefreshPending) return;
+  ihScriptRefreshPending = true;
+  queueMicrotask(() => {
+    ihScriptRefreshPending = false;
+    try {
+      if (getSettings() && document.getElementById("input_helper_toolbar")) {
+        buildToolbar();
+        if (getSettings().enabled && getSettings().floatingPanel?.enabled) floatingPanelController.refreshPanelOnly();
+      }
+    } catch (error) { console.warn("QuickBar script entry refresh failed", error); }
+    window.dispatchEvent(new Event("quickbar:changed"));
+  });
+}
+function ihSyncScriptToolbarButtons(toolbar) {
+  // Rebind against the registry, not a stale script closure. Remove suspended
+  // entries as well, so disabling or moving an entry cannot leave a duplicate.
+  toolbar.find(".ih-script-toolbar-btn").remove();
+  for (const entry of ihScriptButtons.list("toolbar")) {
+    const button = $(`<button type="button" id="${getButtonIdFromKey(entry.key)}" class="input-helper-btn ih-script-toolbar-btn" data-button-key="${entry.key}" data-norefocus="true" data-quickbar-external="true"></button>`);
+    button.attr({ title: entry.label, "aria-label": entry.label }).html(getButtonDisplayHtml(entry.key));
+    bindButtonAction(button, entry.key);
+    toolbar.append(button);
+  }
+}
+function ihPublishScriptButtonApi() {
+  window.STQuickBar = Object.freeze({
+    apiVersion: 1,
+    registerExternalButton: ihScriptButtons.registerExternalButton,
+    unregisterExternalButton: ihScriptButtons.unregisterExternalButton,
+  });
+  window.dispatchEvent(new Event("quickbar:ready"));
+}
+
+// Source visibility is based on an actually reachable shortcut, not merely
+// membership in saved settings. Closed folders and a collapsed floating panel
+// still count when their opener is present and enabled.
+function ihIsShortcutControlAvailable(node) {
+  if (!node?.isConnected) return false;
+  for (let parent = node; parent; parent = parent.parentElement) {
+    if (parent.hidden || parent.inert || parent.disabled || parent.getAttribute("aria-disabled") === "true") return false;
+    const css = window.getComputedStyle(parent);
+    if (css.display === "none" || css.visibility === "hidden" || css.visibility === "collapse" || css.opacity === "0") return false;
+  }
+  const rect = node.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 && window.getComputedStyle(node).pointerEvents !== "none";
+}
+function ihIsFloatingShortcutReachable(key) {
+  const settings = getSettings(), fp = settings.floatingPanel;
+  if (!settings.enabled || !fp?.enabled || settings.buttons?.[key] === false || !(fp.buttons || []).includes(key)) return false;
+  const node = [...document.querySelectorAll(".ih-floating-panel [data-button-key]")].find(node => node.dataset.buttonKey === key);
+  if (!node || node.disabled || node.hidden || node.getAttribute("aria-disabled") === "true") return false;
+  if (ihIsShortcutControlAvailable(node)) return true;
+  // The ball is the reachable opener of an intentionally collapsed panel.
+  const css = window.getComputedStyle(node), panel = node.closest(".ih-floating-panel");
+  const panelCss = panel && window.getComputedStyle(panel);
+  return fp.displayMode === "ball" && floatingPanelController._expanded !== true && !!panel
+    && !panel.hidden && !panel.inert && panel.getAttribute("aria-disabled") !== "true"
+    && panelCss.display === "none" && css.display !== "none"
+    // visibility is inherited from the intentionally collapsed native panel.
+    && (css.visibility !== "hidden" || panelCss.visibility === "hidden")
+    && [...document.querySelectorAll(".ih-floating-ball")].some(ihIsShortcutControlAvailable);
+}
+function ihIsShortcutKeyReachable(key) {
+  const id = getButtonIdFromKey(key);
+  return !!(id && ihIsShortcutControlAvailable(document.getElementById(id))) || ihIsFloatingShortcutReachable(key);
+}
+function ihGetReachableExternalEntryKeys() {
+  const settings = getSettings(), reachable = new Set();
+  if (!settings?.enabled) return reachable;
+  const floating = floatingPanelController.getFloatingButtons();
+  const charVisible = new Set(ihGetCharVisibleButtons());
+  for (const entry of ExternalEntries.getExternalEntries(settings)) {
+    if (settings.buttons?.[entry.key] === false) continue;
+    if (ihIsShortcutKeyReachable(entry.key)) { reachable.add(entry.key); continue; }
+    if (!floating.has(entry.key) && (settings.folders || []).some((folder, index) =>
+      (folder.buttons || []).includes(entry.key) && settings.buttons?.[`folder_${index}`] !== false && ihIsShortcutKeyReachable(`folder_${index}`))) {
+      reachable.add(entry.key); continue;
+    }
+    if (charVisible.has(entry.key) && settings.buttons?.charFolder !== false && ihIsShortcutKeyReachable("charFolder")) reachable.add(entry.key);
+  }
+  return reachable;
+}
+const ihSourceVisibility = createSourceVisibilityController({
+  doc: document, getSettings, getReachableKeys: ihGetReachableExternalEntryKeys,
+  onChange: () => window.dispatchEvent(new Event("quickbar:changed")),
+  onError: error => console.warn("QuickBar source visibility failed; original entries restored", error),
+});
+
+// External entry categories are management sections, not toolbar folders.
+function ihPreserveExternalEntryOrder(rootOrder) {
+  const saved = getSettings().buttonOrder || [];
+  const externalKeys = saved.filter(key => ExternalEntries.findExternalEntry(getSettings(), key));
+  return [...rootOrder, ...externalKeys.filter(key => !rootOrder.includes(key))];
+}
+
+function ihSyncExternalToolbarButtons(toolbar) {
+  const entries = ExternalEntries.getExternalEntries(getSettings());
+  const keys = new Set(entries.map(entry => entry.key));
+  toolbar.find(".ih-external-toolbar-btn").each(function () {
+    if (!keys.has(this.dataset.buttonKey)) $(this).remove();
+  });
+  for (const entry of entries) {
+    const id = getButtonIdFromKey(entry.key);
+    let button = toolbar.find(`#${id}`);
+    if (!button.length) {
+      button = $(`<button type="button" id="${id}" class="input-helper-btn ih-external-toolbar-btn" data-button-key="${entry.key}" data-norefocus="true" data-quickbar-external="true"></button>`);
+      toolbar.append(button);
+      bindButtonAction(button, entry.key);
+    }
+    button.attr("title", entry.label).html(getButtonDisplayHtml(entry.key));
+  }
+}
+
+const ihExternalEntryActivations = new Set();
+async function ihActivateExternalEntry(key) {
+  if (!getSettings().enabled || getSettings().buttons?.[key] === false || ihExternalEntryActivations.has(key)) return;
+  const entry = ExternalEntries.findExternalEntry(getSettings(), key);
+  if (!entry) return;
+  ihExternalEntryActivations.add(key);
+  try {
+    const success = await ExternalEntries.activateExternalEntry(document, entry, {
+      openPanelHost: async () => {
+        const block = document.getElementById("rm_extensions_block");
+        const toggle = document.querySelector("#extensions-settings-button > .drawer-toggle");
+        if (!block || !toggle) return false;
+        if (!block.classList.contains("openDrawer")) {
+          if (typeof SillyTavernScript.doNavbarIconClick === "function") {
+            await SillyTavernScript.doNavbarIconClick.call(toggle);
+          } else {
+            toggle.click();
+            await new Promise(resolve => setTimeout(resolve, 250));
+          }
+        }
+        return block.classList.contains("openDrawer");
+      },
+      afterLayout: () => new Promise(resolve => setTimeout(resolve, 250)),
+    });
+    if (!success) toastr.warning(`「${entry.label}」入口暂不可用，请确认原插件或脚本已加载。已保留快捷入口配置。`, "", { timeOut: 3000 });
+  } catch (error) {
+    console.warn("快捷工具栏: 外部入口调用失败", error);
+    toastr.warning("外部入口调用失败，请尝试从原位置打开。", "", { timeOut: 2500 });
+  } finally {
+    ihExternalEntryActivations.delete(key);
+  }
+}
+
+function ihSyncOriginalEntryVisibilityControl() {
+  const toggle = $("#ih_hide_original_entries");
+  if (!toggle.length) return;
+  const summary = ExternalEntries.getOriginalEntryVisibilitySummary(getSettings());
+  toggle.prop("checked", summary.checked).prop("indeterminate", summary.indeterminate)
+    .attr("aria-checked", summary.indeterminate ? "mixed" : String(summary.checked));
+}
+function ihOnOriginalEntryVisibilityChange() {
+  ExternalEntries.setAllOriginalEntryVisibility(getSettings(), $(this).prop("checked"));
+  ihRefreshExternalEntryUi();
+}
+
+function ihRefreshExternalEntryUi() {
+  saveSettingsDebounced();
+  closeAllFolderDropdowns();
+  renderSettingsPanel();
+  renderFolderSettings();
+  renderFloatingPanelSettings();
+  buildToolbar();
+  if (getSettings().floatingPanel.enabled) floatingPanelController.refreshPanelOnly();
+  ihSourceVisibility.sync();
+}
+
+function ihRenderHiddenOnlyEntrySection(container, source) {
+  const entries = ExternalEntries.getHiddenOnlyEntries(getSettings(), source);
+  if (!entries.length) return;
+  const def = ExternalEntries.EXTERNAL_ENTRY_SOURCES[source];
+  const group = $(`<div class="ih-external-hidden-only">
+    <div class="ih-external-hidden-header">
+      <span class="ih-external-hidden-summary">仅隐藏原入口 · ${entries.length}</span>
+      <button type="button" class="ih-folder-chevron ih-char-mini-btn ih-external-restore-all" title="恢复此分类的全部仅隐藏入口，不影响快捷入口" aria-label="恢复全部仅隐藏的${def.label}">全部恢复</button>
+    </div>
+  </div>`);
+  const focusRestoreControl = index => {
+    const section = $(`.ih-external-section[data-external-source="${source}"]`);
+    const controls = section.find(".ih-external-restore-btn");
+    (controls.length ? controls.eq(Math.min(index, controls.length - 1)) : section.find(".ih-external-scan-btn")).trigger("focus");
+  };
+  group.find(".ih-external-restore-all").on("click", e => {
+    e.stopPropagation();
+    if (!ExternalEntries.clearHiddenOnlyEntries(getSettings(), source)) return;
+    ihRefreshExternalEntryUi();
+    focusRestoreControl(0);
+  });
+  entries.forEach((entry, index) => {
+    const icon = ExternalEntries.normalizeEntryIcon(entry.defaultIcon) || def.icon;
+    const row = $(`<div class="integrated-button-row ih-external-hidden-row" data-hidden-only-key="${ihEscapeAttr(entry.key)}">
+      <span class="ih-external-hidden-icon" aria-hidden="true"><i class="${ihEscapeAttr(icon)}"></i></span>
+      <span class="ih-external-hidden-label" title="${ihEscapeAttr(entry.label)}">${ihEscapeHtml(entry.label)}</span>
+      <button type="button" class="ih-folder-chevron ih-char-mini-btn ih-external-restore-btn" title="恢复显示" aria-label="${ihEscapeAttr(`恢复显示「${entry.label}」`)}"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
+    </div>`);
+    row.find(".ih-external-restore-btn").on("click", e => {
+      e.stopPropagation();
+      if (!ExternalEntries.removeHiddenOnlyEntry(getSettings(), entry.key)) return;
+      ihRefreshExternalEntryUi();
+      focusRestoreControl(index);
+    });
+    group.append(row);
+  });
+  container.append(group);
+}
+
+function ihRenderExternalEntrySections(container) {
+  const settings = getSettings();
+  const state = ExternalEntries.getExternalEntrySettings(settings);
+  const reserved = ihGetReservedButtons();
+  for (const [source, def] of Object.entries(ExternalEntries.EXTERNAL_ENTRY_SOURCES)) {
+    const entries = ExternalEntries.getExternalEntries(settings, source);
+    const hiddenOnly = ExternalEntries.getHiddenOnlyEntries(settings, source);
+    const order = settings.buttonOrder || [];
+    const visible = entries.filter(entry => !reserved.has(entry.key)).sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+    const collapsed = state.collapsed[source] === true;
+    const section = $(`<div class="ih-external-section" data-external-source="${source}">
+      <div class="integrated-button-row ih-folder-row ih-external-header">
+        <div class="button-preview"><i class="${def.icon}"></i></div>
+        <span class="ih-folder-label-text ih-external-label" role="button" tabindex="0" aria-expanded="${!collapsed}">${def.label}<span class="ih-char-badge" title="${entries.length} 个快捷入口，${hiddenOnly.length} 个仅隐藏入口">${entries.length + hiddenOnly.length}</span></span>
+        <button type="button" class="ih-folder-chevron ih-external-chevron" title="展开/收起" aria-expanded="${!collapsed}"><i class="fa-solid ${collapsed ? "fa-chevron-right" : "fa-chevron-down"}"></i></button>
+      </div>
+      <div class="ih-external-children ${collapsed ? "ih-collapsed" : ""}" data-external-source="${source}" ${collapsed ? "inert" : ""}></div>
+    </div>`);
+    const children = section.find(".ih-external-children");
+    const toggle = () => {
+      const next = children.hasClass("ih-collapsed") === false;
+      ExternalEntries.getExternalEntrySettings(getSettings()).collapsed[source] = next;
+      children.toggleClass("ih-collapsed", next).prop("inert", next);
+      section.find("[aria-expanded]").attr("aria-expanded", String(!next));
+      section.find(".ih-external-chevron i").toggleClass("fa-chevron-right", next).toggleClass("fa-chevron-down", !next);
+      saveSettingsDebounced();
+    };
+    section.find(".ih-external-label, .ih-external-chevron").on("click", toggle);
+    section.find(".ih-external-label").on("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+    });
+    visible.forEach(entry => children.append(makeSettingsRow(entry.key, {})));
+    if (!entries.length && !hiddenOnly.length) children.append('<div class="ih-char-empty"><i class="fa-solid fa-circle-info"></i><span>扫描后勾选入口，可加入快捷工具栏或仅隐藏原入口。</span></div>');
+    else if (visible.length < entries.length) children.append(`<div class="ih-char-empty"><i class="fa-solid fa-circle-info"></i><span>${entries.length - visible.length} 个入口已放入文件夹或角色专属区域，可在对应区域管理。</span></div>`);
+    ihRenderHiddenOnlyEntrySection(children, source);
+    const add = $('<button type="button" class="menu_button menu_button_icon ih-folder-inline-add ih-external-scan-btn"><i class="fa-solid fa-magnifying-glass"></i><span>扫描入口</span></button>');
+    add.on("click", () => ihShowExternalEntryPicker(source));
+    children.append(add);
+    container.append(section);
+    if (children.sortable && visible.length > 1) {
+      children.sortable({
+        handle: ".drag-handle", axis: "y", delay: 150, items: "> .integrated-button-row",
+        stop: function () {
+          const sorted = $(this).children(".integrated-button-row").map(function () { return this.dataset.buttonKey; }).get();
+          const moving = new Set(sorted);
+          let index = 0;
+          getSettings().buttonOrder = (getSettings().buttonOrder || []).map(key => moving.has(key) ? sorted[index++] : key);
+          saveSettingsDebounced();
+          buildToolbar();
+        },
+      });
+    }
+  }
+}
+
+function ihShowExternalEntryPicker(source) {
+  const def = ExternalEntries.EXTERNAL_ENTRY_SOURCES[source];
+  if (!def) return;
+  const candidates = ExternalEntries.scanExternalEntries(document, source);
+  const { overlay, escHandler } = createDialogOverlay();
+  const content = $(`<div class="ih-picker-dialog-content ih-external-picker">
+    <div class="ih-external-picker-header"><h4><i class="${def.icon}"></i>${def.label}</h4><button type="button" class="ih-folder-chevron ih-picker-close-btn" title="关闭" aria-label="关闭扫描窗口"><i class="fa-solid fa-xmark"></i></button></div>
+    <div class="ih-char-empty">仅扫描已加载的入口，不执行功能。仅隐藏不会添加快捷按钮，可在设置中恢复。</div>
+    <div class="ih-picker-list"></div>
+    <div class="ih-external-picker-footer">
+      <button type="button" class="menu_button menu_button_icon ih-picker-hide-only-btn" disabled><i class="fa-solid fa-eye-slash"></i><span>仅隐藏原入口</span></button>
+      <button type="button" class="menu_button menu_button_icon ih-picker-confirm-btn" disabled><i class="fa-solid fa-plus"></i><span>加入所选</span></button>
+    </div>
+  </div>`);
+  const list = content.find(".ih-picker-list");
+  const selected = new Set();
+  const selectedCandidates = () => [...selected].map(index => candidates[index])
+    .filter(candidate => !ExternalEntries.isEntryAlreadyAdded(getSettings(), candidate));
+  const updateSelection = () => {
+    const count = selectedCandidates().length;
+    const canHide = selectedCandidates().some(candidate => !ExternalEntries.isEntryHiddenOnly(getSettings(), candidate));
+    content.find(".ih-picker-confirm-btn").prop("disabled", count === 0).find("span").text(count ? `加入所选（${count}）` : "加入所选");
+    content.find(".ih-picker-hide-only-btn").prop("disabled", !canHide);
+  };
+  candidates.forEach((candidate, index) => {
+    const added = ExternalEntries.isEntryAlreadyAdded(getSettings(), candidate);
+    const hiddenOnly = !added && ExternalEntries.isEntryHiddenOnly(getSettings(), candidate);
+    const item = $(`<label class="ih-picker-item ih-external-picker-item${added ? " ih-external-added" : ""}">
+      <input type="checkbox" ${added ? 'checked disabled' : ''} />
+      <span class="bp-preview"><i class="${ihEscapeAttr(candidate.defaultIcon)}"></i></span>
+      <span class="ih-external-candidate-label">${ihEscapeHtml(candidate.label)}</span>
+      ${added ? '<span class="ih-picker-already-added">已添加</span>' : hiddenOnly ? '<span class="ih-picker-already-added ih-external-hidden-state">仅隐藏</span>' : ''}
+    </label>`);
+    item.find("input").on("change", function () {
+      if (this.checked) selected.add(index); else selected.delete(index);
+      item.toggleClass("ih-external-selected", this.checked);
+      updateSelection();
+    });
+    list.append(item);
+  });
+  if (!candidates.length) list.append('<div class="ih-char-empty"><i class="fa-solid fa-circle-info"></i><span>未找到可识别的入口。请确认插件或脚本已加载，再重新扫描。名称重复且没有稳定标识的入口不会列出。</span></div>');
+  overlay.append(content);
+  syncDialogTheme(content[0]);
+  generateFaIconProtectionCSS();
+  const close = () => {
+    if (overlay[0]?._ihCloseOverlay) overlay[0]._ihCloseOverlay();
+    else { document.removeEventListener("keydown", escHandler, true); overlay.remove(); }
+  };
+  content.on("click", e => e.stopPropagation());
+  content.find(".ih-picker-close-btn").on("click", close);
+  overlay.off("click").on("click", e => { if (e.target === overlay[0]) close(); });
+  content.find(".ih-picker-hide-only-btn").on("click", () => {
+    const hidden = ExternalEntries.addHiddenOnlyEntries(getSettings(), selectedCandidates());
+    close();
+    if (hidden.length) ihRefreshExternalEntryUi();
+  });
+  content.find(".ih-picker-confirm-btn").on("click", () => {
+    const added = ExternalEntries.addExternalEntries(getSettings(), selectedCandidates());
+    close();
+    if (added.length) ihRefreshExternalEntryUi();
+  });
 }
 
 function ihRenderCharSettingsSection(container) {
@@ -25551,7 +25988,7 @@ function showCharButtonPicker() {
   const folderedButtons = getFolderedButtons();
   const charBound = ihGetAllCharBoundSet();
   const fpButtons = floatingPanelController.getFloatingButtons();
-  const allKeys = [...ALL_BUTTON_KEYS].filter((k) => k !== "charFolder");
+  const allKeys = [...ALL_BUTTON_KEYS, ...ExternalEntries.getExternalEntries(getSettings()).map(entry => entry.key)].filter((k) => k !== "charFolder");
   const customSymbols = getSettings().customSymbols || [];
   customSymbols.forEach((_, i) => allKeys.push(`custom_${i}`));
   const available = allKeys.filter(
@@ -25575,7 +26012,7 @@ function showCharButtonPicker() {
                     <div class="ih-picker-item" data-key="${ihEscapeAttr(k)}" data-selected="false">
                         <input type="checkbox" style="margin:0;flex-shrink:0;pointer-events:none;" />
                         <span class="bp-preview">${getButtonDisplayHtml(k)}</span>
-                        <span>${getButtonLabel(k)}</span>
+                        <span>${ihEscapeHtml(getButtonLabel(k))}</span>
                     </div>
                 `,
                   )
@@ -25950,6 +26387,8 @@ async function onEnableInputChange() {
     return;
   }
   getSettings().enabled = value;
+  if (!value) ihChatTopNavigator.clear();
+  ihScheduleScriptButtonRefresh();
   floatingEditorController.refresh();
   saveSettingsDebounced();
   ihApplyUnlockSwipes();
@@ -26131,7 +26570,7 @@ function initSortable() {
               const k = $(this).attr("data-button-key");
               if (k) newOrder.push(k);
             });
-          getSettings().buttonOrder = newOrder;
+          getSettings().buttonOrder = ihPreserveExternalEntryOrder(newOrder);
           saveSettingsDebounced();
         }
       },
@@ -26144,7 +26583,7 @@ function initSortable() {
             newOrder.push(key);
           }
         });
-        getSettings().buttonOrder = newOrder;
+        getSettings().buttonOrder = ihPreserveExternalEntryOrder(newOrder);
         saveSettingsDebounced();
         container
           .children(".integrated-button-row[data-folder-row='true']")
@@ -26304,6 +26743,12 @@ async function loadSettings() {
   });
   for (const key of defaultSettings.buttonOrder) {
     if (!s.buttonOrder.includes(key)) s.buttonOrder.push(key);
+  }
+  ExternalEntries.getExternalEntrySettings(s);
+  for (const entry of ExternalEntries.getExternalEntries(s)) {
+    if (!s.buttonOrder.includes(entry.key)) s.buttonOrder.push(entry.key);
+    if (s.buttons[entry.key] === undefined) s.buttons[entry.key] = true;
+    if (s.shortcuts[entry.key] === undefined) s.shortcuts[entry.key] = "";
   }
   if (!s.customSymbols) s.customSymbols = [];
   if (!s.folders) s.folders = [];
@@ -27281,6 +27726,8 @@ jQuery(async () => {
   sendStopController._update();
 
   $("#enable_input_helper").on("change", onEnableInputChange);
+  $(document).off("change.ih-original-entry-visibility", "#ih_hide_original_entries")
+    .on("change.ih-original-entry-visibility", "#ih_hide_original_entries", ihOnOriginalEntryVisibilityChange);
   $("#enable_floating_editor").on("change", async function () {
     const enabled = $(this).prop("checked");
     if (!enabled && !await closeFloatingEditorsBeforeDisable($(this))) {
@@ -27427,6 +27874,7 @@ jQuery(async () => {
 
   $(document).on("change", "#enable_floating_panel", function () {
     getSettings().floatingPanel.enabled = $(this).prop("checked");
+    ihScheduleScriptButtonRefresh();
     saveSettingsDebounced();
     floatingPanelController.refresh();
     buildToolbar();
@@ -27922,6 +28370,7 @@ jQuery(async () => {
       messageNavigation._currentAiIndex = -1;
       messageNavigation._lastNavTime = 0;
       messageNavigation._pendingJump = null;
+      ihChatTopNavigator.clear({ preserveViewport: false });
       quickHideController.reset();
       setupInputTracking();
       _lastFocusedEditable = null;
@@ -28090,5 +28539,7 @@ jQuery(async () => {
   eventSource.on("st_quickbar_reset_floating_ball", () =>
     doResetFloatingBall(),
   );
+  ihPublishScriptButtonApi();
+  ihSourceVisibility.start();
   console.log("快捷工具栏插件已加载");
 });

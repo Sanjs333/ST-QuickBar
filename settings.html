@@ -139,9 +139,19 @@
           <i class="fa-solid fa-chevron-down ih-collapse-icon"></i>
         </div>
         <div class="ih-section-desc">
-          悬浮编辑、删除确认、解锁备选、滚动行为、模型显示等进阶选项
+          原入口隐藏、悬浮编辑、删除确认、解锁备选、滚动行为等进阶选项
         </div>
         <div id="ih_more_settings_body" class="ih-collapsible-body">
+          <div class="ih-switch-row">
+            <label class="ih-switch-label" for="ih_hide_original_entries" title="统一开启或关闭已添加快捷入口的原入口隐藏；单个眼睛按钮仍可独立调整，不影响仅隐藏原入口的规则。">
+              <i class="fa-solid fa-eye-slash"></i>
+              快捷入口可用时隐藏原入口
+            </label>
+            <label class="ih-toggle">
+              <input id="ih_hide_original_entries" type="checkbox" />
+              <span class="ih-toggle-slider"></span>
+            </label>
+          </div>
           <div class="ih-switch-row">
             <label class="ih-switch-label" for="enable_floating_editor" title="在编辑框放大按钮前显示悬浮编辑入口；角色字段自动保存，预设草稿关闭时自动保存，其他字段实时同步。">
               <i class="fa-solid fa-up-right-from-square"></i>

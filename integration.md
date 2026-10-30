@@ -1,8 +1,8 @@
-# 接入 QuickBar 悬浮编辑按钮
+# QuickBar 插件接入说明
 
-适用于希望为文本框添加悬浮编辑入口的插件。
+适用于希望接入悬浮编辑按钮、标准魔法棒 / 扩展面板入口或运行时按钮的插件与脚本。用户操作见 [README.md](README.md#使用说明)。
 
-本页插件接入 API 和行为保持不变：插件字段仍使用源输入框实时同步与
+悬浮编辑接入 API 和保存行为保持不变：插件字段仍使用源输入框实时同步与
 上下文变更锁定，不会自动获得角色字段或预设条目的独立草稿能力。
 
 ## 基础用法
@@ -45,7 +45,10 @@
 ## 行为约定
 
 - 插件字段的悬浮编辑仍实时回写文本框并触发原生 `input` 事件，**不会**替插件
-  执行"保存"。请确保原有输入处理能接收这些修改。
+  执行「保存」。请确保原有输入处理能接收这些修改。
+- 已同步或未修改的实时同步窗口，即使原框失效后锁定，关闭或刷新也不再误报未保存；
+  只有未写回原框的本地修改才提示保留。关闭前会尝试提交尚未结束的组字输入。
+  此判断只确认是否写回原框，不代表来源插件已完成持久化保存。
 - 仅用于真实的文本编辑框。截断预览、复杂编辑器背后的临时值、
   富文本或 JSON 编辑器需先确认读写方式，不能只加属性就视为适配完成。
 
@@ -113,3 +116,129 @@
 不是根据标题里有没有「提示词」猜测，也不会给任意第三方插件字段自动启用。
 计数只读悬浮正文原文，使用酒馆当前分词器，不展开宏、不写回、不触发保存。
 不使用原生 `data-token-counter` 注册属性，避免混入角色卡的总 token 统计。
+
+## 标准魔法棒入口与来源显示策略
+
+新接入优先使用标准 `#extensionsMenu` 原生按钮，提供稳定 DOM ID、纯 FA 图标和清晰名称。
+用户扫描后可选择「仅隐藏原入口」或「加入所选」；加入快捷入口后，
+由 QuickBar 统一管理工具栏、文件夹、角色区域、悬浮面板、排序和快捷键。
+表情包管理器采用这条路径，不调用运行时注册 API。
+
+提供标准原入口即可，无需调用运行时 API，例如：
+
+```html
+<!-- 由来源插件挂载到 #extensionsMenu；ID 应稳定且唯一。 -->
+<div id="my_plugin_open" class="list-group-item" role="button" tabindex="0">
+  <i class="fa-solid fa-plug"></i>
+  <span>我的插件</span>
+</div>
+```
+
+来源仍负责原按钮的点击与键盘处理。用户在「按钮管理 → 魔法棒入口」点击「扫描入口」，
+勾选后选择「仅隐藏原入口」或「加入所选」。加入快捷入口时，QuickBar 只保存定位信息，
+不复制处理函数；调用时重新定位节点并执行原按钮的 `click()`。
+魔法棒扫描仅识别标准 `#extensionsMenu` 下的原生按钮；扩展面板扫描仅识别
+`#extensions_settings` / `#extensions_settings2` 下的顶层原生折叠面板，分别保留对应分类。
+名称定位必须唯一，不保存位置序号选择器；
+核心酒馆顶栏、发送按钮、额外顶栏、iframe / 沙盒内部和面板子操作不在扫描或隐藏范围内。
+
+来源脚本的 `data-quickbar-hide-source-default="true"` 仅保留为来源声明，
+不再绕过 QuickBar 的统一默认策略：新增快捷入口（包括由仅隐藏项转换的入口）
+遵从「更多设置」最后一次统一设置，初始默认关闭。
+用户可对已加入快捷入口统一批量切换，也可通过入口行的眼睛按钮单独修改，以保存的 `hideOriginal` 偏好为准。
+可选的同功能入口可用 `data-quickbar-source-for="原按钮稳定ID"` 关联，也受同一显示策略控制。
+
+QuickBar 用 `data-quickbar-source-hidden="true"` 和自己的独立可移除样式控制显示，
+不改写来源按钮的 style、hidden 或 class，不删除或移动原按钮。
+来源不应把这个标记等同于自己被禁用；原点击处理函数仍需可执行。
+显示状态变化会发 `quickbar:changed` 事件，便于来源更新自己的可选入口。
+
+对于已加入的快捷入口，只有实际可访问的快捷布局才隐藏原入口；QuickBar 关闭、源脚本或布局消失时保留配置、撤销遮罩。
+查询来源时同步临时停用仅 QuickBar 自己的遮罩样式，随后恢复，
+所以被本插件隐藏的来源仍可重新扫描和转发，而来源自己的隐藏 / 禁用状态仍受尊重。
+这是可选的兼容功能，不保证任意第三方脚本都允许在隐藏状态下程序化点击。
+
+「更多设置 → 快捷入口可用时隐藏原入口」统一开关保存在 `externalEntries.hideOriginalByDefault`，
+只批量同步所有已加入快捷入口的 `hideOriginal`，并设置后续新增或转换的快捷入口默认值，
+不修改独立隐藏规则。单项眼睛按钮仍可独立调整，混合选择时统一开关显示半选。
+初始化保留已有单项配置，不新增例外名单。
+
+### 仅隐藏原入口
+
+来源无需额外注册 API：提供上述标准原入口与稳定标识即可。用户选择「仅隐藏原入口」时，
+QuickBar 只保存独立隐藏规则，不生成快捷按钮，不进入文件夹、角色区域或悬浮面板的按钮选择器，
+也不写入快捷键、排序或布局。
+
+独立隐藏仅要求 QuickBar 启用，不要求存在可达的快捷布局。关闭 QuickBar 会撤销自身遮罩、
+恢复来源，重新启用后按保留规则隐藏。规则随设置保存；来源暂时不存在时不删除，
+使用相同稳定标识重建后可继续应用。来源自身的隐藏 / 禁用状态仍受尊重，DOM 结构和原事件保持不动。
+
+用户可在原分类通过眼睛恢复按钮删除单条规则并恢复原入口；「全部恢复」只作用于该分类的
+仅隐藏记录，不影响已加入快捷入口的隐藏偏好。已有仅隐藏项仍可在扫描中勾选，
+通过「加入所选」删除独立规则并转换为快捷入口，转换后遵从现有快捷隐藏策略和最近一次统一默认。
+已加入的快捷入口不会重复创建仅隐藏规则，其原入口显示仍由原入口行的眼睛按钮管理。
+
+## 来源脚本托管的快捷入口（兼容保留）
+
+此接口为兼容既有来源脚本保留；新接入优先使用标准魔法棒按钮。运行时入口由来源脚本选择工具栏或悬浮面板，不参与 QuickBar 按钮管理、扫描或选择器：
+
+```js
+const entry = window.STQuickBar.registerExternalButton({
+  id: 'my-script', label: '我的脚本', icon: 'fa-solid fa-plug',
+  placement: 'toolbar', // 默认 toolbar；也支持 floating
+  action: () => openMyPanel(),
+});
+entry.isActive(); // 宿主和所选区域是否可用，用于来源脚本保留备用入口
+entry.unregister(); // 注销此次注册；旧句柄不会删除同 ID 的更新注册
+```
+
+`window.STQuickBar.apiVersion === 1`；提供 `unregisterExternalButton(id)`。
+同 ID 替换回调，元数据 / 回调 / runtime key 不写入 QuickBar 设置。
+就绪事件为 `quickbar:ready`，入口及启用状态变化事件为 `quickbar:changed`。
+脚本需要在停用 / 销毁时注销，重载后重新注册；未启用目标区域时句柄仍保留但不活跃。
+悬浮位置需启用悬浮面板；工具栏位置追加到当前工具栏，不支持在宿主中另设排序 / 文件夹 / 快捷键。
+ID 格式为字母开头、最多 64 位的小写字母、数字、下划线或连字符。
+非法描述符会抛出 TypeError；动作异常被捕获，执行中的异步动作不会重复触发。
+
+### 加载顺序与生命周期
+
+脚本可能早于或晚于 QuickBar 加载；同时检查现有 API 和监听 `quickbar:ready`，避免错过注册。用 `quickbar:changed` 更新备用入口，并在脚本停用 / 销毁时注销按钮及监听：
+
+```js
+let entry;
+
+function updateFallback() {
+  // 此函数由来源脚本实现，只控制自己的备用入口。
+  setFallbackVisible(!entry?.isActive());
+}
+
+function registerQuickBarEntry() {
+  const api = window.STQuickBar;
+  if (api?.apiVersion !== 1) return;
+  entry?.unregister();
+  entry = api.registerExternalButton({
+    id: 'my-script',
+    label: '我的脚本',
+    icon: 'fa-solid fa-plug',
+    placement: 'toolbar',
+    action: () => openMyPanel(),
+  });
+  updateFallback();
+}
+
+window.addEventListener('quickbar:ready', registerQuickBarEntry);
+window.addEventListener('quickbar:changed', updateFallback);
+registerQuickBarEntry();
+updateFallback();
+
+function disposeQuickBarEntry() {
+  window.removeEventListener('quickbar:ready', registerQuickBarEntry);
+  window.removeEventListener('quickbar:changed', updateFallback);
+  entry?.unregister();
+  entry = undefined;
+  updateFallback();
+}
+```
+
+`isActive()` 表示宿主和所选区域已启用，不保证按钮当前展开或在视口内可见。
+此类按钮不参与扫描、管理、文件夹、角色区域、快捷键或原入口隐藏设置；来源需自行处理备用入口，重载后重新注册。

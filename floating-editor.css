@@ -293,7 +293,8 @@
     vertical-align: middle;
 }
 
-.ih-floating-editor-launch {
+.ih-floating-editor-launch,
+.ih-preset-entry-navigation-action {
     cursor: pointer;
 }
 
@@ -303,7 +304,8 @@
     vertical-align: middle;
 }
 
-.ih-floating-editor-launch:not(.right_menu_button) {
+.ih-floating-editor-launch:not(.right_menu_button),
+.ih-preset-entry-navigation-action:not(.right_menu_button) {
     padding: 2px;
 }
 
@@ -318,9 +320,15 @@
     opacity: 1;
 }
 
-.ih-floating-editor-launch:focus-visible {
+.ih-floating-editor-launch:focus-visible,
+.ih-preset-entry-navigation-action:focus-visible {
     outline: 1px solid currentColor;
     outline-offset: 2px;
+}
+
+.ih-preset-entry-navigation-action[aria-disabled="true"] {
+    opacity: 0.35;
+    cursor: default;
 }
 
 .world_entry_edit label small > span.justifySpaceBetween:has(.ih-floating-editor-actions-pair)

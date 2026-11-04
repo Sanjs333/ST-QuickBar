@@ -14,19 +14,34 @@ import { extension_settings } from "../../../extensions.js";
 import * as STExtensions from "../../../extensions.js";
 import { power_user } from "../../../power-user.js";
 import * as SlashCommands from "../../../slash-commands.js";
-import { createFloatingEditorController, createFloatingEditorAdapter, resolveCodeMirrorForSource } from "./floating-editor.js";
+import {
+  createFloatingEditorController,
+  createFloatingEditorAdapter,
+  resolveCodeMirrorForSource,
+} from "./floating-editor.js";
 import * as STTokenizers from "../../../tokenizers.js";
 import * as TextGenerationSettings from "../../../textgen-settings.js";
 import {
-  supportsEditorTokenCount, createTokenCountBinding, createNativePromptTokenCounter,
+  supportsEditorTokenCount,
+  createTokenCountBinding,
+  createNativePromptTokenCounter,
 } from "./editor-token-counter.js";
-import { createCharacterFieldStore, createPresetEntryStore, createPresetSwitchGuard } from "./editor-stores.js";
+import {
+  createCharacterFieldStore,
+  createPresetEntryStore,
+  createPresetSwitchGuard,
+} from "./editor-stores.js";
 import { getPresetManager } from "../../../preset-manager.js";
 import * as OpenAISettings from "../../../openai.js";
 import * as ExternalEntries from "./external-entries.js";
 import { createScriptButtonRegistry } from "./script-buttons.js";
 import { createSourceVisibilityController } from "./source-visibility.js";
-import { createChatTopNavigator, getLoadedChatTopOffset } from "./chat-top-navigation.js";
+import {
+  createChatTopNavigator,
+  getLoadedChatTopOffset,
+} from "./chat-top-navigation.js";
+import { createPresetEntryNavigator } from "./preset-entry-navigation.js";
+import { Popup, POPUP_TYPE, POPUP_RESULT } from "../../../popup.js";
 
 const openCharacterChat = SillyTavernScript.openCharacterChat;
 const executeSlashCommandsWithOptions = (...args) => {
@@ -46,7 +61,10 @@ let floatingPresetEpoch = 0;
 const characterFieldStore = createCharacterFieldStore({ getRequestHeaders });
 
 function acceptSavedCharacterField({ avatar, field, value }) {
-  if (!["description", "personality", "scenario", "first_mes"].includes(field) || typeof value !== "string") {
+  if (
+    !["description", "personality", "scenario", "first_mes"].includes(field) ||
+    typeof value !== "string"
+  ) {
     throw new Error("已保存字段的标识或内容无效，未同步到本地角色数据。");
   }
   const patchRaw = (raw) => {
@@ -57,57 +75,84 @@ function acceptSavedCharacterField({ avatar, field, value }) {
       card[field] = value;
       if (card.data && typeof card.data === "object") card.data[field] = value;
       return JSON.stringify(card);
-    } catch { return raw; }
+    } catch {
+      return raw;
+    }
   };
-  const character = characters.find(item => item.avatar === avatar);
+  const character = characters.find((item) => item.avatar === avatar);
   if (character) {
     character[field] = value;
     if (character.data) character.data[field] = value;
     character.json_data = patchRaw(character.json_data);
   }
-  if (document.getElementById("avatar_url_pole")?.value === avatar &&
-      document.getElementById("form_create")?.getAttribute("actiontype") === "editcharacter") {
+  if (
+    document.getElementById("avatar_url_pole")?.value === avatar &&
+    document.getElementById("form_create")?.getAttribute("actiontype") ===
+      "editcharacter"
+  ) {
     const raw = document.getElementById("character_json_data");
     if (raw) raw.value = patchRaw(raw.value);
   }
 }
 
 const floatingPresetSwitch = createPresetSwitchGuard({
-  getApplicationPromise: typeof OpenAISettings.getPresetApplicationPromise === "function"
-    ? () => OpenAISettings.getPresetApplicationPromise() : undefined,
+  getApplicationPromise:
+    typeof OpenAISettings.getPresetApplicationPromise === "function"
+      ? () => OpenAISettings.getPresetApplicationPromise()
+      : undefined,
 });
 const presetEntryStore = createPresetEntryStore({
   getManager: () => OpenAISettings.promptManager,
-  getPresetName: () => floatingPresetSwitch.isPending()
-    ? "" : getPresetManager("openai")?.getSelectedPresetName() || "",
+  getPresetName: () =>
+    floatingPresetSwitch.isPending()
+      ? ""
+      : getPresetManager("openai")?.getSelectedPresetName() || "",
 });
 
 let editorTokenContextEpoch = 0;
 function editorTokenContextKey() {
   const api = SillyTavernScript.main_api;
   return JSON.stringify([
-    editorTokenContextEpoch, api, power_user.tokenizer,
-    api === "openai" ? STTokenizers.getTokenizerModel() : STTokenizers.getTokenizerBestMatch(api),
-    api === "textgenerationwebui" ? [
-      TextGenerationSettings.textgenerationwebui_settings?.type,
-      TextGenerationSettings.getTextGenModel?.(),
-    ] : null,
+    editorTokenContextEpoch,
+    api,
+    power_user.tokenizer,
+    api === "openai"
+      ? STTokenizers.getTokenizerModel()
+      : STTokenizers.getTokenizerBestMatch(api),
+    api === "textgenerationwebui"
+      ? [
+          TextGenerationSettings.textgenerationwebui_settings?.type,
+          TextGenerationSettings.getTextGenModel?.(),
+        ]
+      : null,
     SillyTavernScript.online_status,
   ]);
 }
-const countEditorTokens = text => STTokenizers.getTokenCountAsync(text);
+const countEditorTokens = (text) => STTokenizers.getTokenCountAsync(text);
 const nativePromptTokenCounter = createNativePromptTokenCounter({
-  document, countTokens: countEditorTokens, createAdapter: createFloatingEditorAdapter,
-  resolveCodeMirror: resolveCodeMirrorForSource, getContextKey: editorTokenContextKey,
-  getIdentity: () => JSON.stringify([floatingPresetEpoch, getPresetManager("openai")?.getSelectedPresetName()]),
+  document,
+  countTokens: countEditorTokens,
+  createAdapter: createFloatingEditorAdapter,
+  resolveCodeMirror: resolveCodeMirrorForSource,
+  getContextKey: editorTokenContextKey,
+  getIdentity: () =>
+    JSON.stringify([
+      floatingPresetEpoch,
+      getPresetManager("openai")?.getSelectedPresetName(),
+    ]),
   isEnabled: () => getSettings().enabled,
   isContextReady: () => !floatingPresetSwitch.isPending(),
 });
 
 const floatingEditorController = createFloatingEditorController({
-  createTokenCounter: ({ source, ...options }) => supportsEditorTokenCount(source)
-    ? createTokenCountBinding({ ...options, countTokens: countEditorTokens, getContextKey: editorTokenContextKey })
-    : null,
+  createTokenCounter: ({ source, ...options }) =>
+    supportsEditorTokenCount(source)
+      ? createTokenCountBinding({
+          ...options,
+          countTokens: countEditorTokens,
+          getContextKey: editorTokenContextKey,
+        })
+      : null,
   characterFieldStore,
   presetEntryStore,
   onCharacterFieldSaved: acceptSavedCharacterField,
@@ -136,6 +181,53 @@ const floatingEditorController = createFloatingEditorController({
   saveGeometry: (geometry) => {
     getSettings().floatingEditorGeometry = geometry;
     saveSettingsDebounced();
+  },
+});
+
+const presetEntryNavigator = createPresetEntryNavigator({
+  document,
+  getManager: () => OpenAISettings.promptManager,
+  getIdentity: () =>
+    JSON.stringify([
+      floatingPresetEpoch,
+      getPresetManager("openai")?.getSelectedPresetName(),
+    ]),
+  isEnabled: () => getSettings().enabled,
+  isContextReady: () => !floatingPresetSwitch.isPending(),
+  notify: (message) =>
+    toastr.warning(message, "预设条目切换", { timeOut: 5000 }),
+  confirmSwitch: async ({ name, target, uncertain }) => {
+    const content = document.createElement("div");
+    const title = document.createElement("h3");
+    title.textContent = "当前条目有未保存的修改";
+    const text = document.createElement("p");
+    text.textContent = `是否保存「${name || "当前条目"}」后切换到「${target || "相邻条目"}」？保存包含名称、角色、注入设置和正文；整份命名预设仍需在酒馆保存。`;
+    content.append(title, text);
+    if (uncertain) {
+      const warning = document.createElement("p");
+      warning.textContent =
+        "上次保存结果尚未确认。直接切换不会撤销已经发出的保存请求；建议先重试保存。";
+      content.append(warning);
+    }
+    const result = await new Popup(content, POPUP_TYPE.CONFIRM, null, {
+      okButton: "保存并切换",
+      cancelButton: "取消",
+      defaultResult: POPUP_RESULT.NEGATIVE,
+      customButtons: [
+        { text: "不保存，直接切换", result: POPUP_RESULT.CUSTOM1 },
+      ],
+    }).show();
+    return result === POPUP_RESULT.AFFIRMATIVE
+      ? "save"
+      : result === POPUP_RESULT.CUSTOM1
+        ? "discard"
+        : "cancel";
+  },
+  onSwitched: () => {
+    floatingEditorController.refresh();
+    nativePromptTokenCounter.refresh({ force: true });
+    if (findReplaceController.active)
+      findReplaceController._scheduleFloatingInputRefresh();
   },
 });
 
@@ -401,7 +493,11 @@ function isToolUiElement(el) {
 }
 function getEditTarget(noFallback) {
   for (const el of [_lastEditTarget, _lastFocusedEditable])
-    if (el?.isConnected && el.ownerDocument?.defaultView && isEditableElement(el))
+    if (
+      el?.isConnected &&
+      el.ownerDocument?.defaultView &&
+      isEditableElement(el)
+    )
       return el;
   return noFallback
     ? null
@@ -3774,7 +3870,8 @@ const historyManager = {
     // Share only with the actual source element, never with unrelated fields
     // that happen to reuse an id (including fields in another document).
     const shareKey = this._getLogicalSource(el) || el;
-    let h = this.externalHistories.get(shareKey) ||
+    let h =
+      this.externalHistories.get(shareKey) ||
       this._sharedHistoriesByKey.get(shareKey);
     if (h) this.externalHistories.set(el, h);
     const currentText = el.value || "";
@@ -5333,7 +5430,8 @@ async function ihSaveCurrentChat() {
 
 function getButtonIdFromKey(key) {
   if (ihScriptButtons.get(key)) return `input_${key}_btn`;
-  if (ExternalEntries.findExternalEntry(getSettings(), key)) return `input_${key}_btn`;
+  if (ExternalEntries.findExternalEntry(getSettings(), key))
+    return `input_${key}_btn`;
   if (key.startsWith("custom_"))
     return `input_custom_${key.replace("custom_", "")}_btn`;
   if (key.startsWith("folder_"))
@@ -5397,7 +5495,10 @@ function getButtonDisplayHtml(key) {
   if (scriptButton) return `<i class="${ihEscapeAttr(scriptButton.icon)}"></i>`;
   const external = ExternalEntries.findExternalEntry(getSettings(), key);
   if (external) {
-    const icon = ExternalEntries.normalizeEntryIcon(external.icon || external.defaultIcon) || ExternalEntries.EXTERNAL_ENTRY_SOURCES[external.source].icon;
+    const icon =
+      ExternalEntries.normalizeEntryIcon(
+        external.icon || external.defaultIcon,
+      ) || ExternalEntries.EXTERNAL_ENTRY_SOURCES[external.source].icon;
     return `<i class="${ihEscapeAttr(icon)}"></i>`;
   }
   if (key.startsWith("custom_")) {
@@ -5850,11 +5951,15 @@ function findScrollNavigationContainer() {
     getCodeMirrorView(target)?.scrollDOM || target.closest(".cm-scroller");
   if (cmScroller)
     return isScrollNavigationTargetAvailable(cmScroller) ? cmScroller : null;
-  if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") return target;
+  if (target.tagName === "TEXTAREA" || target.tagName === "INPUT")
+    return target;
 
   let root = target;
   const doc = target.ownerDocument;
-  while (root.parentElement?.isContentEditable && root.parentElement !== doc.body)
+  while (
+    root.parentElement?.isContentEditable &&
+    root.parentElement !== doc.body
+  )
     root = root.parentElement;
   for (let el = root; el && el !== doc.body; el = el.parentElement) {
     if (el.id === "chat" || el.tagName === "DIALOG") break;
@@ -5868,16 +5973,24 @@ function findScrollNavigationContainer() {
   return root;
 }
 
-function ihGetLoadedChatTopOffset(chatEl) { return getLoadedChatTopOffset(chatEl); }
+function ihGetLoadedChatTopOffset(chatEl) {
+  return getLoadedChatTopOffset(chatEl);
+}
 const ihChatTopNavigator = createChatTopNavigator({
   // Read-only optional compatibility. Never toggle or save another plugin's settings.
   getBackfillThreshold: () => {
     const settings = globalThis.__stChatRenderOptimizer?.settings;
-    if (!settings || settings.enabled === false || settings.autoLoadMore !== true) return null;
+    if (
+      !settings ||
+      settings.enabled === false ||
+      settings.autoLoadMore !== true
+    )
+      return null;
     const threshold = Number(settings.autoLoadThresholdPx);
     return Number.isFinite(threshold) && threshold >= 0 ? threshold : null;
   },
-  onError: error => console.warn("QuickBar chat-top navigation failed", error),
+  onError: (error) =>
+    console.warn("QuickBar chat-top navigation failed", error),
 });
 
 function ihScrollBoxToTop(scrollEl) {
@@ -7127,7 +7240,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.3.6";
+const EXTENSION_VERSION = "3.3.7";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -7961,14 +8074,9 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.6</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.7</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>新增外部入口（实验性）</b>：按钮管理可扫描魔法棒、扩展面板入口，选择加入快捷工具栏或仅隐藏原入口。快捷入口支持图标、快捷键、排序及各类布局；仅隐藏项使用精简列表，可单项或按分类恢复，不生成快捷按钮。</li>
-  <li><b>新增原入口隐藏设置</b>：「更多设置」统一管理已添加快捷入口的隐藏偏好，单项眼睛按钮仍可独立调整，新快捷入口沿用最近一次统一设置。仅在快捷布局可访问时隐藏原入口，不可用时自动恢复。</li>
-  <li><b>新增脚本快捷入口接口</b>：来源脚本可将运行时按钮注册到工具栏或悬浮面板，不写入已保存布局，也不参与扫描与按钮管理。</li>
-  <li><b>调整悬浮球大小</b>：最低值由 32px 降至 24px，圆形与方形均可使用；默认 48px、最大值 80px 及图片显示方式不变。</li>
-  <li><b>修复聊天回顶</b>：定位到当前已加载的第一条可见消息，兼容已识别的近顶自动加载逻辑，避免回顶误触历史补载；不重新加载聊天或修改历史加载设置。</li>
-  <li><b>修复悬浮窗关闭提示</b>：已同步或未修改的实时同步窗口，关闭、刷新时不再误报未保存；关闭前尝试写回输入法组字内容，未保存或未同步的修改仍保留确认提示。</li>
+  <li><b>新增预设条目切换</b>：悬浮编辑图标前新增“上一条 / 下一条”小箭头。按预设列表顺序，无需关闭面板即可直接切换可编辑条目；切换到首尾条目时箭头变灰，且不循环。</li>
 </ul>
 `;
 
@@ -8057,6 +8165,18 @@ function openHelpPanel() {
 </ul>
 <p>聊天楼层处于编辑状态时，符号插入等编辑操作优先作用于该楼层；已聚焦的悬浮正文优先于聊天楼层。查找替换与选中模式以光标最后所在的编辑框为准。悬浮窗的查找目标单独绑定，不随其他输入框的焦点变化。</p>
 <p>光标位于编辑框内时，「跳转 AI 消息顶部」与「跳转聊天底部」分别回到框内开头与末尾，翻页、自动滚动同样作用于光标所在的可滚动容器；「跳转聊天顶部」始终作用于聊天区。</p>
+
+<div class="ih-help-h4"><i class="fa-solid fa-chevron-up"></i> 预设条目切换</div>
+<p>打开酒馆的聊天补全预设（Prompt Manager），点击已有条目的编辑（铅笔）按钮。在原来的悬浮编辑图标前可看到<q>「上一条 / 下一条」</q>小箭头，排列为<q>「上一条 → 下一条 → 悬浮编辑 → 原放大」</q>；没有放大入口时，箭头显示在原生底部操作区。点击即可在同一面板里切换相邻条目，不用关闭再打开。</p>
+<p><b>顺序与状态</b>：按预设列表的实际顺序切换原生允许编辑的条目，停用条目也包含在内，不能编辑的标记会跳过；悬停可查看相邻条目名称。到第一条 / 最后一条时，对应箭头变灰，不循环。</p>
+<p><b>未保存修改</b>：没有修改时直接切换；当前表单有修改时使用原生弹窗确认：</p>
+<ul>
+    <li><b>保存并切换</b>：先保存名称、角色、触发条件、注入位置 / 深度 / 顺序、禁止覆盖设置与正文，成功后切换。</li>
+    <li><b>不保存，直接切换</b>：放弃当前表单尚未保存的修改，载入相邻条目；不会撤销已经发出的保存请求。</li>
+    <li><b>取消</b>：留在当前条目，保留编辑内容。</li>
+</ul>
+<p><b>保护规则</b>：保存失败、超时、冲突，或等待期间预设 / 条目 / 顺序发生变化时停止切换并提示；保存期间继续输入的新修改也保留在当前条目。上次保存结果未确认时会提醒重试，直接切换不会撤销已发出的请求。已有悬浮草稿继续绑定原条目，不随原面板改绑。<b>整份命名预设仍需按酒馆原有方式保存。</b></p>
+<p><b>默认提供，无独立开关</b>：关闭<q>「悬浮编辑窗」</q>不会关闭条目导航，关闭 QuickBar 总开关时移除箭头。尚未保存的新条目需先用原生保存按钮保存一次。</p>
 
 <div class="ih-help-h4"><i class="fa-solid fa-up-right-from-square"></i> 悬浮编辑窗</div>
 <p>点击放大图标左侧的悬浮编辑图标，可独立编辑角色描述、性格、场景、主开场白、世界书条目、自定义 CSS，以及打字指示器等已适配插件的文本框。默认启用，可在设置 → 更多设置中的<q>「悬浮编辑窗」</q>关闭；与下文的悬浮球 / 按钮面板是不同功能。</p><p>使用酒馆标准放大按钮的插件会自动显示悬浮入口；自制按钮需要插件作者适配。打字指示器及已适配切换保护的编辑框，在更换主题或方案后会锁定旧窗口，原内容仍可复制。修改仍需按原插件的方式保存。</p>
@@ -8817,20 +8937,33 @@ function ihEnsureSwipeArrays(msg) {
 }
 const IH_GENERATION_INFO_KEY = "ih_generation_info";
 const IH_MESSAGE_GENERATION_TYPES = new Set([
-  "normal", "regenerate", "swipe", "continue", "append", "appendFinal",
+  "normal",
+  "regenerate",
+  "swipe",
+  "continue",
+  "append",
+  "appendFinal",
 ]);
-const ihNormalizeGenerationName = (value) => typeof value === "string" ? value.trim() : "";
+const ihNormalizeGenerationName = (value) =>
+  typeof value === "string" ? value.trim() : "";
 
 function ihGetSwipeGenerationInfo(message, swipeIndex) {
   const current = Number.isInteger(message?.swipe_id) ? message.swipe_id : 0;
-  const index = Number.isInteger(swipeIndex) && swipeIndex >= 0 ? swipeIndex : current;
+  const index =
+    Number.isInteger(swipeIndex) && swipeIndex >= 0 ? swipeIndex : current;
   const swipeExtra = message?.swipe_info?.[index]?.extra;
   const currentExtra = index === current ? message?.extra : null;
-  const saved = swipeExtra?.[IH_GENERATION_INFO_KEY] ?? currentExtra?.[IH_GENERATION_INFO_KEY];
+  const saved =
+    swipeExtra?.[IH_GENERATION_INFO_KEY] ??
+    currentExtra?.[IH_GENERATION_INFO_KEY];
   return {
-    profileName: typeof saved?.profileName === "string" ? saved.profileName : null,
+    profileName:
+      typeof saved?.profileName === "string" ? saved.profileName : null,
     presetName: typeof saved?.presetName === "string" ? saved.presetName : null,
-    modelName: ihNormalizeGenerationName(saved?.modelName) || ihNormalizeGenerationName(swipeExtra?.model) || ihNormalizeGenerationName(currentExtra?.model),
+    modelName:
+      ihNormalizeGenerationName(saved?.modelName) ||
+      ihNormalizeGenerationName(swipeExtra?.model) ||
+      ihNormalizeGenerationName(currentExtra?.model),
   };
 }
 
@@ -8845,9 +8978,11 @@ function ihRenderGenerationInfo(message, swipeIndex) {
   const parts = fields.map(([label, icon, value, empty, unknown]) => {
     const text = value === null ? unknown : value || empty;
     const title = `${label}：${text}${value === null ? "（这条备选没有保存生成时的名称）" : ""}`;
-    return `<div class="ih-me-generation-item${value ? "" : " ih-me-generation-missing"}" title="${ihEscapeAttr(title)}">` +
+    return (
+      `<div class="ih-me-generation-item${value ? "" : " ih-me-generation-missing"}" title="${ihEscapeAttr(title)}">` +
       `<span class="ih-me-generation-label"><i class="fa-solid ${icon}" aria-hidden="true"></i>${label}：</span>` +
-      `<span class="ih-me-generation-value">${ihEscapeHtml(text)}</span></div>`;
+      `<span class="ih-me-generation-value">${ihEscapeHtml(text)}</span></div>`
+    );
   });
   return `<div class="ih-me-generation-info" role="group" tabindex="0" aria-label="生成时使用的 API 档案、预设和模型，可左右滚动">${parts.join("")}</div>`;
 }
@@ -8855,34 +8990,49 @@ function ihRenderGenerationInfo(message, swipeIndex) {
 function ihCaptureGenerationInfo(settings, presetName, modelName) {
   const manager = settings?.connectionManager;
   const profile = Array.isArray(manager?.profiles)
-    ? manager.profiles.find((entry) => entry?.id === manager.selectedProfile) : null;
+    ? manager.profiles.find((entry) => entry?.id === manager.selectedProfile)
+    : null;
   return {
     version: 1,
-    profileName: profile ? ihNormalizeGenerationName(profile.name) : manager?.selectedProfile ? null : "",
-    presetName: typeof presetName === "string" ? ihNormalizeGenerationName(presetName) : null,
+    profileName: profile
+      ? ihNormalizeGenerationName(profile.name)
+      : manager?.selectedProfile
+        ? null
+        : "",
+    presetName:
+      typeof presetName === "string"
+        ? ihNormalizeGenerationName(presetName)
+        : null,
     modelName: ihNormalizeGenerationName(modelName),
   };
 }
 
 function ihInstallGenerationInfoTracking({
-  eventSource, eventTypes, getContext, capture,
+  eventSource,
+  eventTypes,
+  getContext,
+  capture,
 }) {
   let pending = null;
   const on = (type, listener) => {
-    if (type) eventSource.on(type, (...args) => {
-      try {
-        listener(...args);
-      } catch (error) {
-        console.warn("快捷工具栏: 记录消息生成配置失败", error);
-      }
-    });
+    if (type)
+      eventSource.on(type, (...args) => {
+        try {
+          listener(...args);
+        } catch (error) {
+          console.warn("快捷工具栏: 记录消息生成配置失败", error);
+        }
+      });
   };
-  const sameChat = (context) => pending && context.chat === pending.chat &&
+  const sameChat = (context) =>
+    pending &&
+    context.chat === pending.chat &&
     context.getCurrentChatId?.() === pending.chatId;
   const begin = (type, options, dryRun) => {
     if (dryRun) return;
     pending = null;
-    if (type && !IH_MESSAGE_GENERATION_TYPES.has(type) && !options?.quietToLoud) return;
+    if (type && !IH_MESSAGE_GENERATION_TYPES.has(type) && !options?.quietToLoud)
+      return;
     const context = getContext();
     const last = context.chat?.at(-1);
     pending = {
@@ -8913,19 +9063,27 @@ function ihInstallGenerationInfoTracking({
     const message = context.chat[messageId];
     if (!message || message.is_user || !message.gen_started) return false;
     const index = Number.isInteger(message.swipe_id) ? message.swipe_id : 0;
-    if (message === pending.last && message.gen_started === pending.started &&
-        index === pending.swipeIndex) return false;
+    if (
+      message === pending.last &&
+      message.gen_started === pending.started &&
+      index === pending.swipeIndex
+    )
+      return false;
     if (!message.extra || typeof message.extra !== "object") message.extra = {};
     writeExtra(message.extra);
     const firstNew = message === pending.last ? pending.swipeCount : 0;
-    if (Array.isArray(message.swipe_info)) message.swipe_info.forEach((swipe, i) => {
-      if (!swipe || (i !== index && i < firstNew)) return;
-      if (!swipe.extra || typeof swipe.extra !== "object") swipe.extra = {};
-      writeExtra(swipe.extra);
-    });
+    if (Array.isArray(message.swipe_info))
+      message.swipe_info.forEach((swipe, i) => {
+        if (!swipe || (i !== index && i < firstNew)) return;
+        if (!swipe.extra || typeof swipe.extra !== "object") swipe.extra = {};
+        writeExtra(swipe.extra);
+      });
     return true;
   };
-  on(eventTypes.GENERATION_AFTER_COMMANDS || eventTypes.GENERATION_STARTED, begin);
+  on(
+    eventTypes.GENERATION_AFTER_COMMANDS || eventTypes.GENERATION_STARTED,
+    begin,
+  );
   on(eventTypes.GENERATE_AFTER_DATA, (_data, dryRun) => {
     if (dryRun || !pending) return;
     if (sameChat(getContext())) pending.info = capture();
@@ -8943,7 +9101,9 @@ function ihInstallGenerationInfoTracking({
     if (pending?.streamRecorded) record(pending.chat.length - 1);
     else pending = null;
   });
-  on(eventTypes.CHAT_CHANGED, () => { pending = null; });
+  on(eventTypes.CHAT_CHANGED, () => {
+    pending = null;
+  });
 }
 
 function ihGetSwipeModelName(msg, swipeIdx) {
@@ -16758,9 +16918,7 @@ function openHideManagerPanel() {
           if (curBackup) {
             let nowId = "";
             try {
-              nowId = String(
-                SillyTavern.getContext().getCurrentChatId() || "",
-              );
+              nowId = String(SillyTavern.getContext().getCurrentChatId() || "");
             } catch (e) {}
             const nowChar = ihBranchGetChar();
             const sameChar =
@@ -18488,8 +18646,8 @@ function openHideManagerPanel() {
     const inPreview = !!sharedState.branchPreviewName;
     const inDetail = !inPreview && !!sharedState.branchDetailName;
     const panel = content.find('.ih-mgr-tab-panel[data-panel="branch"]');
-    const wasSubview = panel.hasClass("ih-br-in-detail") ||
-      panel.hasClass("ih-br-in-preview");
+    const wasSubview =
+      panel.hasClass("ih-br-in-detail") || panel.hasClass("ih-br-in-preview");
     panel
       .toggleClass("ih-br-in-detail", inDetail)
       .toggleClass("ih-br-in-preview", inPreview);
@@ -18504,9 +18662,14 @@ function openHideManagerPanel() {
       const saved = sharedState.branchTreeScroll;
       if (wasSubview && saved) {
         const restore = () => {
-          if (!content[0].isConnected || sharedState.activeTab !== "branch" ||
-              sharedState.branchPreviewName || sharedState.branchDetailName ||
-              sharedState.branchTreeScroll !== saved) return;
+          if (
+            !content[0].isConnected ||
+            sharedState.activeTab !== "branch" ||
+            sharedState.branchPreviewName ||
+            sharedState.branchDetailName ||
+            sharedState.branchTreeScroll !== saved
+          )
+            return;
           const host = content.find("#ih_mgr_branch_tree")[0];
           if (host) host.scrollTop = saved.top;
           content[0].scrollTop = saved.outerTop;
@@ -19811,9 +19974,7 @@ function openHideManagerPanel() {
       };
       _meSelect();
       requestAnimationFrame(_meSelect);
-      btn
-        .find(".ih-me-locate-count")
-        .text(ev.hlIndex + 1 + "/" + pos.length);
+      btn.find(".ih-me-locate-count").text(ev.hlIndex + 1 + "/" + pos.length);
       return;
     }
     const marks = content.find("#ih_mgr_edit_view .ih-search-hl");
@@ -19828,9 +19989,7 @@ function openHideManagerPanel() {
         behavior: ihGetScrollBehavior(),
       });
     } catch (e) {}
-    btn
-      .find(".ih-me-locate-count")
-      .text(ev.hlIndex + 1 + "/" + marks.length);
+    btn.find(".ih-me-locate-count").text(ev.hlIndex + 1 + "/" + marks.length);
   });
 
   content.find("#ih_mgr_branch_scan").on("click", () => runBranchScan());
@@ -20812,14 +20971,21 @@ const floatingPanelController = {
       "top 0.1s ease-out, left 0.1s ease-out, max-height 0.1s ease-out",
       "important",
     );
-    const buttons = [...(fp.buttons || []), ...ihScriptButtons.list("floating").map(entry => entry.key)];
+    const buttons = [
+      ...(fp.buttons || []),
+      ...ihScriptButtons.list("floating").map((entry) => entry.key),
+    ];
     if (buttons.length === 0) {
       panel.append(
         `<div style="padding:8px;font-size:11px;opacity:0.5;white-space:nowrap;">请在设置中添加按钮</div>`,
       );
     }
     buttons.forEach((bKey) => {
-      if (ExternalEntries.findExternalEntry(getSettings(), bKey) && getSettings().buttons?.[bKey] === false) return;
+      if (
+        ExternalEntries.findExternalEntry(getSettings(), bKey) &&
+        getSettings().buttons?.[bKey] === false
+      )
+        return;
       if (bKey === "charFolder") {
         if (ihGetCharVisibleButtons().length === 0) return;
         const cbar = ihGetCharBar();
@@ -20872,7 +21038,11 @@ const floatingPanelController = {
       const btn = $(
         `<button class="input-helper-btn ih-fp-btn" data-button-key="${ihEscapeAttr(bKey)}" title="${ihEscapeAttr(label)}">${displayHtml}</button>`,
       );
-      if (ihScriptButtons.get(bKey)) btn.attr({ "data-norefocus": "true", "data-quickbar-external": "true" });
+      if (ihScriptButtons.get(bKey))
+        btn.attr({
+          "data-norefocus": "true",
+          "data-quickbar-external": "true",
+        });
       bindButtonAction(btn, bKey);
       this._applyButtonSize(btn[0], fp.buttonSize || 12);
       panel.append(btn);
@@ -22237,7 +22407,10 @@ const floatingPanelController = {
   getFloatingButtons() {
     const fp = getSettings().floatingPanel;
     if (!fp || !fp.enabled) return new Set();
-    return new Set([...(fp.buttons || []), ...ihScriptButtons.list("floating").map(entry => entry.key)]);
+    return new Set([
+      ...(fp.buttons || []),
+      ...ihScriptButtons.list("floating").map((entry) => entry.key),
+    ]);
   },
 
   refresh() {
@@ -22427,7 +22600,8 @@ function bindRepeatableButton(btn, action) {
 
 function getActionForKey(key) {
   if (ihScriptButtons.get(key)) return () => ihScriptButtons.activate(key);
-  if (ExternalEntries.findExternalEntry(getSettings(), key)) return () => ihActivateExternalEntry(key);
+  if (ExternalEntries.findExternalEntry(getSettings(), key))
+    return () => ihActivateExternalEntry(key);
   if (shortcutFunctionMap[key]) return shortcutFunctionMap[key];
   if (key.startsWith("custom_")) {
     const idx = parseInt(key.replace("custom_", ""));
@@ -22946,7 +23120,10 @@ function ihIsButtonKeyAlive(bKey) {
     if (isNaN(idx)) return false;
     return !!(getSettings().customSymbols || [])[idx];
   }
-  return !!BUTTON_DEFS[bKey] || !!ExternalEntries.findExternalEntry(getSettings(), bKey);
+  return (
+    !!BUTTON_DEFS[bKey] ||
+    !!ExternalEntries.findExternalEntry(getSettings(), bKey)
+  );
 }
 
 function ihGetCurrentCharKey() {
@@ -23095,7 +23272,11 @@ function ihPruneCharButtons() {
 }
 function ihIsOrderKeyValid(bKey) {
   if (typeof bKey !== "string" || !bKey) return false;
-  if (BUTTON_DEFS[bKey] || ExternalEntries.findExternalEntry(getSettings(), bKey)) return true;
+  if (
+    BUTTON_DEFS[bKey] ||
+    ExternalEntries.findExternalEntry(getSettings(), bKey)
+  )
+    return true;
   const mCustom = bKey.match(/^custom_(\d+)$/);
   if (mCustom) {
     return !!(getSettings().customSymbols || [])[parseInt(mCustom[1])];
@@ -23598,7 +23779,10 @@ function buildToolbar() {
   ihSyncExternalToolbarButtons(toolbar);
   ihSyncScriptToolbarButtons(toolbar);
   const buttons = settings.buttons;
-  const order = [...(settings.buttonOrder || []), ...ihScriptButtons.list("toolbar").map(entry => entry.key)];
+  const order = [
+    ...(settings.buttonOrder || []),
+    ...ihScriptButtons.list("toolbar").map((entry) => entry.key),
+  ];
   const folders = settings.folders || [];
   const folderedButtons = ihGetReservedButtons();
   const floatingButtons = floatingPanelController.getFloatingButtons();
@@ -23812,7 +23996,9 @@ function makeSettingsRow(key, opts) {
   if (opts.isCharChild) {
     extraBtns += `<span class="ih-child-remove-btn ih-char-unbind-btn" role="button" tabindex="0" title="解除角色绑定（按钮会回到通用工具栏）" data-button-key="${key}"><i class="fa-solid fa-link-slash"></i></span>`;
   }
-  const extraClass = (opts.isChild || opts.isCharChild ? " ih-child-row" : "") + (external ? " ih-external-entry-row" : "");
+  const extraClass =
+    (opts.isChild || opts.isCharChild ? " ih-child-row" : "") +
+    (external ? " ih-external-entry-row" : "");
   const row = $(`
         <div class="integrated-button-row${extraClass}" data-button-key="${key}" ${opts.isCustom ? 'data-custom="true"' : ""} ${opts.isChild ? 'data-is-child="true"' : ""}>
             <span class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></span>
@@ -23829,7 +24015,8 @@ function makeSettingsRow(key, opts) {
     saveSettingsDebounced();
     updateButtonVisibilityDebounced();
     if (external) {
-      if (getSettings().floatingPanel?.enabled) floatingPanelController.refreshPanelOnly();
+      if (getSettings().floatingPanel?.enabled)
+        floatingPanelController.refreshPanelOnly();
       ihSourceVisibility.schedule();
     }
   });
@@ -23854,7 +24041,8 @@ function makeSettingsRow(key, opts) {
     });
     row.find(".ih-external-remove-btn").on("click", function (e) {
       e.stopPropagation();
-      if (ExternalEntries.removeExternalEntry(getSettings(), key)) ihRefreshExternalEntryUi();
+      if (ExternalEntries.removeExternalEntry(getSettings(), key))
+        ihRefreshExternalEntryUi();
     });
   }
   if (opts.isCustom) {
@@ -24307,7 +24495,12 @@ function renderFloatingPanelSettings() {
   container.empty();
   const fp = getSettings().floatingPanel || {};
   const _ballOpacityPct = Math.round(ihGetBallOpacity() * 100);
-  const allKeys = [...ALL_BUTTON_KEYS, ...ExternalEntries.getExternalEntries(getSettings()).map(entry => entry.key)];
+  const allKeys = [
+    ...ALL_BUTTON_KEYS,
+    ...ExternalEntries.getExternalEntries(getSettings()).map(
+      (entry) => entry.key,
+    ),
+  ];
   const customSymbols = getSettings().customSymbols || [];
   customSymbols.forEach((_, i) => allKeys.push(`custom_${i}`));
   const allFolders = getSettings().folders || [];
@@ -25370,7 +25563,12 @@ function renderFolderSettings() {
 
 function showButtonPicker(folderIndex) {
   const folderedButtons = ihGetReservedButtons();
-  const allKeys = [...ALL_BUTTON_KEYS, ...ExternalEntries.getExternalEntries(getSettings()).map(entry => entry.key)].filter((k) => k !== "charFolder");
+  const allKeys = [
+    ...ALL_BUTTON_KEYS,
+    ...ExternalEntries.getExternalEntries(getSettings()).map(
+      (entry) => entry.key,
+    ),
+  ].filter((k) => k !== "charFolder");
   const customSymbols = getSettings().customSymbols || [];
   customSymbols.forEach((_, i) => allKeys.push(`custom_${i}`));
   const available = allKeys.filter((k) => !folderedButtons.has(k));
@@ -25483,7 +25681,9 @@ function updateButtonVisibility() {
     const btnId = getButtonIdFromKey(key);
     if (btnId) $(`#${btnId}`).hide();
   });
-  const allHidden = Object.keys(buttons).every((k) => buttons[k] === false) && !ihScriptButtons.list("toolbar").length;
+  const allHidden =
+    Object.keys(buttons).every((k) => buttons[k] === false) &&
+    !ihScriptButtons.list("toolbar").length;
   if (!settings.enabled || allHidden) {
     $("#input_helper_toolbar").addClass("input-helper-hidden");
   } else {
@@ -25495,10 +25695,15 @@ function updateButtonVisibility() {
 // Script-owned entries deliberately bypass QuickBar settings and scanning.
 let ihScriptRefreshPending = false;
 const ihScriptButtons = createScriptButtonRegistry({
-  isAvailable: entry => !!getSettings()?.enabled && !!document.getElementById("input_helper_toolbar")
-    && (entry.placement !== "floating" || !!getSettings().floatingPanel?.enabled),
+  isAvailable: (entry) =>
+    !!getSettings()?.enabled &&
+    !!document.getElementById("input_helper_toolbar") &&
+    (entry.placement !== "floating" || !!getSettings().floatingPanel?.enabled),
   onChange: ihScheduleScriptButtonRefresh,
-  onError: error => { console.warn("QuickBar script button failed", error); toastr.warning("脚本入口调用失败，请从原入口重试。"); },
+  onError: (error) => {
+    console.warn("QuickBar script button failed", error);
+    toastr.warning("脚本入口调用失败，请从原入口重试。");
+  },
 });
 function ihScheduleScriptButtonRefresh() {
   if (ihScriptRefreshPending) return;
@@ -25508,9 +25713,12 @@ function ihScheduleScriptButtonRefresh() {
     try {
       if (getSettings() && document.getElementById("input_helper_toolbar")) {
         buildToolbar();
-        if (getSettings().enabled && getSettings().floatingPanel?.enabled) floatingPanelController.refreshPanelOnly();
+        if (getSettings().enabled && getSettings().floatingPanel?.enabled)
+          floatingPanelController.refreshPanelOnly();
       }
-    } catch (error) { console.warn("QuickBar script entry refresh failed", error); }
+    } catch (error) {
+      console.warn("QuickBar script entry refresh failed", error);
+    }
     window.dispatchEvent(new Event("quickbar:changed"));
   });
 }
@@ -25519,8 +25727,12 @@ function ihSyncScriptToolbarButtons(toolbar) {
   // entries as well, so disabling or moving an entry cannot leave a duplicate.
   toolbar.find(".ih-script-toolbar-btn").remove();
   for (const entry of ihScriptButtons.list("toolbar")) {
-    const button = $(`<button type="button" id="${getButtonIdFromKey(entry.key)}" class="input-helper-btn ih-script-toolbar-btn" data-button-key="${entry.key}" data-norefocus="true" data-quickbar-external="true"></button>`);
-    button.attr({ title: entry.label, "aria-label": entry.label }).html(getButtonDisplayHtml(entry.key));
+    const button = $(
+      `<button type="button" id="${getButtonIdFromKey(entry.key)}" class="input-helper-btn ih-script-toolbar-btn" data-button-key="${entry.key}" data-norefocus="true" data-quickbar-external="true"></button>`,
+    );
+    button
+      .attr({ title: entry.label, "aria-label": entry.label })
+      .html(getButtonDisplayHtml(entry.key));
     bindButtonAction(button, entry.key);
     toolbar.append(button);
   }
@@ -25540,65 +25752,137 @@ function ihPublishScriptButtonApi() {
 function ihIsShortcutControlAvailable(node) {
   if (!node?.isConnected) return false;
   for (let parent = node; parent; parent = parent.parentElement) {
-    if (parent.hidden || parent.inert || parent.disabled || parent.getAttribute("aria-disabled") === "true") return false;
+    if (
+      parent.hidden ||
+      parent.inert ||
+      parent.disabled ||
+      parent.getAttribute("aria-disabled") === "true"
+    )
+      return false;
     const css = window.getComputedStyle(parent);
-    if (css.display === "none" || css.visibility === "hidden" || css.visibility === "collapse" || css.opacity === "0") return false;
+    if (
+      css.display === "none" ||
+      css.visibility === "hidden" ||
+      css.visibility === "collapse" ||
+      css.opacity === "0"
+    )
+      return false;
   }
   const rect = node.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0 && window.getComputedStyle(node).pointerEvents !== "none";
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    window.getComputedStyle(node).pointerEvents !== "none"
+  );
 }
 function ihIsFloatingShortcutReachable(key) {
-  const settings = getSettings(), fp = settings.floatingPanel;
-  if (!settings.enabled || !fp?.enabled || settings.buttons?.[key] === false || !(fp.buttons || []).includes(key)) return false;
-  const node = [...document.querySelectorAll(".ih-floating-panel [data-button-key]")].find(node => node.dataset.buttonKey === key);
-  if (!node || node.disabled || node.hidden || node.getAttribute("aria-disabled") === "true") return false;
+  const settings = getSettings(),
+    fp = settings.floatingPanel;
+  if (
+    !settings.enabled ||
+    !fp?.enabled ||
+    settings.buttons?.[key] === false ||
+    !(fp.buttons || []).includes(key)
+  )
+    return false;
+  const node = [
+    ...document.querySelectorAll(".ih-floating-panel [data-button-key]"),
+  ].find((node) => node.dataset.buttonKey === key);
+  if (
+    !node ||
+    node.disabled ||
+    node.hidden ||
+    node.getAttribute("aria-disabled") === "true"
+  )
+    return false;
   if (ihIsShortcutControlAvailable(node)) return true;
   // The ball is the reachable opener of an intentionally collapsed panel.
-  const css = window.getComputedStyle(node), panel = node.closest(".ih-floating-panel");
+  const css = window.getComputedStyle(node),
+    panel = node.closest(".ih-floating-panel");
   const panelCss = panel && window.getComputedStyle(panel);
-  return fp.displayMode === "ball" && floatingPanelController._expanded !== true && !!panel
-    && !panel.hidden && !panel.inert && panel.getAttribute("aria-disabled") !== "true"
-    && panelCss.display === "none" && css.display !== "none"
+  return (
+    fp.displayMode === "ball" &&
+    floatingPanelController._expanded !== true &&
+    !!panel &&
+    !panel.hidden &&
+    !panel.inert &&
+    panel.getAttribute("aria-disabled") !== "true" &&
+    panelCss.display === "none" &&
+    css.display !== "none" &&
     // visibility is inherited from the intentionally collapsed native panel.
-    && (css.visibility !== "hidden" || panelCss.visibility === "hidden")
-    && [...document.querySelectorAll(".ih-floating-ball")].some(ihIsShortcutControlAvailable);
+    (css.visibility !== "hidden" || panelCss.visibility === "hidden") &&
+    [...document.querySelectorAll(".ih-floating-ball")].some(
+      ihIsShortcutControlAvailable,
+    )
+  );
 }
 function ihIsShortcutKeyReachable(key) {
   const id = getButtonIdFromKey(key);
-  return !!(id && ihIsShortcutControlAvailable(document.getElementById(id))) || ihIsFloatingShortcutReachable(key);
+  return (
+    !!(id && ihIsShortcutControlAvailable(document.getElementById(id))) ||
+    ihIsFloatingShortcutReachable(key)
+  );
 }
 function ihGetReachableExternalEntryKeys() {
-  const settings = getSettings(), reachable = new Set();
+  const settings = getSettings(),
+    reachable = new Set();
   if (!settings?.enabled) return reachable;
   const floating = floatingPanelController.getFloatingButtons();
   const charVisible = new Set(ihGetCharVisibleButtons());
   for (const entry of ExternalEntries.getExternalEntries(settings)) {
     if (settings.buttons?.[entry.key] === false) continue;
-    if (ihIsShortcutKeyReachable(entry.key)) { reachable.add(entry.key); continue; }
-    if (!floating.has(entry.key) && (settings.folders || []).some((folder, index) =>
-      (folder.buttons || []).includes(entry.key) && settings.buttons?.[`folder_${index}`] !== false && ihIsShortcutKeyReachable(`folder_${index}`))) {
-      reachable.add(entry.key); continue;
+    if (ihIsShortcutKeyReachable(entry.key)) {
+      reachable.add(entry.key);
+      continue;
     }
-    if (charVisible.has(entry.key) && settings.buttons?.charFolder !== false && ihIsShortcutKeyReachable("charFolder")) reachable.add(entry.key);
+    if (
+      !floating.has(entry.key) &&
+      (settings.folders || []).some(
+        (folder, index) =>
+          (folder.buttons || []).includes(entry.key) &&
+          settings.buttons?.[`folder_${index}`] !== false &&
+          ihIsShortcutKeyReachable(`folder_${index}`),
+      )
+    ) {
+      reachable.add(entry.key);
+      continue;
+    }
+    if (
+      charVisible.has(entry.key) &&
+      settings.buttons?.charFolder !== false &&
+      ihIsShortcutKeyReachable("charFolder")
+    )
+      reachable.add(entry.key);
   }
   return reachable;
 }
 const ihSourceVisibility = createSourceVisibilityController({
-  doc: document, getSettings, getReachableKeys: ihGetReachableExternalEntryKeys,
+  doc: document,
+  getSettings,
+  getReachableKeys: ihGetReachableExternalEntryKeys,
   onChange: () => window.dispatchEvent(new Event("quickbar:changed")),
-  onError: error => console.warn("QuickBar source visibility failed; original entries restored", error),
+  onError: (error) =>
+    console.warn(
+      "QuickBar source visibility failed; original entries restored",
+      error,
+    ),
 });
 
 // External entry categories are management sections, not toolbar folders.
 function ihPreserveExternalEntryOrder(rootOrder) {
   const saved = getSettings().buttonOrder || [];
-  const externalKeys = saved.filter(key => ExternalEntries.findExternalEntry(getSettings(), key));
-  return [...rootOrder, ...externalKeys.filter(key => !rootOrder.includes(key))];
+  const externalKeys = saved.filter((key) =>
+    ExternalEntries.findExternalEntry(getSettings(), key),
+  );
+  return [
+    ...rootOrder,
+    ...externalKeys.filter((key) => !rootOrder.includes(key)),
+  ];
 }
 
 function ihSyncExternalToolbarButtons(toolbar) {
   const entries = ExternalEntries.getExternalEntries(getSettings());
-  const keys = new Set(entries.map(entry => entry.key));
+  const keys = new Set(entries.map((entry) => entry.key));
   toolbar.find(".ih-external-toolbar-btn").each(function () {
     if (!keys.has(this.dataset.buttonKey)) $(this).remove();
   });
@@ -25606,7 +25890,9 @@ function ihSyncExternalToolbarButtons(toolbar) {
     const id = getButtonIdFromKey(entry.key);
     let button = toolbar.find(`#${id}`);
     if (!button.length) {
-      button = $(`<button type="button" id="${id}" class="input-helper-btn ih-external-toolbar-btn" data-button-key="${entry.key}" data-norefocus="true" data-quickbar-external="true"></button>`);
+      button = $(
+        `<button type="button" id="${id}" class="input-helper-btn ih-external-toolbar-btn" data-button-key="${entry.key}" data-norefocus="true" data-quickbar-external="true"></button>`,
+      );
       toolbar.append(button);
       bindButtonAction(button, entry.key);
     }
@@ -25616,33 +25902,51 @@ function ihSyncExternalToolbarButtons(toolbar) {
 
 const ihExternalEntryActivations = new Set();
 async function ihActivateExternalEntry(key) {
-  if (!getSettings().enabled || getSettings().buttons?.[key] === false || ihExternalEntryActivations.has(key)) return;
+  if (
+    !getSettings().enabled ||
+    getSettings().buttons?.[key] === false ||
+    ihExternalEntryActivations.has(key)
+  )
+    return;
   const entry = ExternalEntries.findExternalEntry(getSettings(), key);
   if (!entry) return;
   ihExternalEntryActivations.add(key);
   try {
-    const success = await ExternalEntries.activateExternalEntry(document, entry, {
-      openPanelHost: async () => {
-        const block = document.getElementById("rm_extensions_block");
-        const toggle = document.querySelector("#extensions-settings-button > .drawer-toggle");
-        if (!block || !toggle) return false;
-        if (!block.classList.contains("openDrawer")) {
-          if (typeof SillyTavernScript.doNavbarIconClick === "function") {
-            await SillyTavernScript.doNavbarIconClick.call(toggle);
-          } else {
-            toggle.click();
-            await new Promise(resolve => setTimeout(resolve, 250));
+    const success = await ExternalEntries.activateExternalEntry(
+      document,
+      entry,
+      {
+        openPanelHost: async () => {
+          const block = document.getElementById("rm_extensions_block");
+          const toggle = document.querySelector(
+            "#extensions-settings-button > .drawer-toggle",
+          );
+          if (!block || !toggle) return false;
+          if (!block.classList.contains("openDrawer")) {
+            if (typeof SillyTavernScript.doNavbarIconClick === "function") {
+              await SillyTavernScript.doNavbarIconClick.call(toggle);
+            } else {
+              toggle.click();
+              await new Promise((resolve) => setTimeout(resolve, 250));
+            }
           }
-        }
-        return block.classList.contains("openDrawer");
+          return block.classList.contains("openDrawer");
+        },
+        afterLayout: () => new Promise((resolve) => setTimeout(resolve, 250)),
+        onPanelOpened: (entry) => ihSourceVisibility.revealPanel(entry),
       },
-      afterLayout: () => new Promise(resolve => setTimeout(resolve, 250)),
-      onPanelOpened: entry => ihSourceVisibility.revealPanel(entry),
-    });
-    if (!success) toastr.warning(`「${entry.label}」入口暂不可用，请确认原插件或脚本已加载。已保留快捷入口配置。`, "", { timeOut: 3000 });
+    );
+    if (!success)
+      toastr.warning(
+        `「${entry.label}」入口暂不可用，请确认原插件或脚本已加载。已保留快捷入口配置。`,
+        "",
+        { timeOut: 3000 },
+      );
   } catch (error) {
     console.warn("快捷工具栏: 外部入口调用失败", error);
-    toastr.warning("外部入口调用失败，请尝试从原位置打开。", "", { timeOut: 2500 });
+    toastr.warning("外部入口调用失败，请尝试从原位置打开。", "", {
+      timeOut: 2500,
+    });
   } finally {
     ihExternalEntryActivations.delete(key);
   }
@@ -25651,12 +25955,21 @@ async function ihActivateExternalEntry(key) {
 function ihSyncOriginalEntryVisibilityControl() {
   const toggle = $("#ih_hide_original_entries");
   if (!toggle.length) return;
-  const summary = ExternalEntries.getOriginalEntryVisibilitySummary(getSettings());
-  toggle.prop("checked", summary.checked).prop("indeterminate", summary.indeterminate)
-    .attr("aria-checked", summary.indeterminate ? "mixed" : String(summary.checked));
+  const summary =
+    ExternalEntries.getOriginalEntryVisibilitySummary(getSettings());
+  toggle
+    .prop("checked", summary.checked)
+    .prop("indeterminate", summary.indeterminate)
+    .attr(
+      "aria-checked",
+      summary.indeterminate ? "mixed" : String(summary.checked),
+    );
 }
 function ihOnOriginalEntryVisibilityChange() {
-  ExternalEntries.setAllOriginalEntryVisibility(getSettings(), $(this).prop("checked"));
+  ExternalEntries.setAllOriginalEntryVisibility(
+    getSettings(),
+    $(this).prop("checked"),
+  );
   ihRefreshExternalEntryUi();
 }
 
@@ -25667,7 +25980,8 @@ function ihRefreshExternalEntryUi() {
   renderFolderSettings();
   renderFloatingPanelSettings();
   buildToolbar();
-  if (getSettings().floatingPanel.enabled) floatingPanelController.refreshPanelOnly();
+  if (getSettings().floatingPanel.enabled)
+    floatingPanelController.refreshPanelOnly();
   ihSourceVisibility.sync();
 }
 
@@ -25681,27 +25995,33 @@ function ihRenderHiddenOnlyEntrySection(container, source) {
       <button type="button" class="ih-folder-chevron ih-char-mini-btn ih-external-restore-all" title="恢复此分类的全部仅隐藏入口，不影响快捷入口" aria-label="恢复全部仅隐藏的${def.label}">全部恢复</button>
     </div>
   </div>`);
-  const focusRestoreControl = index => {
+  const focusRestoreControl = (index) => {
     const section = $(`.ih-external-section[data-external-source="${source}"]`);
     const controls = section.find(".ih-external-restore-btn");
-    (controls.length ? controls.eq(Math.min(index, controls.length - 1)) : section.find(".ih-external-scan-btn")).trigger("focus");
+    (controls.length
+      ? controls.eq(Math.min(index, controls.length - 1))
+      : section.find(".ih-external-scan-btn")
+    ).trigger("focus");
   };
-  group.find(".ih-external-restore-all").on("click", e => {
+  group.find(".ih-external-restore-all").on("click", (e) => {
     e.stopPropagation();
     if (!ExternalEntries.clearHiddenOnlyEntries(getSettings(), source)) return;
     ihRefreshExternalEntryUi();
     focusRestoreControl(0);
   });
   entries.forEach((entry, index) => {
-    const icon = ExternalEntries.normalizeEntryIcon(entry.defaultIcon) || def.icon;
-    const row = $(`<div class="integrated-button-row ih-external-hidden-row" data-hidden-only-key="${ihEscapeAttr(entry.key)}">
+    const icon =
+      ExternalEntries.normalizeEntryIcon(entry.defaultIcon) || def.icon;
+    const row =
+      $(`<div class="integrated-button-row ih-external-hidden-row" data-hidden-only-key="${ihEscapeAttr(entry.key)}">
       <span class="ih-external-hidden-icon" aria-hidden="true"><i class="${ihEscapeAttr(icon)}"></i></span>
       <span class="ih-external-hidden-label" title="${ihEscapeAttr(entry.label)}">${ihEscapeHtml(entry.label)}</span>
       <button type="button" class="ih-folder-chevron ih-char-mini-btn ih-external-restore-btn" title="恢复显示" aria-label="${ihEscapeAttr(`恢复显示「${entry.label}」`)}"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
     </div>`);
-    row.find(".ih-external-restore-btn").on("click", e => {
+    row.find(".ih-external-restore-btn").on("click", (e) => {
       e.stopPropagation();
-      if (!ExternalEntries.removeHiddenOnlyEntry(getSettings(), entry.key)) return;
+      if (!ExternalEntries.removeHiddenOnlyEntry(getSettings(), entry.key))
+        return;
       ihRefreshExternalEntryUi();
       focusRestoreControl(index);
     });
@@ -25714,13 +26034,18 @@ function ihRenderExternalEntrySections(container) {
   const settings = getSettings();
   const state = ExternalEntries.getExternalEntrySettings(settings);
   const reserved = ihGetReservedButtons();
-  for (const [source, def] of Object.entries(ExternalEntries.EXTERNAL_ENTRY_SOURCES)) {
+  for (const [source, def] of Object.entries(
+    ExternalEntries.EXTERNAL_ENTRY_SOURCES,
+  )) {
     const entries = ExternalEntries.getExternalEntries(settings, source);
     const hiddenOnly = ExternalEntries.getHiddenOnlyEntries(settings, source);
     const order = settings.buttonOrder || [];
-    const visible = entries.filter(entry => !reserved.has(entry.key)).sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+    const visible = entries
+      .filter((entry) => !reserved.has(entry.key))
+      .sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
     const collapsed = state.collapsed[source] === true;
-    const section = $(`<div class="ih-external-section" data-external-source="${source}">
+    const section =
+      $(`<div class="ih-external-section" data-external-source="${source}">
       <div class="integrated-button-row ih-folder-row ih-external-header">
         <div class="button-preview"><i class="${def.icon}"></i></div>
         <span class="ih-folder-label-text ih-external-label" role="button" tabindex="0" aria-expanded="${!collapsed}">${def.label}<span class="ih-char-badge" title="${entries.length} 个快捷入口，${hiddenOnly.length} 个仅隐藏入口">${entries.length + hiddenOnly.length}</span></span>
@@ -25731,31 +26056,56 @@ function ihRenderExternalEntrySections(container) {
     const children = section.find(".ih-external-children");
     const toggle = () => {
       const next = children.hasClass("ih-collapsed") === false;
-      ExternalEntries.getExternalEntrySettings(getSettings()).collapsed[source] = next;
+      ExternalEntries.getExternalEntrySettings(getSettings()).collapsed[
+        source
+      ] = next;
       children.toggleClass("ih-collapsed", next).prop("inert", next);
       section.find("[aria-expanded]").attr("aria-expanded", String(!next));
       saveSettingsDebounced();
     };
-    section.find(".ih-external-label, .ih-external-chevron").on("click", toggle);
-    section.find(".ih-external-label").on("keydown", e => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+    section
+      .find(".ih-external-label, .ih-external-chevron")
+      .on("click", toggle);
+    section.find(".ih-external-label").on("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
     });
-    visible.forEach(entry => children.append(makeSettingsRow(entry.key, {})));
-    if (!entries.length && !hiddenOnly.length) children.append('<div class="ih-char-empty"><i class="fa-solid fa-circle-info"></i><span>扫描后勾选入口，可加入快捷工具栏或仅隐藏原入口。</span></div>');
-    else if (visible.length < entries.length) children.append(`<div class="ih-char-empty"><i class="fa-solid fa-circle-info"></i><span>${entries.length - visible.length} 个入口已放入文件夹或角色专属区域，可在对应区域管理。</span></div>`);
+    visible.forEach((entry) => children.append(makeSettingsRow(entry.key, {})));
+    if (!entries.length && !hiddenOnly.length)
+      children.append(
+        '<div class="ih-char-empty"><i class="fa-solid fa-circle-info"></i><span>扫描后勾选入口，可加入快捷工具栏或仅隐藏原入口。</span></div>',
+      );
+    else if (visible.length < entries.length)
+      children.append(
+        `<div class="ih-char-empty"><i class="fa-solid fa-circle-info"></i><span>${entries.length - visible.length} 个入口已放入文件夹或角色专属区域，可在对应区域管理。</span></div>`,
+      );
     ihRenderHiddenOnlyEntrySection(children, source);
-    const add = $('<button type="button" class="menu_button menu_button_icon ih-folder-inline-add ih-external-scan-btn"><i class="fa-solid fa-magnifying-glass"></i><span>扫描入口</span></button>');
+    const add = $(
+      '<button type="button" class="menu_button menu_button_icon ih-folder-inline-add ih-external-scan-btn"><i class="fa-solid fa-magnifying-glass"></i><span>扫描入口</span></button>',
+    );
     add.on("click", () => ihShowExternalEntryPicker(source));
     children.append(add);
     container.append(section);
     if (children.sortable && visible.length > 1) {
       children.sortable({
-        handle: ".drag-handle", axis: "y", delay: 150, items: "> .integrated-button-row",
+        handle: ".drag-handle",
+        axis: "y",
+        delay: 150,
+        items: "> .integrated-button-row",
         stop: function () {
-          const sorted = $(this).children(".integrated-button-row").map(function () { return this.dataset.buttonKey; }).get();
+          const sorted = $(this)
+            .children(".integrated-button-row")
+            .map(function () {
+              return this.dataset.buttonKey;
+            })
+            .get();
           const moving = new Set(sorted);
           let index = 0;
-          getSettings().buttonOrder = (getSettings().buttonOrder || []).map(key => moving.has(key) ? sorted[index++] : key);
+          getSettings().buttonOrder = (getSettings().buttonOrder || []).map(
+            (key) => (moving.has(key) ? sorted[index++] : key),
+          );
           saveSettingsDebounced();
           buildToolbar();
         },
@@ -25780,48 +26130,77 @@ function ihShowExternalEntryPicker(source) {
   </div>`);
   const list = content.find(".ih-picker-list");
   const selected = new Set();
-  const selectedCandidates = () => [...selected].map(index => candidates[index])
-    .filter(candidate => !ExternalEntries.isEntryAlreadyAdded(getSettings(), candidate));
+  const selectedCandidates = () =>
+    [...selected]
+      .map((index) => candidates[index])
+      .filter(
+        (candidate) =>
+          !ExternalEntries.isEntryAlreadyAdded(getSettings(), candidate),
+      );
   const updateSelection = () => {
     const count = selectedCandidates().length;
-    const canHide = selectedCandidates().some(candidate => !ExternalEntries.isEntryHiddenOnly(getSettings(), candidate));
-    content.find(".ih-picker-confirm-btn").prop("disabled", count === 0).find("span").text(count ? `加入所选（${count}）` : "加入所选");
+    const canHide = selectedCandidates().some(
+      (candidate) =>
+        !ExternalEntries.isEntryHiddenOnly(getSettings(), candidate),
+    );
+    content
+      .find(".ih-picker-confirm-btn")
+      .prop("disabled", count === 0)
+      .find("span")
+      .text(count ? `加入所选（${count}）` : "加入所选");
     content.find(".ih-picker-hide-only-btn").prop("disabled", !canHide);
   };
   candidates.forEach((candidate, index) => {
     const added = ExternalEntries.isEntryAlreadyAdded(getSettings(), candidate);
-    const hiddenOnly = !added && ExternalEntries.isEntryHiddenOnly(getSettings(), candidate);
-    const item = $(`<label class="ih-picker-item ih-external-picker-item${added ? " ih-external-added" : ""}">
-      <input type="checkbox" ${added ? 'checked disabled' : ''} />
+    const hiddenOnly =
+      !added && ExternalEntries.isEntryHiddenOnly(getSettings(), candidate);
+    const item =
+      $(`<label class="ih-picker-item ih-external-picker-item${added ? " ih-external-added" : ""}">
+      <input type="checkbox" ${added ? "checked disabled" : ""} />
       <span class="bp-preview"><i class="${ihEscapeAttr(candidate.defaultIcon)}"></i></span>
       <span class="ih-external-candidate-label">${ihEscapeHtml(candidate.label)}</span>
-      ${added ? '<span class="ih-picker-already-added">已添加</span>' : hiddenOnly ? '<span class="ih-picker-already-added ih-external-hidden-state">仅隐藏</span>' : ''}
+      ${added ? '<span class="ih-picker-already-added">已添加</span>' : hiddenOnly ? '<span class="ih-picker-already-added ih-external-hidden-state">仅隐藏</span>' : ""}
     </label>`);
     item.find("input").on("change", function () {
-      if (this.checked) selected.add(index); else selected.delete(index);
+      if (this.checked) selected.add(index);
+      else selected.delete(index);
       item.toggleClass("ih-external-selected", this.checked);
       updateSelection();
     });
     list.append(item);
   });
-  if (!candidates.length) list.append('<div class="ih-char-empty"><i class="fa-solid fa-circle-info"></i><span>未找到可识别的入口。请确认插件或脚本已加载，再重新扫描。名称重复且没有稳定标识的入口不会列出。</span></div>');
+  if (!candidates.length)
+    list.append(
+      '<div class="ih-char-empty"><i class="fa-solid fa-circle-info"></i><span>未找到可识别的入口。请确认插件或脚本已加载，再重新扫描。名称重复且没有稳定标识的入口不会列出。</span></div>',
+    );
   overlay.append(content);
   syncDialogTheme(content[0]);
   generateFaIconProtectionCSS();
   const close = () => {
     if (overlay[0]?._ihCloseOverlay) overlay[0]._ihCloseOverlay();
-    else { document.removeEventListener("keydown", escHandler, true); overlay.remove(); }
+    else {
+      document.removeEventListener("keydown", escHandler, true);
+      overlay.remove();
+    }
   };
-  content.on("click", e => e.stopPropagation());
+  content.on("click", (e) => e.stopPropagation());
   content.find(".ih-picker-close-btn").on("click", close);
-  overlay.off("click").on("click", e => { if (e.target === overlay[0]) close(); });
+  overlay.off("click").on("click", (e) => {
+    if (e.target === overlay[0]) close();
+  });
   content.find(".ih-picker-hide-only-btn").on("click", () => {
-    const hidden = ExternalEntries.addHiddenOnlyEntries(getSettings(), selectedCandidates());
+    const hidden = ExternalEntries.addHiddenOnlyEntries(
+      getSettings(),
+      selectedCandidates(),
+    );
     close();
     if (hidden.length) ihRefreshExternalEntryUi();
   });
   content.find(".ih-picker-confirm-btn").on("click", () => {
-    const added = ExternalEntries.addExternalEntries(getSettings(), selectedCandidates());
+    const added = ExternalEntries.addExternalEntries(
+      getSettings(),
+      selectedCandidates(),
+    );
     close();
     if (added.length) ihRefreshExternalEntryUi();
   });
@@ -25981,7 +26360,12 @@ function showCharButtonPicker() {
   const folderedButtons = getFolderedButtons();
   const charBound = ihGetAllCharBoundSet();
   const fpButtons = floatingPanelController.getFloatingButtons();
-  const allKeys = [...ALL_BUTTON_KEYS, ...ExternalEntries.getExternalEntries(getSettings()).map(entry => entry.key)].filter((k) => k !== "charFolder");
+  const allKeys = [
+    ...ALL_BUTTON_KEYS,
+    ...ExternalEntries.getExternalEntries(getSettings()).map(
+      (entry) => entry.key,
+    ),
+  ].filter((k) => k !== "charFolder");
   const customSymbols = getSettings().customSymbols || [];
   customSymbols.forEach((_, i) => allKeys.push(`custom_${i}`));
   const available = allKeys.filter(
@@ -26375,7 +26759,10 @@ async function closeFloatingEditorsBeforeDisable(control) {
 
 async function onEnableInputChange() {
   const value = $("#enable_input_helper").prop("checked");
-  if (!value && !await closeFloatingEditorsBeforeDisable($("#enable_input_helper"))) {
+  if (
+    !value &&
+    !(await closeFloatingEditorsBeforeDisable($("#enable_input_helper")))
+  ) {
     $("#enable_input_helper").prop("checked", true);
     return;
   }
@@ -26383,6 +26770,7 @@ async function onEnableInputChange() {
   if (!value) ihChatTopNavigator.clear();
   ihScheduleScriptButtonRefresh();
   floatingEditorController.refresh();
+  presetEntryNavigator.refresh();
   saveSettingsDebounced();
   ihApplyUnlockSwipes();
   if (value) {
@@ -27719,17 +28107,23 @@ jQuery(async () => {
   sendStopController._update();
 
   $("#enable_input_helper").on("change", onEnableInputChange);
-  $(document).off("change.ih-original-entry-visibility", "#ih_hide_original_entries")
-    .on("change.ih-original-entry-visibility", "#ih_hide_original_entries", ihOnOriginalEntryVisibilityChange);
+  $(document)
+    .off("change.ih-original-entry-visibility", "#ih_hide_original_entries")
+    .on(
+      "change.ih-original-entry-visibility",
+      "#ih_hide_original_entries",
+      ihOnOriginalEntryVisibilityChange,
+    );
   $("#enable_floating_editor").on("change", async function () {
     const enabled = $(this).prop("checked");
-    if (!enabled && !await closeFloatingEditorsBeforeDisable($(this))) {
+    if (!enabled && !(await closeFloatingEditorsBeforeDisable($(this)))) {
       $(this).prop("checked", true);
       return;
     }
     getSettings().floatingEditorEnabled = enabled;
     saveSettingsDebounced();
     floatingEditorController.refresh();
+    presetEntryNavigator.refresh();
   });
   $("#enable_confirm_dangerous").on("change", function () {
     getSettings().confirmDangerousActions = $(this).prop("checked");
@@ -28024,19 +28418,30 @@ jQuery(async () => {
     }
     floatingEditorController.start();
     nativePromptTokenCounter.start();
+    presetEntryNavigator.start();
     const refreshEditorTokenCounts = () => {
       editorTokenContextEpoch++;
       nativePromptTokenCounter.refresh({ force: true });
       floatingEditorController.refreshTokenCounts({ force: true });
     };
-    for (const name of ["MAIN_API_CHANGED", "CHATCOMPLETION_MODEL_CHANGED", "CONNECTION_PROFILE_LOADED"]) {
-      if (event_types[name]) eventSource.on(event_types[name], refreshEditorTokenCounts);
+    for (const name of [
+      "MAIN_API_CHANGED",
+      "CHATCOMPLETION_MODEL_CHANGED",
+      "CONNECTION_PROFILE_LOADED",
+    ]) {
+      if (event_types[name])
+        eventSource.on(event_types[name], refreshEditorTokenCounts);
     }
-    $(document).on("change.ihEditorTokenCounter", "#tokenizer", refreshEditorTokenCounts);
+    $(document).on(
+      "change.ihEditorTokenCounter",
+      "#tokenizer",
+      refreshEditorTokenCounts,
+    );
     window.addEventListener("online", refreshEditorTokenCounts);
     const refreshFloatingEditor = () => {
       floatingEditorController.refresh();
       nativePromptTokenCounter.refresh();
+      presetEntryNavigator.refresh();
     };
     const switchEditorContext = () => {
       floatingEditorEpoch++;
@@ -28058,7 +28463,8 @@ jQuery(async () => {
     for (const name of ["PRESET_CHANGED", "OAI_PRESET_CHANGED_BEFORE"]) {
       if (event_types[name])
         eventSource.on(event_types[name], () => {
-          if (name === "OAI_PRESET_CHANGED_BEFORE") floatingPresetSwitch.begin();
+          if (name === "OAI_PRESET_CHANGED_BEFORE")
+            floatingPresetSwitch.begin();
           floatingPresetEpoch++;
           refreshFloatingEditor();
         });

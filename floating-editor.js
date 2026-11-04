@@ -805,6 +805,23 @@ export function bindFloatingEditorInteractionBoundary(element) {
     };
 }
 
+export function styleFloatingEditorLauncher(maximize, button, {
+    className = "ih-floating-editor-launch", icon = "fa-up-right-from-square",
+} = {}) {
+    const external = maximize.hasAttribute(EXTENSION_EDITOR_TARGET);
+    const classes = external
+        ? ["right_menu_button", "menu_button"].filter(name => maximize.classList.contains(name))
+        : [...maximize.classList].filter(name =>
+            name !== "editor_maximize" && !name.startsWith("fa-") && name !== "fa" &&
+            name !== "fas" && name !== "far" && !name.startsWith("ih-floating-editor"));
+    if (external) classes.push("ih-floating-editor-launch--external");
+    for (const name of ["fa-fw", "fa-lg", "fa-sm", "fa-xs", "fa-2xs", "fa-xl", "fa-2xl"]) {
+        if (maximize.classList.contains(name)) classes.push(name);
+    }
+    const nextClassName = [className, "fa-solid", icon, ...classes].join(" ");
+    if (button.className !== nextClassName) button.className = nextClassName;
+}
+
 const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
 const text = value => String(value ?? '');
 const escapeHtml = value => text(value)
@@ -3207,21 +3224,6 @@ export function createFloatingEditorController({
     }
   }
 
-  function styleLauncher(maximize, button) {
-    const external = maximize.hasAttribute(EXTENSION_EDITOR_TARGET);
-    const classes = external
-      ? ["right_menu_button", "menu_button"].filter(name => maximize.classList.contains(name))
-      : [...maximize.classList].filter(name =>
-          name !== "editor_maximize" && !name.startsWith("fa-") && name !== "fa" &&
-          name !== "fas" && name !== "far" && !name.startsWith("ih-floating-editor"));
-    if (external) classes.push("ih-floating-editor-launch--external");
-    for (const name of ["fa-fw", "fa-lg", "fa-sm", "fa-xs", "fa-2xs", "fa-xl", "fa-2xl"]) {
-      if (maximize.classList.contains(name)) classes.push(name);
-    }
-    const className = ["ih-floating-editor-launch", "fa-solid", "fa-up-right-from-square", ...classes].join(" ");
-    if (button.className !== className) button.className = className;
-  }
-
   function ensureLauncher(maximize) {
     if (!maximize.isConnected || !maximize.matches(MAXIMIZE)) return;
     maximizers.add(maximize);
@@ -3250,7 +3252,7 @@ export function createFloatingEditorController({
       buttons.set(maximize, button);
       ownedButtons.add(button);
     }
-    styleLauncher(maximize, button);
+    styleFloatingEditorLauncher(maximize, button);
     if (maximize.hasAttribute(EXTENSION_EDITOR_TARGET)) {
       const oldPair = maximize.parentElement;
       if (ownedPairs.has(oldPair) && oldPair.matches(PAIR)) oldPair.replaceWith(maximize);

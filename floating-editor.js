@@ -111,10 +111,12 @@ const CM_HOST_CLASSES = [
   "cm-editor",
   "codemirror-host",
   "bai-bai-toolkit-description-codemirror-editor",
+  "bai-bai-toolkit-preset-prompt-codemirror-editor",
   "bai-bai-toolkit-custom-css-codemirror-editor",
 ];
 const CM_SOURCE_CLASSES = [
   "bai-bai-toolkit-description-source-hidden",
+  "bai-bai-toolkit-preset-prompt-source-hidden",
   "bai-bai-toolkit-custom-css-source-hidden",
 ];
 

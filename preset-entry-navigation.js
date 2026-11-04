@@ -101,12 +101,21 @@ export function createPresetEntryNavigator({
 
     function neighbors(c) {
         if (!c?.prompt) return [null, null];
-        const list = c.manager.listElement;
-        let ids = list?.isConnected
-            ? [...list.children].map(row => row.dataset.pmIdentifier).filter(Boolean) : [];
-        if (!ids.length && c.manager.activeCharacter &&
-            typeof c.manager.getPromptOrderForCharacter === 'function') {
-            ids = c.manager.getPromptOrderForCharacter(c.manager.activeCharacter).map(item => item.identifier);
+        // Use the actual native prompt order, not only the rendered top-level rows.
+        // Grouped/filtered lists can omit rows, and favorites are duplicate mirrors.
+        let ids = [];
+        if (c.manager.activeCharacter && typeof c.manager.getPromptOrderForCharacter === 'function') {
+            const order = c.manager.getPromptOrderForCharacter(c.manager.activeCharacter);
+            if (Array.isArray(order)) ids = order.map(item => item?.identifier).filter(Boolean);
+        }
+        if (!ids.length) {
+            const list = c.manager.listElement;
+            if (list?.isConnected) {
+                ids = [...list.querySelectorAll('[data-pm-identifier]')]
+                    .filter(row => row.dataset.presetFavoriteMirror !== 'true' &&
+                        !row.classList.contains('bai-bai-preset-favorite-prompt'))
+                    .map(row => row.dataset.pmIdentifier).filter(Boolean);
+            }
         }
         const seen = new Set();
         const ordered = ids.flatMap(identifier => {

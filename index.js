@@ -485,7 +485,8 @@ let _lastEditTarget = null;
 function isToolUiElement(el) {
   try {
     return !!$(el).closest(
-      "#input_helper_toolbar, .ih-find-bar, .ih-folder-dropdown-portal, .ih-floating-panel, .shortcut-input",
+      "#input_helper_toolbar, .ih-find-bar, .ih-folder-dropdown-portal, " +
+        ".ih-floating-panel, .ih-color-picker-portal, .ih-clipboard-helper, .shortcut-input",
     ).length;
   } catch (e) {
     return true;
@@ -496,7 +497,8 @@ function getEditTarget(noFallback) {
     if (
       el?.isConnected &&
       el.ownerDocument?.defaultView &&
-      isEditableElement(el)
+      isEditableElement(el) &&
+      !isToolUiElement(el)
     )
       return el;
   return noFallback
@@ -531,7 +533,7 @@ function shouldIgnoreFocusedElement(el) {
       $el.closest(
         ".ih-dialog-overlay, .input-helper-settings, #input_helper_toolbar, " +
           ".ih-find-bar, .ih-folder-dropdown-portal, .ih-floating-panel, " +
-          ".shortcut-input",
+          ".ih-color-picker-portal, .ih-clipboard-helper, .shortcut-input",
       ).length
     )
       return true;
@@ -540,21 +542,9 @@ function shouldIgnoreFocusedElement(el) {
 }
 
 function getInsertionTarget() {
-  if (getFloatingEditorToolTarget(_lastFocusedEditable))
-    return _lastFocusedEditable;
-  const editingTextarea = $("#chat .mes textarea:visible").first();
-  if (editingTextarea.length) return editingTextarea[0];
-
-  if (_lastFocusedEditable) {
-    try {
-      const ownerDoc = _lastFocusedEditable.ownerDocument;
-      if (ownerDoc && ownerDoc.contains(_lastFocusedEditable)) {
-        return _lastFocusedEditable;
-      }
-    } catch (e) {}
-    _lastFocusedEditable = null;
-  }
-  return getMessageInput()[0];
+  // Share the last chosen editor with undo/redo and find. A background message
+  // editor is only a fallback, never a reason to override the focused editor.
+  return getEditTarget();
 }
 
 function getCodeMirrorView(el) {
@@ -2100,7 +2090,7 @@ const findReplaceController = {
     this._floatingTarget = getFloatingEditorToolTarget(el);
     if (this._floatingTarget) {
       if (!this._floatingTarget.isValid()) return null;
-      el = _lastFocusedEditable = this._floatingTarget.target;
+      el = _lastEditTarget = _lastFocusedEditable = this._floatingTarget.target;
     }
     this._cmView = this._floatingTarget ? null : getCodeMirrorView(el);
     if (
@@ -3321,6 +3311,7 @@ function openColorPicker(options = {}) {
     toastr.warning("这个编辑区暂不支持取色", "", { timeOut: 1500 });
     return;
   }
+  _lastEditTarget = target;
   if (target === getMessageInput()[0]) {
     _lastFocusedEditable = null;
   } else {
@@ -5728,9 +5719,9 @@ function insertNewLine() {
   }, 0);
 }
 
-function insertTag(tag) {
+function insertTag(tag, target = null) {
   if (!getSettings().enabled) return;
-  const target = getInsertionTarget();
+  target = target || getInsertionTarget();
   if (!target) return;
   const isExternal = isExternalTarget(target);
 
@@ -5866,13 +5857,45 @@ async function doCopy() {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(selectedText);
     } else {
-      const ta = document.createElement("textarea");
+      const doc = target.ownerDocument || document;
+      const focused = doc.activeElement;
+      const selection = doc.defaultView?.getSelection();
+      const range =
+        target.isContentEditable && selection?.rangeCount
+          ? selection.getRangeAt(0).cloneRange()
+          : null;
+      const ta = doc.createElement("textarea");
+      ta.className = "ih-clipboard-helper";
+      ta.tabIndex = -1;
+      ta.setAttribute("aria-hidden", "true");
       ta.value = selectedText;
       ta.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0;";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
+      doc.body.appendChild(ta);
+      try {
+        ta.select();
+        doc.execCommand("copy");
+      } finally {
+        const restoreFocus = doc.activeElement === ta;
+        ta.remove();
+        if (restoreFocus && focused?.isConnected) {
+          // Returning from the hidden clipboard control is not a new search
+          // target or an unexpected auto-focus of the send box.
+          const previousTarget = findReplaceController._floatingNavigationFocusTarget;
+          const previousGuard = findReplaceController._suspendFocusGuard;
+          findReplaceController._floatingNavigationFocusTarget = focused;
+          findReplaceController._suspendFocusGuard = true;
+          try {
+            focused.focus({ preventScroll: true });
+          } finally {
+            findReplaceController._floatingNavigationFocusTarget = previousTarget;
+            findReplaceController._suspendFocusGuard = previousGuard;
+          }
+          if (range && target.contains(range.commonAncestorContainer)) {
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        }
+      }
     }
     toastr.info("已复制", "", { timeOut: 500 });
   } catch (e) {
@@ -5904,7 +5927,13 @@ async function doPaste() {
     return;
   }
 
-  insertTag(clipText);
+  // Clipboard reads are asynchronous. Never paste into a different editor or
+  // pull focus back after the user has selected another editing target.
+  if (!target.isConnected || getInsertionTarget() !== target) {
+    toastr.info("编辑目标已改变，请重新粘贴", "", { timeOut: 1500 });
+    return;
+  }
+  insertTag(clipText, target);
 }
 
 function getFocusedScrollEditable() {
@@ -8163,7 +8192,7 @@ function openHelpPanel() {
     <li>CodeMirror 代码编辑器</li>
     <li>contentEditable 区域</li>
 </ul>
-<p>聊天楼层处于编辑状态时，符号插入等编辑操作优先作用于该楼层；已聚焦的悬浮正文优先于聊天楼层。查找替换与选中模式以光标最后所在的编辑框为准。悬浮窗的查找目标单独绑定，不随其他输入框的焦点变化。</p>
+<p>符号与文本插入、复制/粘贴、光标移动、选中模式、撤回/重做和查找替换统一以最后聚焦的有效编辑框为准；聊天楼层即使还处于编辑状态，也不会抢走世界书、角色卡、预设或发送框的操作。点击工具栏、查找/替换输入框或取色面板控件不会改变编辑目标；只有没有有效编辑目标时，才依次回退到正在编辑的聊天楼层、发送框。查找导航可聚焦并选中目标正文中的匹配项；悬浮窗的查找目标单独绑定，不随其他输入框的焦点变化。</p>
 <p>光标位于编辑框内时，「跳转 AI 消息顶部」与「跳转聊天底部」分别回到框内开头与末尾，翻页、自动滚动同样作用于光标所在的可滚动容器；「跳转聊天顶部」始终作用于聊天区。</p>
 
 <div class="ih-help-h4"><i class="fa-solid fa-chevron-up"></i> 预设条目切换</div>
@@ -27656,7 +27685,7 @@ function setupGlobalFocusTracking() {
         "focusin",
         function (e) {
           const el = e.target;
-          if (!isEditableElement(el)) return;
+          if (!isEditableElement(el) || isToolUiElement(el)) return;
           _lastFocusedEditable = el;
           _lastFocusedForScroll = el;
           _lastEditTarget = el;
@@ -28633,7 +28662,7 @@ jQuery(async () => {
                   "focusin",
                   function (e) {
                     const el = e.target;
-                    if (!isEditableElement(el)) return;
+                    if (!isEditableElement(el) || isToolUiElement(el)) return;
                     _lastFocusedEditable = el;
                     _lastFocusedForScroll = el;
                     _lastEditTarget = el;

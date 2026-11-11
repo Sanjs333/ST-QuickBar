@@ -1,14 +1,15 @@
-// Shortcuts to same-document entry points. Never move/clone source UI or
-// inspect handlers, navbar drawers, or iframe/sandbox contents.
 export const EXTERNAL_ENTRY_SOURCES = Object.freeze({
   wand: { label: "魔法棒入口", icon: "fa-solid fa-wand-magic-sparkles", roots: ["extensionsMenu"] },
   panel: { label: "扩展面板入口", icon: "fa-solid fa-puzzle-piece", roots: ["extensions_settings", "extensions_settings2"] },
 });
-// Only our stylesheet is temporarily disabled during synchronous source
-// discovery. This ignores QuickBar's masking but respects the source plugin's
-// own hidden/disabled/CSS state, without mutating or moving its original node.
 export const SOURCE_VISIBILITY_STYLE_ID = "st-quickbar-source-visibility";
 export const SOURCE_HIDDEN_ATTRIBUTE = "data-quickbar-source-hidden";
+const RELATED_ATTRIBUTE = "data-quickbar-source-for";
+// ID-weighted masking beats theme !important rules without changing source inline styles.
+const SOURCE_VISIBILITY_CSS = `:is(#${SOURCE_VISIBILITY_STYLE_ID}#${SOURCE_VISIBILITY_STYLE_ID}, [${SOURCE_HIDDEN_ATTRIBUTE}="true"])[${SOURCE_HIDDEN_ATTRIBUTE}="true"] { display: none !important; }`;
+const LAYOUT_ROOTS = "#rm_extensions_block, #input_helper_toolbar, .ih-floating-panel, .ih-floating-ball, #extensionsMenu, #extensions_settings, #extensions_settings2, .ih-folder-dropdown-portal, [data-quickbar-source-for]";
+
+// Disable only our mask during synchronous discovery, preserving source-owned visibility.
 export function withUnmaskedSourceVisibility(doc, read) {
   const sheet = doc.getElementById(SOURCE_VISIBILITY_STYLE_ID)?.sheet;
   if (!sheet) return read();
@@ -87,8 +88,7 @@ export function getExternalEntries(settings, source) {
 
 export function getHiddenOnlyEntries(settings, source) {
   const state = getExternalEntrySettings(settings);
-  // A shortcut always wins on load, even when its eye is OFF or its layout
-  // is unavailable. Stale hidden-only data must never force that source off.
+  // Shortcut preferences take precedence over stale hidden-only rules.
   const shortcuts = new Set(getExternalEntries(settings).map(entryIdentity));
   return uniqueEntries(state.hiddenOnly, source, isHiddenOnlyEntry).filter(entry => !shortcuts.has(entryIdentity(entry)));
 }
@@ -98,7 +98,6 @@ export function isEntryHiddenOnly(settings, candidate) {
     .some(entry => entryIdentity(entry) === entryIdentity(candidate));
 }
 
-// Hidden-only rules have no button, shortcut, folder or floating placement.
 export function addHiddenOnlyEntries(settings, candidates) {
   const state = getExternalEntrySettings(settings), added = [];
   if (!Array.isArray(candidates)) return added;
@@ -133,8 +132,6 @@ export function clearHiddenOnlyEntries(settings, source) {
   return removed;
 }
 
-// The unified switch is a batch operation. Per-entry eyes remain independent;
-// new entries inherit the last unified choice, which defaults to OFF.
 export function getOriginalEntryVisibilityDefault(settings) {
   const state = getExternalEntrySettings(settings);
   if (typeof state.hideOriginalByDefault !== "boolean") state.hideOriginalByDefault = false;
@@ -200,15 +197,13 @@ function iconFor(element, source) {
 }
 
 function isAvailable(element, root) {
-  // Collapsed menus/drawers are normal: ignore the root and its ancestors,
-  // but do not bypass an entry deliberately hidden or disabled inside it.
+  // Ignore collapsed hosts, but respect hidden/disabled nodes inside them.
   for (let node = element; node && node !== root; node = node.parentElement) {
     if (node.hidden || node.getAttribute("aria-disabled") === "true" || node.disabled || node.classList.contains("disabled")) return false;
     const css = node.ownerDocument.defaultView?.getComputedStyle(node);
     if (css?.display === "none") return false;
   }
-  // visibility is inherited, so compare against the hidden host rather than
-  // rejecting every entry in a theme that hides the collapsed menu that way.
+  // Distinguish inherited host visibility from a hidden source entry.
   const win = element.ownerDocument.defaultView;
   if (win?.getComputedStyle(element).visibility === "hidden" && win.getComputedStyle(root).visibility !== "hidden") return false;
   return true;
@@ -315,8 +310,7 @@ export function removeExternalEntry(settings, key) {
   if (!entry) return false;
   const state = getExternalEntrySettings(settings);
   state[entry.source] = state[entry.source].filter(item => item?.key !== key);
-  // Removing a shortcut must not revive a stale hidden-only rule from a
-  // cross-mode duplicate loaded earlier.
+  // Do not revive a stale hidden-only rule when removing its shortcut.
   const identity = entryIdentity(entry);
   state.hiddenOnly[entry.source] = state.hiddenOnly[entry.source]
     .filter(item => !isEntryDescriptor(item, entry.source) || entryIdentity(item) !== identity);
@@ -347,8 +341,7 @@ export async function activateExternalEntry(doc, entry, { openPanelHost, afterLa
   const content = [...target.closest(".inline-drawer").children].find(node => node.matches(".inline-drawer-content"));
   if (!content) return false;
   if (content.hidden || doc.defaultView?.getComputedStyle(content).display === "none") target.click();
-  // Native expansion starts synchronously. Reveal its header now, without
-  // waiting for the positioning delay; re-resolve in case the click rebuilt UI.
+  // Reveal before scrolling; the click may have rebuilt the source UI.
   const openingTarget = resolveExternalEntry(doc, entry);
   const openingContent = openingTarget && [...openingTarget.closest(".inline-drawer").children]
     .find(node => node.matches(".inline-drawer-content"));
@@ -362,4 +355,210 @@ export async function activateExternalEntry(doc, entry, { openPanelHost, afterLa
   onPanelOpened?.(entry);
   target.scrollIntoView?.({ behavior: "smooth", block: "nearest", inline: "nearest" });
   return true;
+}
+
+// Script-owned buttons remain runtime-only and outside saved layouts.
+export function createScriptButtonRegistry({ isAvailable = () => true, onChange = () => {}, onError = () => {} } = {}) {
+  const entries = new Map();
+  const running = new Set();
+  const notify = () => { try { onChange(); } catch (error) { onError(error); } };
+  function isActive(id) {
+    const entry = entries.get(id);
+    if (!entry) return false;
+    try { return !!isAvailable(entry); } catch { return false; }
+  }
+  function registerExternalButton(descriptor) {
+    if (!descriptor || typeof descriptor.id !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/.test(descriptor.id)
+      || typeof descriptor.label !== "string" || !descriptor.label.trim() || typeof descriptor.action !== "function"
+      || (descriptor.placement !== undefined && !["toolbar", "floating"].includes(descriptor.placement))) {
+      throw new TypeError("Invalid QuickBar script button descriptor");
+    }
+    const entry = Object.freeze({
+      id: descriptor.id, key: `script_${descriptor.id}`, label: descriptor.label.trim().slice(0, 160),
+      icon: normalizeEntryIcon(descriptor.icon) || "fa-solid fa-plug",
+      placement: descriptor.placement || "toolbar", action: descriptor.action,
+    });
+    entries.set(entry.id, entry);
+    const handle = Object.freeze({
+      id: entry.id, key: entry.key,
+      isActive: () => entries.get(entry.id) === entry && isActive(entry.id),
+      unregister() {
+        // A stale script's cleanup must not remove its replacement's callback.
+        if (entries.get(entry.id) !== entry) return;
+        entries.delete(entry.id); notify();
+      },
+    });
+    notify();
+    return handle;
+  }
+  function unregisterExternalButton(id) {
+    if (entries.delete(id)) notify();
+  }
+  async function activate(key) {
+    const entry = get(key);
+    if (!entry || !isActive(entry.id) || running.has(key)) return false;
+    running.add(key);
+    try { await entry.action(); return true; }
+    catch (error) { try { onError(error); } catch {} return false; }
+    finally { running.delete(key); }
+  }
+  function get(key) {
+    if (typeof key !== "string" || !key.startsWith("script_")) return null;
+    return entries.get(key.slice(7)) || null;
+  }
+  function list(placement) {
+    return [...entries.values()].filter(entry => (!placement || entry.placement === placement) && isActive(entry.id));
+  }
+  function clear() { entries.clear(); notify(); }
+  return Object.freeze({ registerExternalButton, unregisterExternalButton, get, list, activate, clear });
+}
+
+// Shortcuts require a reachable replacement; hidden-only rules do not.
+export function createSourceVisibilityController({ doc = globalThis.document, getSettings, getReachableKeys, onChange = () => {}, onError = () => {} }) {
+  const win = doc.defaultView;
+  let started = false, destroyed = false, syncing = false, timer = null, observer = null, style = null;
+  let owned = new Set(), openedPanels = new Set();
+  const report = error => { try { onError(error); } catch {} };
+  const notify = () => { try { onChange(); } catch (error) { report(error); } };
+  function restore() {
+    let changed = owned.size > 0;
+    for (const node of owned) {
+      if (node.getAttribute(SOURCE_HIDDEN_ATTRIBUTE) === "true") node.removeAttribute(SOURCE_HIDDEN_ATTRIBUTE);
+    }
+    owned.clear(); openedPanels.clear();
+    return changed;
+  }
+  function ensureStyle() {
+    style = doc.getElementById(SOURCE_VISIBILITY_STYLE_ID);
+    if (style && style.tagName !== "STYLE") { style = null; throw new Error("QuickBar source visibility style ID is occupied"); }
+    if (!style) {
+      style = doc.createElement("style"); style.id = SOURCE_VISIBILITY_STYLE_ID;
+      (doc.head || doc.documentElement).append(style);
+    }
+    if (style.textContent !== SOURCE_VISIBILITY_CSS) style.textContent = SOURCE_VISIBILITY_CSS;
+  }
+  function removeStyle() {
+    const node = style || doc.getElementById(SOURCE_VISIBILITY_STYLE_ID);
+    if (node?.tagName === "STYLE") node.remove();
+    style = null;
+  }
+  function isPanelOpen(header) {
+    const host = header?.closest("#rm_extensions_block");
+    if (!host?.isConnected || !host.classList.contains("openDrawer") || host.hidden
+      || win.getComputedStyle(host).display === "none") return false;
+    const drawer = header.closest(".inline-drawer");
+    const content = [...drawer.children].find(node => node.matches(".inline-drawer-content"));
+    // The chevron closes before the native slide animation finishes.
+    return !!content && !content.hidden && win.getComputedStyle(content).display !== "none"
+      && !header.querySelector(".inline-drawer-icon")?.classList.contains("down");
+  }
+  function revealPanel(entry) {
+    if (!started || destroyed || entry?.source !== "panel") return;
+    openedPanels.add(entry.key);
+    // Apply before activation scrolls to the header, not on the next observer tick.
+    sync();
+  }
+  function sync() {
+    if (!started || destroyed || syncing) return;
+    syncing = true;
+    try {
+      const settings = getSettings();
+      if (!settings?.enabled) {
+        const changed = restore(); removeStyle();
+        if (changed) notify();
+        return;
+      }
+      ensureStyle();
+      const desired = withUnmaskedSourceVisibility(doc, () => {
+        const next = new Set(), ids = new Set(), activePanels = new Set(), revealedHeaders = new Set();
+        const entries = getExternalEntries(settings);
+        for (const entry of entries) {
+          if (entry.source !== "panel" || !openedPanels.has(entry.key) || settings.buttons?.[entry.key] === false) continue;
+          const node = resolveExternalEntry(doc, entry);
+          if (!isPanelOpen(node)) continue;
+          activePanels.add(entry.key); revealedHeaders.add(node);
+        }
+        // Native reopening must not resume an expired QuickBar reveal session.
+        openedPanels = activePanels;
+        const collect = (entry, allowReveal = false) => {
+          const node = resolveExternalEntry(doc, entry);
+          if (!node?.isConnected) return;
+          if (!allowReveal || !revealedHeaders.has(node)) next.add(node);
+          // Revealing a panel header must not reveal its alternate entries.
+          if (node.id) ids.add(node.id);
+        };
+        for (const entry of getHiddenOnlyEntries(settings)) collect(entry);
+        const shortcuts = entries
+          .filter(entry => entry.hideOriginal === true && settings.buttons?.[entry.key] !== false);
+        // Hidden-only use must work without a shortcut layout provider at all.
+        const reachable = new Set(shortcuts.length && typeof getReachableKeys === "function" ? getReachableKeys() || [] : []);
+        for (const entry of shortcuts) if (reachable.has(entry.key)) collect(entry, true);
+        if (ids.size) for (const node of doc.querySelectorAll(`[${RELATED_ATTRIBUTE}]`)) {
+          if (node.isConnected && ids.has(node.getAttribute(RELATED_ATTRIBUTE))) next.add(node);
+        }
+        return next;
+      });
+      let changed = desired.size !== owned.size;
+      for (const node of owned) if (!desired.has(node)) {
+        changed = true;
+        if (node.getAttribute(SOURCE_HIDDEN_ATTRIBUTE) === "true") node.removeAttribute(SOURCE_HIDDEN_ATTRIBUTE);
+      }
+      for (const node of desired) {
+        if (!owned.has(node)) changed = true;
+        // Track before writing so a partially failed sync can restore every mask.
+        owned.add(node);
+        if (node.getAttribute(SOURCE_HIDDEN_ATTRIBUTE) !== "true") {
+          node.setAttribute(SOURCE_HIDDEN_ATTRIBUTE, "true"); changed = true;
+        }
+      }
+      owned = desired;
+      if (changed) notify();
+    } catch (error) {
+      const changed = restore();
+      report(error);
+      if (changed) notify();
+    } finally { syncing = false; }
+  }
+  function schedule() {
+    if (!started || destroyed || timer !== null) return;
+    timer = win.setTimeout(() => { timer = null; sync(); }, 60);
+  }
+  function relevant(node) {
+    if (node?.nodeType === 3) node = node.parentElement;
+    if (!node || node === style) return false;
+    return node === doc.documentElement || node === doc.body || node === doc.head
+      || !!node.closest?.(`${LAYOUT_ROOTS}, head`);
+  }
+  function introduced(node) {
+    return node !== style && (!!node.matches?.(LAYOUT_ROOTS) || !!node.querySelector?.(LAYOUT_ROOTS));
+  }
+  function start() {
+    if (started || destroyed) return;
+    started = true;
+    try {
+      // Recover orphaned masks left by an interrupted previous host instance.
+      for (const node of doc.querySelectorAll(`[${SOURCE_HIDDEN_ATTRIBUTE}="true"]`)) node.removeAttribute(SOURCE_HIDDEN_ATTRIBUTE);
+      if (win.MutationObserver) {
+        observer = new win.MutationObserver(records => {
+          if (records.some(record => relevant(record.target)
+            || (record.type === "childList" && [...record.addedNodes, ...record.removedNodes].some(introduced)))) schedule();
+        });
+        observer.observe(doc.documentElement, { subtree: true, childList: true, characterData: true, attributes: true,
+          attributeFilter: ["id", "aria-label", "title", "tabindex", "style", "class", "hidden", "disabled", "aria-disabled", "data-quickbar-hide-source-default", RELATED_ATTRIBUTE] });
+      }
+      win.addEventListener("resize", schedule); win.addEventListener("pagehide", destroy);
+      sync();
+    } catch (error) { const changed = restore(); report(error); if (changed) notify(); }
+  }
+  function destroy() {
+    if (destroyed) return;
+    destroyed = true; started = false;
+    if (timer !== null) win.clearTimeout(timer);
+    timer = null; observer?.disconnect(); observer = null;
+    win.removeEventListener("resize", schedule); win.removeEventListener("pagehide", destroy);
+    const changed = restore();
+    removeStyle();
+    if (changed) notify();
+  }
+  return Object.freeze({ start, schedule, sync, revealPanel, destroy });
 }

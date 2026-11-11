@@ -34,8 +34,6 @@ import {
 import { getPresetManager } from "../../../preset-manager.js";
 import * as OpenAISettings from "../../../openai.js";
 import * as ExternalEntries from "./external-entries.js";
-import { createScriptButtonRegistry } from "./script-buttons.js";
-import { createSourceVisibilityController } from "./source-visibility.js";
 import {
   createChatTopNavigator,
   getLoadedChatTopOffset,
@@ -25724,7 +25722,7 @@ function updateButtonVisibility() {
 
 // Script-owned entries deliberately bypass QuickBar settings and scanning.
 let ihScriptRefreshPending = false;
-const ihScriptButtons = createScriptButtonRegistry({
+const ihScriptButtons = ExternalEntries.createScriptButtonRegistry({
   isAvailable: (entry) =>
     !!getSettings()?.enabled &&
     !!document.getElementById("input_helper_toolbar") &&
@@ -25886,7 +25884,7 @@ function ihGetReachableExternalEntryKeys() {
   }
   return reachable;
 }
-const ihSourceVisibility = createSourceVisibilityController({
+const ihSourceVisibility = ExternalEntries.createSourceVisibilityController({
   doc: document,
   getSettings,
   getReachableKeys: ihGetReachableExternalEntryKeys,

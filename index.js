@@ -10431,6 +10431,7 @@ function openHideManagerPanel() {
     return;
   }
   const { overlay, escHandler } = createDialogOverlay({ passthrough: true });
+  overlay.addClass("ih-mgr-overlay");
   let total = chat.length;
 
   const sharedState = {
@@ -11429,10 +11430,15 @@ function openHideManagerPanel() {
   let _mgrFoldBall = null;
   const closeDialog = () => {
     sharedState.editView = null;
-    if (_mgrVvHandler && window.visualViewport) {
-      window.visualViewport.removeEventListener("resize", _mgrVvHandler);
-      _mgrVvHandler = null;
+    if (_mgrViewportHandler) {
+      window.removeEventListener("resize", _mgrViewportHandler);
+      if (_mgrViewport) {
+        _mgrViewport.removeEventListener("resize", _mgrViewportHandler);
+        _mgrViewport.removeEventListener("scroll", _mgrViewportHandler);
+      }
+      _mgrViewportHandler = null;
     }
+    if (_mgrViewportRaf) cancelAnimationFrame(_mgrViewportRaf);
     if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
     if (sharedState._transferJumpHlTimer)
       clearTimeout(sharedState._transferJumpHlTimer);
@@ -11475,6 +11481,8 @@ function openHideManagerPanel() {
   content.find("#ih_mgr_close").on("click", closeDialog);
   function _mgrExpand() {
     content.show();
+    _mgrSyncViewportSpace();
+    _scheduleMgrToolbarHeightSync();
     if (_mgrFoldBall) {
       _mgrFoldBall.remove();
       _mgrFoldBall = null;
@@ -11722,19 +11730,49 @@ function openHideManagerPanel() {
     }
   }
   _ihMgrInstance = { expand: _mgrExpand };
-  let _mgrVvHandler = null;
-  function _mgrSyncFullscreenSpace() {
-    if (!content.hasClass("ih-mgr-maximized")) return;
-    const vv = window.visualViewport;
-    if (!vv) return;
-    content.css("height", Math.max(240, Math.round(vv.height)) + "px");
+  const _mgrViewport = window.visualViewport;
+  let _mgrViewportHandler = null;
+  let _mgrViewportRaf = null;
+  function _mgrSyncViewportSpace() {
+    // Keep the overlay and both panel modes inside the area above the keyboard.
+    const vv = _mgrViewport;
+    const height = vv ? vv.height : window.innerHeight;
+    content.toggleClass("ih-mgr-short", height < 420);
+    const style = overlay[0].style;
+    style.setProperty(
+      "--ih-mgr-viewport-height",
+      height + "px",
+    );
+    style.setProperty(
+      "--ih-mgr-viewport-width",
+      (vv ? vv.width : window.innerWidth) + "px",
+    );
+    style.setProperty(
+      "--ih-mgr-viewport-top",
+      (vv ? vv.offsetTop : 0) + "px",
+    );
+    style.setProperty(
+      "--ih-mgr-viewport-left",
+      (vv ? vv.offsetLeft : 0) + "px",
+    );
   }
-  if (window.visualViewport) {
-    _mgrVvHandler = function () {
-      _mgrSyncFullscreenSpace();
-    };
-    window.visualViewport.addEventListener("resize", _mgrVvHandler);
+  _mgrViewportHandler = function () {
+    if (_mgrViewportRaf) return;
+    _mgrViewportRaf = requestAnimationFrame(() => {
+      _mgrViewportRaf = null;
+      _mgrSyncViewportSpace();
+      _syncMgrToolbarHeight();
+      renderVisible();
+      renderTransferTarget();
+      if (sharedState.activeTab === "branch") _branchLayoutNodes();
+    });
+  };
+  window.addEventListener("resize", _mgrViewportHandler);
+  if (_mgrViewport) {
+    _mgrViewport.addEventListener("resize", _mgrViewportHandler);
+    _mgrViewport.addEventListener("scroll", _mgrViewportHandler);
   }
+  _mgrSyncViewportSpace();
   let _mgrMaximized = false;
   content.find("#ih_mgr_zoom").on("click", function () {
     _mgrMaximized = !_mgrMaximized;
@@ -11743,13 +11781,12 @@ function openHideManagerPanel() {
     if (_mgrMaximized) {
       icon.removeClass("fa-expand").addClass("fa-compress");
       $(this).attr("title", "退出全屏");
-      _mgrSyncFullscreenSpace();
     } else {
       icon.removeClass("fa-compress").addClass("fa-expand");
       $(this).attr("title", "全屏");
-      content.css("height", "");
     }
     $(this).toggleClass("ih-mgr-x-on", _mgrMaximized);
+    _mgrSyncViewportSpace();
     setTimeout(() => {
       _syncMgrToolbarHeight();
       refreshList();

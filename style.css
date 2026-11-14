@@ -8307,6 +8307,8 @@ body.ih-cp-selecting input::-moz-selection {
     display: none;
   }
 }
+/* Keep message navigation steady regardless of text length or AI-only controls. */
+.ih-mgr-content.ih-me-active:not(.ih-mgr-maximized),
 .ih-mgr-content[data-active-tab="search"]:not(.ih-mgr-maximized) {
   height: calc(var(--ih-mgr-viewport-height, 100vh) * 0.94);
   overflow: hidden;
@@ -8342,6 +8344,8 @@ body.ih-cp-selecting input::-moz-selection {
   flex: 1 1 auto;
   min-height: 0;
 }
+.ih-mgr-content.ih-me-active:not(.ih-mgr-maximized) .ih-me-textarea,
+.ih-mgr-content.ih-me-active:not(.ih-mgr-maximized) .ih-me-preview,
 .ih-mgr-content[data-active-tab="search"]:not(.ih-mgr-maximized)
   .ih-me-textarea,
 .ih-mgr-content[data-active-tab="search"]:not(.ih-mgr-maximized)

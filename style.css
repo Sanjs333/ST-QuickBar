@@ -4322,25 +4322,6 @@ body.ih-cp-selecting input::-moz-selection {
   gap: 3px;
   flex-shrink: 0;
 }
-.ih-mgr-transfer-current {
-  flex: 1;
-  min-width: 0;
-  font-size: 11.5px;
-  font-family: var(--monoFontFamily);
-  opacity: 0.85;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 4px 8px;
-  border-radius: 7px;
-  background-color: color-mix(
-    in srgb,
-    var(--SmartThemeBodyColor) 6%,
-    transparent
-  );
-  border: 1px solid
-    color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
-}
 .ih-mgr-transfer-target-label {
   display: flex;
   align-items: center;
@@ -4631,6 +4612,10 @@ body.ih-cp-selecting input::-moz-selection {
     var(--SmartThemeBorderColor)
   );
 }
+.ih-mgr-select2-display[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
 .ih-mgr-select2-open .ih-mgr-select2-display {
   border-color: var(--SmartThemeQuoteColor, cornflowerblue);
 }
@@ -4709,6 +4694,44 @@ body.ih-cp-selecting input::-moz-selection {
     var(--SmartThemeBodyColor) 15%,
     transparent
   );
+}
+.ih-mgr-select2-create {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 8px);
+  margin: 4px;
+  padding: 7px 9px;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s;
+}
+.ih-mgr-select2-create i {
+  font-size: 10px;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+.ih-mgr-select2-create:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 12%,
+    transparent
+  );
+}
+.ih-mgr-select2-create:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .ih-mgr-select2-list {
   max-height: 200px;

@@ -602,6 +602,7 @@ const defaultSettings = {
   branchSort: { by: "modified", desc: true, relative: false },
   searchTreeView: true,
   lastMgrTab: "hide",
+  mgrMaximized: false,
   showModelInChat: false,
   disableSmoothScroll: false,
   floatingPanel: {
@@ -7267,7 +7268,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.3.7";
+const EXTENSION_VERSION = "3.3.8";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -8101,9 +8102,11 @@ function openUpdatePanel(options) {
 
 const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
-<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v3.3.7</h4>
+<h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v${CHANGELOG_VERSION}</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>新增预设条目切换</b>：悬浮编辑图标前新增“上一条 / 下一条”小箭头。按预设列表顺序，无需关闭面板即可直接切换可编辑条目；切换到首尾条目时箭头变灰，且不循环。</li>
+  <li>转存面板的“当前聊天档”调整为“来源聊天档”，支持搜索选择同角色的其他聊天档。</li>
+  <li>目标聊天档下拉列表新增“新建聊天”选项，创建后自动选为目标。</li>
+  <li>消息管理面板支持记忆全屏状态，重新打开或刷新页面后恢复上次显示模式。</li>
 </ul>
 `;
 
@@ -8393,22 +8396,24 @@ function openHelpPanel() {
 <p><b>注意</b>：分支分析仅支持单角色聊天，不支持群聊。</p>
 
 <p class="ih-help-sub">转存</p>
-<p>将当前聊天中的消息复制或移动至<b>同一角色的其他聊天档</b>。适用于将某段剧情迁移至新聊天中延续、将偏离主线的分支整理至独立存档、或将正文中生成的额外场景楼层转移至专属存档等场景。</p>
+<p>在<b>同一角色的聊天档</b>之间复制或移动消息。来源聊天档默认选中当前聊天，可通过下拉框搜索并选择其他档；目标聊天档也支持搜索选择。</p>
+<p><b>新建目标聊天档</b>：打开目标聊天档的下拉列表，选择<q>「新建聊天」</q>并输入未使用的名称。创建后自动选为目标，聊天区会在转存完成后切换到目标聊天。</p>
 <p>转存面板采用上下分栏：</p>
 <ul>
-    <li><b>上方</b>为当前聊天，勾选需要转出的消息（可使用共享的全选、反选、范围选择等工具）</li>
-    <li><b>下方</b>为目标聊天档预览，点击某条消息（或其前方的 <i class="fa-solid fa-crosshairs"></i> 落点按钮）即可将插入位置设定至该消息之前，也可点击最底部的<q>「追加到末尾」</q></li>
+    <li><b>上方</b>为所选来源聊天档，勾选需要转出的消息（可使用共享的全选、反选、范围选择等工具）；选择其他来源不会切换聊天区正在打开的档</li>
+    <li><b>下方</b>为目标聊天档预览，点击某条消息即可将插入位置设为该消息之前，也可点击最底部的<q>「追加到末尾」</q></li>
 </ul>
-<p><b>操作步骤</b>：切换至<q>「转存」</q>标签 → 上方勾选消息 → 选择目标聊天档 → 下方点击某条消息设为落点 → 点击<q>「复制」</q>或<q>「移动」</q>，完成后自动打开目标聊天。</p>
-<p><b>复制与移动的区别</b>：复制会在原聊天中保留这些消息；移动会将这些消息从当前聊天中删除（数据并未丢失，仅转移至目标聊天档）。</p>
+<p><b>操作步骤</b>：切换至<q>「转存」</q>标签 → 搜索选择来源聊天档并勾选消息 → 选择或新建目标聊天档 → 下方点击某条消息设为落点 → 点击<q>「复制」</q>或<q>「移动」</q>，完成后自动打开目标聊天。</p>
+<p>切换来源聊天档后会清空勾选，需重新选择消息；来源右侧的重置按钮可重新选中当前聊天档。</p>
+<p><b>复制与移动的区别</b>：复制会在来源聊天档中保留这些消息；移动会先保存到目标聊天档，再从来源聊天档中删除。</p>
 <p><b>转存方向（上 / 下切换）</b>：列表工具栏的<q>「已选 X 条」</q>右侧有一个<q>「上 / 下」</q>切换按钮，用于决定转存方向：</p>
 <ul>
-    <li>切换至<q>「上」</q>：从当前聊天转出至目标聊天档。上方显示勾选框（选择要转出的消息），下方为目标聊天档预览（点击某条消息设定插入落点），完成后自动打开目标聊天。</li>
-    <li>切换至<q>「下」</q>：将其他聊天档中的消息转入当前聊天。下方显示勾选框（选择要转入的消息），上方显示当前聊天并标注插入落点（点击某条消息设定位置），完成后停留在当前聊天。</li>
+    <li>切换至<q>「上」</q>：从上方来源聊天档转出至下方目标聊天档。上方勾选消息，下方点击消息设定插入落点。</li>
+    <li>切换至<q>「下」</q>：从下方聊天档转入上方聊天档。下方勾选消息，上方点击消息设定插入落点；来源与目标标签会同步互换，实际目标的下拉框仍可新建聊天。两个方向完成后都会打开实际目标聊天。</li>
 </ul>
 <p>全选、反选、范围选择、清除等操作会作用于当前显示勾选框的列表；倒序、楼层跳转、回到顶部、回到底部也会随方向切换同步调整。</p>
-<p><b>目标档预览编辑</b>：下方每条消息的眼睛按钮可查看与修改该楼层内容，保存后将写回目标聊天档文件。</p>
-<p><b>转存篮清单</b>：篮中消息会按来源聊天档分组列出楼层、发送者与内容摘要，可单条移出，也可展开查看某条的全部重复来源。加入时若发现内容与篮中已有消息完全相同，会记为同一条的多个来源，执行<q>「移动」</q>时只从最初加入的那个档删除，其余档中的副本保留。</p>
+<p><b>聊天档预览编辑</b>：上下列表每条消息的眼睛按钮都可查看与修改内容，保存后写回该消息所属的聊天档。</p>
+<p><b>转存篮清单</b>：使用转存篮时，以篮中消息为来源，选择或新建目标聊天档后执行复制或移动。清单按来源聊天档分组列出楼层、发送者与内容摘要，可单条移出，也可展开查看某条的全部重复来源。加入时若发现内容与篮中已有消息完全相同，会记为同一条的多个来源，执行<q>「移动」</q>时只从最初加入的那个档删除，其余档中的副本保留。</p>
 <p><b>断层检测与补齐</b>：篮中同一聊天档内楼层不连续时（例如只勾了 AI 回复、跳过了中间的用户提问），清单会在断口处标出跳过了哪几楼并提供<q>「补上」</q>按钮；顶部还有<q>「全部补齐」</q>可一次填平所有缺口。执行复制或移动前若仍有断层会弹窗确认。转存时会按聊天档与楼层重新排序，落地顺序与原对话一致。</p>
 <p><b>定位</b>：转存篮横幅上的准星按钮可依次跳转并闪烁高亮篮中的消息，方便核对到底选了哪些。</p>
 
@@ -8428,19 +8433,19 @@ function openHelpPanel() {
 <p class="ih-help-sub">列表工具栏</p>
 <ul>
     <li>隐藏、删除、移动、插入和转存标签共用同一工具栏：全选、反选、范围选择、清除；搜索标签使用独立的搜索与转存篮工具，分支标签使用独立的扫描与说明工具</li>
-    <li><b>查重</b>按钮（指纹图标）可扫描当前聊天档中内容完全相同的消息，自动勾选每组里靠后出现的那些、保留第一条不勾，方便一次性清掉重复楼层</li>
+    <li><b>查重</b>按钮（指纹图标）可扫描当前聊天档中内容完全相同的消息；转存标签作用于上方所选聊天档。自动勾选每组里靠后出现的那些、保留第一条不勾，方便一次性清掉重复楼层</li>
     <li>勾选状态和滚动位置在标签页之间保留，切换标签不会丢失</li>
     <li>输入楼层号时列表会实时高亮对应消息：单条使用强调色、范围使用主题色、保留最近使用绿色</li>
     <li>每条消息的箭头按钮可一键跳转至原聊天位置</li>
     <li>消息倒序按钮可切换列表显示方向，便于从最新消息向前浏览管理</li>
     <li>内置回到顶部、回到底部按钮以及楼层跳转框，输入楼层号并回车或点击跳转，列表将平滑滚动并将目标消息居中显示</li>
-    <li><b>Token</b> 徽章：点击展开显示当前聊天总 Token 数（数字在上、tokens 在下），再次点击收起；开启后，每条消息临时显示该楼层的 Token 数</li>
+    <li><b>Token</b> 徽章：点击展开显示上方列表对应聊天档的总 Token 数（数字在上、tokens 在下），再次点击收起；开启后，每条消息临时显示该楼层的 Token 数</li>
     <li>采用按需渲染，大量消息时也能保持流畅</li>
 </ul>
 
 <p class="ih-help-sub">面板外观与折叠</p>
 <ul>
-    <li>标题栏共四个按钮：<b>说明</b>（显示/隐藏各标签页顶部的使用说明，收起后搜索结果与分支树会自动变高）、<b>全屏</b>（面板铺满窗口，列表随之撑高；移动端弹出输入法时会自动收缩，避免底部按钮被键盘挡住）、<b>折叠</b>（收成可拖拽的悬浮球）、<b>关闭</b></li>
+    <li>标题栏共四个按钮：<b>说明</b>（显示/隐藏各标签页顶部的使用说明，收起后搜索结果与分支树会自动变高）、<b>全屏</b>（记住上次的全屏或普通状态，下次打开及刷新后恢复；移动端弹出输入法时会自动收缩，避免底部按钮被键盘挡住）、<b>折叠</b>（收成可拖拽的悬浮球）、<b>关闭</b></li>
     <li>标题栏固定在面板顶部，向下滚动内容时这四个按钮始终可见</li>
     <li>折叠后面板收起为可拖拽的幽灵悬浮球，便于操作聊天区；点击悬浮球恢复展开，悬浮球位置会被记住</li>
     <li>面板本身不带遮罩层，折叠后可直接操作下方聊天区</li>
@@ -10145,6 +10150,9 @@ async function ihRelinkParentLinks(oldName, newName) {
 function ihInputDialog(title, defaultValue) {
   return new Promise((resolve) => {
     const { overlay, escHandler } = createDialogOverlay();
+    document.removeEventListener("keydown", escHandler, true);
+    let inputEscHandler = null;
+    let settled = false;
     const dlg = $(`
       <div class="ih-cf-content">
         <h3><i class="fa-solid fa-pen"></i> ${ihEscapeHtml(title || "输入")}</h3>
@@ -10164,10 +10172,23 @@ function ihInputDialog(title, defaultValue) {
     dlg.on("click", (e) => e.stopPropagation());
     generateFaIconProtectionCSS();
     const close = (val) => {
+      if (settled) return;
+      settled = true;
       document.removeEventListener("keydown", escHandler, true);
+      if (inputEscHandler) document.removeEventListener("keydown", inputEscHandler, true);
       overlay.remove();
       resolve(val);
     };
+    overlay[0]._ihCloseOverlay = () => close(null);
+    inputEscHandler = (e) => {
+      if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
+      const overlays = Array.from(document.querySelectorAll(".ih-dialog-overlay"));
+      if (overlays[overlays.length - 1] !== overlay[0]) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      close(null);
+    };
+    document.addEventListener("keydown", inputEscHandler, true);
     overlay.off("click").on("click", (e) => {
       if (e.target === overlay[0]) close(null);
     });
@@ -10228,6 +10249,9 @@ async function ihAskText(title, defaultValue) {
 function ihConfirmDialog(opts) {
   return new Promise((resolve) => {
     const { overlay, escHandler } = createDialogOverlay();
+    document.removeEventListener("keydown", escHandler, true);
+    let confirmEscHandler = null;
+    let settled = false;
     const lines = (opts.lines || [])
       .map((l) => `<div class="ih-cf-line">${l}</div>`)
       .join("");
@@ -10246,10 +10270,23 @@ function ihConfirmDialog(opts) {
     dlg.on("click", (e) => e.stopPropagation());
     generateFaIconProtectionCSS();
     const close = (val) => {
+      if (settled) return;
+      settled = true;
       document.removeEventListener("keydown", escHandler, true);
+      if (confirmEscHandler) document.removeEventListener("keydown", confirmEscHandler, true);
       overlay.remove();
       resolve(val);
     };
+    overlay[0]._ihCloseOverlay = () => close(false);
+    confirmEscHandler = (e) => {
+      if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
+      const overlays = Array.from(document.querySelectorAll(".ih-dialog-overlay"));
+      if (overlays[overlays.length - 1] !== overlay[0]) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      close(false);
+    };
+    document.addEventListener("keydown", confirmEscHandler, true);
     overlay.off("click").on("click", (e) => {
       if (e.target === overlay[0]) close(false);
     });
@@ -10432,7 +10469,11 @@ function openHideManagerPanel() {
   }
   const { overlay, escHandler } = createDialogOverlay({ passthrough: true });
   overlay.addClass("ih-mgr-overlay");
+  document.removeEventListener("keydown", escHandler, true);
+  let _mgrEscapeHandler = null;
+  let _mgrClosed = false;
   let total = chat.length;
+  let _mgrMaximized = getSettings().mgrMaximized === true;
 
   const sharedState = {
     selected: new Set(),
@@ -10445,10 +10486,23 @@ function openHideManagerPanel() {
     _jumpHlTimer: null,
     showToken: false,
     tokenCache: new Map(),
+    transferSourceFile: "",
+    transferSourceChat: null,
+    transferSourceHeader: null,
+    transferSourceSelected: new Set(),
+    transferSourceLoading: false,
+    transferSourceFailed: false,
+    transferBusy: false,
+    transferListLoading: false,
+    transferListFailed: false,
+    _transferSourceLoadId: 0,
+    _transferTargetLoadId: 0,
+    _transferChatListLoadId: 0,
     transferTargetChat: null,
     transferTargetHeader: null,
     transferInsertAt: null,
     transferLoading: false,
+    transferTargetFailed: false,
     _transferListLoaded: false,
     manageTarget: "upper",
     transferReverseOrder: false,
@@ -10512,12 +10566,12 @@ function openHideManagerPanel() {
   const initStatus = getHiddenStatus();
 
   const content = $(`
-    <div class="ih-mgr-content" data-active-tab="hide">
+    <div class="ih-mgr-content${_mgrMaximized ? " ih-mgr-maximized" : ""}" data-active-tab="hide">
       <div class="ih-mgr-header">
         <h3><i class="fa-solid fa-ghost"></i> 消息管理</h3>
         <span class="ih-mgr-total-badge">${total} 条消息</span>
         <button class="ih-mgr-close-x ih-mgr-tip-x" id="ih_mgr_tip_toggle" title="显示/隐藏各标签的使用说明"><i class="fa-solid fa-circle-question"></i></button>
-        <button class="ih-mgr-close-x ih-mgr-zoom-x" id="ih_mgr_zoom" title="全屏"><i class="fa-solid fa-expand"></i></button>
+        <button class="ih-mgr-close-x ih-mgr-zoom-x${_mgrMaximized ? " ih-mgr-x-on" : ""}" id="ih_mgr_zoom" title="${_mgrMaximized ? "退出全屏" : "全屏"}"><i class="fa-solid fa-${_mgrMaximized ? "compress" : "expand"}"></i></button>
         <button class="ih-mgr-close-x ih-mgr-fold-x" id="ih_mgr_fold" title="折叠面板"><i class="fa-solid fa-window-minimize"></i></button>
         <button class="ih-mgr-close-x" id="ih_mgr_close" title="关闭"><i class="fa-solid fa-xmark"></i></button>
       </div>
@@ -10660,14 +10714,28 @@ function openHideManagerPanel() {
         </div>
         <div class="ih-mgr-basket-list" id="ih_mgr_basket_list" style="display:none;"></div>
         <div class="ih-mgr-inline-row ih-mgr-transfer-current-row">
-          <label class="ih-mgr-inline-label">当前聊天档</label>
-          <span class="ih-mgr-transfer-current" id="ih_mgr_transfer_current" title="正在从这个聊天档转存">—</span>
+          <label class="ih-mgr-inline-label" id="ih_mgr_transfer_source_label">来源聊天档</label>
+          <div class="ih-mgr-select2" id="ih_mgr_transfer_source_select2">
+            <div class="ih-mgr-select2-display" id="ih_mgr_transfer_source_display" tabindex="0" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="ih_mgr_transfer_source_options">
+              <span class="ih-mgr-select2-text">加载中…</span>
+            </div>
+            <div class="ih-mgr-select2-dropdown" id="ih_mgr_transfer_source_dropdown">
+              <div class="ih-mgr-select2-search-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" class="ih-mgr-select2-search ih-fp-transparent-input" id="ih_mgr_transfer_source_search" placeholder="搜索聊天档…" />
+                <button class="ih-mgr-select2-search-clear" id="ih_mgr_transfer_source_search_clear" title="清空搜索"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+              <button type="button" class="ih-mgr-select2-create" id="ih_mgr_transfer_source_new_chat" style="display:none;"><i class="fa-solid fa-plus"></i> 新建聊天</button>
+              <div class="ih-mgr-select2-list" id="ih_mgr_transfer_source_options" role="listbox"></div>
+            </div>
+          </div>
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_transfer_source_reset" title="选择当前聊天档"><i class="fa-solid fa-rotate-left"></i></button>
         </div>
 
         <div class="ih-mgr-inline-row">
-          <label class="ih-mgr-inline-label">目标聊天档</label>
+          <label class="ih-mgr-inline-label" id="ih_mgr_transfer_target_label">目标聊天档</label>
           <div class="ih-mgr-select2" id="ih_mgr_transfer_select2">
-            <div class="ih-mgr-select2-display" id="ih_mgr_transfer_display" tabindex="0">
+            <div class="ih-mgr-select2-display" id="ih_mgr_transfer_display" tabindex="0" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="ih_mgr_transfer_options">
               <span class="ih-mgr-select2-text">加载中…</span>
             </div>
             <div class="ih-mgr-select2-dropdown" id="ih_mgr_transfer_dropdown">
@@ -10676,7 +10744,8 @@ function openHideManagerPanel() {
                 <input type="text" class="ih-mgr-select2-search ih-fp-transparent-input" id="ih_mgr_transfer_search" placeholder="搜索聊天档…" />
                 <button class="ih-mgr-select2-search-clear" id="ih_mgr_transfer_search_clear" title="清空搜索"><i class="fa-solid fa-xmark"></i></button>
               </div>
-              <div class="ih-mgr-select2-list" id="ih_mgr_transfer_options"></div>
+              <button type="button" class="ih-mgr-select2-create" id="ih_mgr_transfer_new_chat"><i class="fa-solid fa-plus"></i> 新建聊天</button>
+              <div class="ih-mgr-select2-list" id="ih_mgr_transfer_options" role="listbox"></div>
             </div>
           </div>
           <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_mgr_transfer_clear_selected" title="清除已选聊天档"><i class="fa-solid fa-eraser"></i></button>
@@ -10847,7 +10916,7 @@ function openHideManagerPanel() {
       <div class="ih-mgr-shared-list-area">
         <div class="ih-mgr-toolbar">
           <span class="ih-mgr-count" id="ih_mgr_count">已选 0 条</span>
-          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-manage-toggle" id="ih_mgr_manage_toggle" title="切换工具栏管理对象（上方当前聊天 / 下方目标聊天）" style="display:none;">
+          <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-manage-toggle" id="ih_mgr_manage_toggle" title="切换转存方向（上方聊天档 / 下方聊天档）" style="display:none;">
             <i class="fa-solid fa-arrow-up"></i><span class="ih-mgr-manage-toggle-text">上</span>
           </button>
           <div class="ih-mgr-btn-scroll">
@@ -11020,6 +11089,26 @@ function openHideManagerPanel() {
   const spacerBottomEl = content.find(".ih-mgr-vlist-spacer-bottom")[0];
   const rowsEl = content.find(".ih-mgr-vlist-rows")[0];
 
+  function _hasExternalTransferSource() {
+    return (
+      sharedState.activeTab === "transfer" &&
+      !!sharedState.transferSourceFile &&
+      !_isCurrentTransferFile(sharedState.transferSourceFile)
+    );
+  }
+
+  function _getUpperMessages() {
+    return _hasExternalTransferSource()
+      ? sharedState.transferSourceChat || []
+      : chat;
+  }
+
+  function _getUpperSelected() {
+    return _hasExternalTransferSource()
+      ? sharedState.transferSourceSelected
+      : sharedState.selected;
+  }
+
   function getHighlightSet() {
     const set = {
       ranges: [],
@@ -11084,12 +11173,13 @@ function openHideManagerPanel() {
       sharedState.activeTab === "transfer" &&
       sharedState.manageTarget === "lower"
     ) {
+      const upperTotal = _getUpperMessages().length;
       const t =
         sharedState.transferUpperInsertAt == null
-          ? total
+          ? upperTotal
           : sharedState.transferUpperInsertAt;
-      if (t >= 0 && t < total) set.insertAbove = t;
-      else if (t >= total && total > 0) set.insertBelow = total - 1;
+      if (t >= 0 && t < upperTotal) set.insertAbove = t;
+      else if (t >= upperTotal && upperTotal > 0) set.insertBelow = upperTotal - 1;
     }
     return set;
   }
@@ -11100,7 +11190,7 @@ function openHideManagerPanel() {
   }
 
   function buildRowHtml(floor, hl) {
-    const msg = chat[floor];
+    const msg = _getUpperMessages()[floor];
     if (!msg) return "";
     const rawMes = String(msg?.mes || "");
     const sender = ihEscapeHtml(msg.name || (msg.is_user ? "User" : "AI"));
@@ -11119,7 +11209,7 @@ function openHideManagerPanel() {
     }
     const hidden = isMessageHidden(msg);
     const locked = isStructuralSystemMessage(msg);
-    const isChecked = sharedState.selected.has(floor);
+    const isChecked = _getUpperSelected().has(floor);
     if (!hl) hl = getHighlightSet();
     const cls = ["ih-mgr-msg-item"];
     if (hidden) cls.push("ih-mgr-msg-is-hidden");
@@ -11152,22 +11242,37 @@ function openHideManagerPanel() {
   }
 
   function renderVisible() {
+    const listTotal = _getUpperMessages().length;
+    if (_hasExternalTransferSource() && sharedState.transferSourceLoading) {
+      spacerTopEl.style.height = "0px";
+      spacerBottomEl.style.height = "0px";
+      rowsEl.innerHTML = '<div class="ih-mgr-transfer-empty">加载中…</div>';
+      return;
+    }
+    if (_hasExternalTransferSource() && sharedState.transferSourceFailed) {
+      spacerTopEl.style.height = "0px";
+      spacerBottomEl.style.height = "0px";
+      rowsEl.innerHTML = '<div class="ih-mgr-transfer-empty">读取失败，请重新选择来源聊天档</div>';
+      return;
+    }
     const scrollTop = vlistEl.scrollTop;
     const viewH = vlistEl.clientHeight || 400;
-    const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER);
+    const startIdx = Math.min(listTotal, Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER));
     const endIdx = Math.min(
-      total,
+      listTotal,
       Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + BUFFER,
     );
     spacerTopEl.style.height = startIdx * ROW_HEIGHT + "px";
-    spacerBottomEl.style.height = (total - endIdx) * ROW_HEIGHT + "px";
+    spacerBottomEl.style.height = (listTotal - endIdx) * ROW_HEIGHT + "px";
     const hl = getHighlightSet();
     let html = "";
     for (let i = startIdx; i < endIdx; i++) {
-      const floor = sharedState.reverseOrder ? total - 1 - i : i;
+      const floor = sharedState.reverseOrder ? listTotal - 1 - i : i;
       html += buildRowHtml(floor, hl);
     }
-    rowsEl.innerHTML = html;
+    rowsEl.innerHTML = html || (sharedState.activeTab === "transfer"
+      ? '<div class="ih-mgr-transfer-empty">这个聊天档暂无消息</div>'
+      : "");
     if (sharedState.showToken) computeTokensForVisible();
   }
   function _getTokenizerCtx() {
@@ -11181,17 +11286,19 @@ function openHideManagerPanel() {
   async function computeTokensForVisible() {
     const ctx = _getTokenizerCtx();
     if (!ctx) return;
+    const messages = _getUpperMessages();
     const pending = rowsEl.querySelectorAll(
       '.ih-mgr-msg-token[data-pending="1"]',
     );
     for (const el of pending) {
       const floor = parseInt(el.dataset.floor);
-      if (isNaN(floor) || !chat[floor]) continue;
+      if (isNaN(floor) || !messages[floor]) continue;
       el.removeAttribute("data-pending");
       try {
         const count = await ctx.getTokenCountAsync(
-          String(chat[floor].mes || ""),
+          String(messages[floor].mes || ""),
         );
+        if (messages !== _getUpperMessages()) return;
         sharedState.tokenCache.set(floor, count);
         if (el.ownerDocument && el.ownerDocument.contains(el)) {
           el.textContent = count + " tokens";
@@ -11208,10 +11315,11 @@ function openHideManagerPanel() {
       return;
     }
     numEl.html('<i class="fa-solid fa-spinner fa-spin"></i>');
+    const messages = _getUpperMessages();
     let sum = 0;
-    for (let i = 0; i < total; i++) {
-      if (!sharedState.showToken) return;
-      const msg = chat[i];
+    for (let i = 0; i < messages.length; i++) {
+      if (!sharedState.showToken || messages !== _getUpperMessages()) return;
+      const msg = messages[i];
       if (!msg) continue;
       let count;
       if (sharedState.tokenCache.has(i)) {
@@ -11219,6 +11327,7 @@ function openHideManagerPanel() {
       } else {
         try {
           count = await ctx.getTokenCountAsync(String(msg.mes || ""));
+          if (messages !== _getUpperMessages()) return;
           sharedState.tokenCache.set(i, count);
         } catch (e) {
           count = 0;
@@ -11265,12 +11374,13 @@ function openHideManagerPanel() {
   function scrollListToFloor(floor) {
     if (floor === null || floor === undefined || isNaN(floor) || floor < 0)
       return;
-    if (floor >= total) {
+    const upperTotal = _getUpperMessages().length;
+    if (floor >= upperTotal) {
       const toBottom = sharedState.reverseOrder ? 0 : vlistEl.scrollHeight;
       vlistEl.scrollTo({ top: toBottom, behavior: ihGetScrollBehavior() });
       return;
     }
-    const displayIndex = sharedState.reverseOrder ? total - 1 - floor : floor;
+    const displayIndex = sharedState.reverseOrder ? upperTotal - 1 - floor : floor;
     const targetTop =
       displayIndex * ROW_HEIGHT - vlistEl.clientHeight / 2 + ROW_HEIGHT / 2;
     vlistEl.scrollTo({
@@ -11290,12 +11400,19 @@ function openHideManagerPanel() {
         isLower: true,
       };
     }
-    return { set: sharedState.selected, total: total, isLower: false };
+    return {
+      set: _getUpperSelected(),
+      total: _getUpperMessages().length,
+      isLower: false,
+    };
   }
 
   function updateCount() {
     const a = _getActiveSel();
     content.find("#ih_mgr_count").text(`已选 ${a.set.size} 条`);
+    content.find("#ih_mgr_jump_floor").attr("max", Math.max(0, a.total - 1));
+    content.find(".ih-mgr-header .ih-mgr-total-badge")
+      .text(`${_getUpperMessages().length} 条消息`);
     content
       .find("#ih_mgr_reverse_order")
       .toggleClass(
@@ -11429,6 +11546,11 @@ function openHideManagerPanel() {
 
   let _mgrFoldBall = null;
   const closeDialog = () => {
+    if (_mgrClosed) return;
+    _mgrClosed = true;
+    sharedState._transferSourceLoadId++;
+    sharedState._transferTargetLoadId++;
+    sharedState._transferChatListLoadId++;
     sharedState.editView = null;
     if (_mgrViewportHandler) {
       window.removeEventListener("resize", _mgrViewportHandler);
@@ -11473,13 +11595,32 @@ function openHideManagerPanel() {
     _ihMgrInstance = null;
 
     document.removeEventListener("keydown", escHandler, true);
+    if (_mgrEscapeHandler) document.removeEventListener("keydown", _mgrEscapeHandler, true);
     overlay.remove();
   };
+  overlay[0]._ihCloseOverlay = closeDialog;
+  _mgrEscapeHandler = (e) => {
+    if (e.key !== "Escape" || _mgrClosed || document.querySelector("dialog[open]")) return;
+    const overlays = Array.from(document.querySelectorAll(".ih-dialog-overlay"));
+    if (overlays[overlays.length - 1] !== overlay[0]) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    const openDropdown = content.find(".ih-mgr-select2-open .ih-mgr-select2-display").first();
+    if (openDropdown.length) {
+      _closeTransferDropdown();
+      _closeSearchS2Dropdown();
+      openDropdown.trigger("focus");
+    } else {
+      closeDialog();
+    }
+  };
+  document.addEventListener("keydown", _mgrEscapeHandler, true);
   overlay.off("click").on("click", (e) => {
     if (e.target === overlay[0]) closeDialog();
   });
   content.find("#ih_mgr_close").on("click", closeDialog);
   function _mgrExpand() {
+    if (_mgrClosed) return;
     content.show();
     _mgrSyncViewportSpace();
     _scheduleMgrToolbarHeightSync();
@@ -11489,6 +11630,7 @@ function openHideManagerPanel() {
     }
   }
   function _mgrFold() {
+    if (_mgrClosed) return;
     content.hide();
     if (_mgrFoldBall) return;
     const ball = $(
@@ -11656,6 +11798,10 @@ function openHideManagerPanel() {
       }
     }
 
+    if (sharedState.editView?.file && _isCurrentTransferFile(sharedState.editView.file)) {
+      sharedState.editView.file = "";
+    }
+
     total = chat.length;
     content.find(".ih-mgr-header .ih-mgr-total-badge").text(total + " 条消息");
     content
@@ -11684,13 +11830,22 @@ function openHideManagerPanel() {
     const _hideSt = getHiddenStatus();
     content.find("#ih_mgr_hide_status span").text(_hideSt.summary);
 
-    content.find("#ih_mgr_transfer_current").text(newChatFile || "—");
+    sharedState._transferSourceLoadId++;
+    sharedState.transferSourceFile = _currentTransferFile();
+    sharedState.transferSourceChat = chat;
+    sharedState.transferSourceHeader = null;
+    sharedState.transferSourceSelected.clear();
+    sharedState.transferSourceLoading = false;
+    sharedState.transferSourceFailed = false;
+    _syncTransferSelectionDisplay(true);
     const _curTarget = _getTransferTargetValue();
     if (
       _curTarget &&
       String(_curTarget).replace(/\.jsonl$/i, "") === newChatFile
     ) {
-      _setTransferSelected("");
+      _transferSelectedValue = "";
+      _syncTransferSelectionDisplay(false);
+      loadTransferTarget("");
     }
     sharedState._transferListLoaded = false;
     _searchS2Loaded = false;
@@ -11773,9 +11928,10 @@ function openHideManagerPanel() {
     _mgrViewport.addEventListener("scroll", _mgrViewportHandler);
   }
   _mgrSyncViewportSpace();
-  let _mgrMaximized = false;
   content.find("#ih_mgr_zoom").on("click", function () {
     _mgrMaximized = !_mgrMaximized;
+    getSettings().mgrMaximized = _mgrMaximized;
+    saveSettingsDebounced();
     content.toggleClass("ih-mgr-maximized", _mgrMaximized);
     const icon = $(this).find("i");
     if (_mgrMaximized) {
@@ -11823,8 +11979,14 @@ function openHideManagerPanel() {
   });
   content.on("click", ".ih-mgr-tab", function () {
     const tab = $(this).data("tab");
+    if (sharedState.transferBusy) return;
+    const previousUpperMessages = _getUpperMessages();
     sharedState.scrollTop = vlistEl.scrollTop;
     sharedState.activeTab = tab;
+    if (previousUpperMessages !== _getUpperMessages()) {
+      sharedState.tokenCache.clear();
+      sharedState.jumpHighlight = null;
+    }
     content.attr("data-active-tab", tab);
     getSettings().lastMgrTab = tab;
     saveSettingsDebounced();
@@ -11871,6 +12033,7 @@ function openHideManagerPanel() {
       .toggleClass("ih-mgr-range-mode", false);
     content.find("#ih_mgr_range_toggle").removeClass("ih-mgr-btn-active");
     refreshList();
+    if (sharedState.showToken) computeTotalTokens();
     if (tab === "transfer") {
       if (!sharedState._transferListLoaded) {
         sharedState._transferListLoaded = true;
@@ -11885,11 +12048,16 @@ function openHideManagerPanel() {
     }, 0);
   });
 
-  content.on("click", ".ih-mgr-msg-jump", function (e) {
+  content.on("click", ".ih-mgr-msg-jump", async function (e) {
     e.stopPropagation();
     e.preventDefault();
+    if (sharedState.transferBusy) return;
     const floor = parseInt($(this).data("floor"));
     if (isNaN(floor)) return;
+    if (_hasExternalTransferSource()) {
+      await _openTransferChatAt(_getTransferSourceValue(), floor);
+      return;
+    }
     closeDialog();
     const chatEl = document.getElementById("chat");
     if (!chatEl) return;
@@ -11906,9 +12074,10 @@ function openHideManagerPanel() {
   content.on("click", ".ih-mgr-msg-edit", function (e) {
     e.stopPropagation();
     e.preventDefault();
+    if (sharedState.transferBusy) return;
     const floor = parseInt($(this).data("floor"));
     if (isNaN(floor)) return;
-    _meOpen("", floor, null);
+    _meOpen(_hasExternalTransferSource() ? _getTransferSourceValue() : "", floor, null);
   });
 
   rowsEl.addEventListener("click", function (e) {
@@ -11919,12 +12088,14 @@ function openHideManagerPanel() {
     if (sharedState.activeTab === "insert") return;
     const floor = parseInt(item.dataset.floor);
     if (isNaN(floor)) return;
+    if (sharedState.transferBusy ||
+        (sharedState.activeTab === "transfer" && sharedState.transferSourceLoading)) return;
 
     if (
       sharedState.activeTab === "transfer" &&
       sharedState.manageTarget === "lower"
     ) {
-      sharedState.transferUpperInsertAt = floor >= total ? null : floor;
+      sharedState.transferUpperInsertAt = floor >= _getUpperMessages().length ? null : floor;
       renderVisible();
       return;
     }
@@ -11938,7 +12109,7 @@ function openHideManagerPanel() {
       } else {
         const a = Math.min(sharedState.rangeStart, floor);
         const b = Math.max(sharedState.rangeStart, floor);
-        for (let i = a; i <= b; i++) sharedState.selected.add(i);
+        for (let i = a; i <= b; i++) _getUpperSelected().add(i);
         sharedState.rangeStart = null;
         sharedState.rangeMode = false;
         content
@@ -11951,15 +12122,15 @@ function openHideManagerPanel() {
     }
 
     if (e.target.matches("input[type=checkbox]")) {
-      if (e.target.checked) sharedState.selected.add(floor);
-      else sharedState.selected.delete(floor);
+      if (e.target.checked) _getUpperSelected().add(floor);
+      else _getUpperSelected().delete(floor);
       item.classList.toggle("ih-mgr-msg-checked", e.target.checked);
       updateCount();
       return;
     }
 
-    if (sharedState.selected.has(floor)) sharedState.selected.delete(floor);
-    else sharedState.selected.add(floor);
+    if (_getUpperSelected().has(floor)) _getUpperSelected().delete(floor);
+    else _getUpperSelected().add(floor);
     refreshList();
   });
 
@@ -11988,7 +12159,7 @@ function openHideManagerPanel() {
     if (sharedState.manageTarget === "lower") {
       const arr = sharedState.transferTargetChat || [];
       if (arr.length === 0) {
-        toastr.warning("目标聊天档尚未加载完成", "", { timeOut: 1200 });
+        toastr.warning("聊天档尚未加载完成", "", { timeOut: 1200 });
         return;
       }
       if (isNaN(f) || f < 0 || f >= arr.length) {
@@ -12008,8 +12179,9 @@ function openHideManagerPanel() {
       }, 3000);
       return;
     }
-    if (isNaN(f) || f < 0 || f >= total) {
-      toastr.warning(`楼层超出范围（0~${total - 1}）`, "", { timeOut: 1200 });
+    const upperTotal = _getUpperMessages().length;
+    if (isNaN(f) || f < 0 || f >= upperTotal) {
+      toastr.warning(`楼层超出范围（0~${upperTotal - 1}）`, "", { timeOut: 1200 });
       return;
     }
     sharedState.jumpHighlight = f;
@@ -12080,7 +12252,7 @@ function openHideManagerPanel() {
   content.find("#ih_mgr_find_dup").on("click", () => {
     if (sharedState.manageTarget === "lower") {
       toastr.info(
-        "查重只作用于当前聊天档，请先把工具栏的「上/下」切回「上」",
+        "查重作用于上方聊天档，请先把工具栏的「上/下」切回「上」",
         "",
         {
           timeOut: 2200,
@@ -12088,16 +12260,16 @@ function openHideManagerPanel() {
       );
       return;
     }
-    const groups = ihFindDupGroupsInChat(chat);
+    const groups = ihFindDupGroupsInChat(_getUpperMessages());
     if (groups.length === 0) {
       toastr.info("本档没有内容完全相同的消息", "", { timeOut: 1500 });
       return;
     }
-    sharedState.selected.clear();
+    _getUpperSelected().clear();
     let dupCount = 0;
     groups.forEach(function (floors) {
       for (let i = 1; i < floors.length; i++) {
-        sharedState.selected.add(floors[i]);
+        _getUpperSelected().add(floors[i]);
         dupCount++;
       }
     });
@@ -12560,38 +12732,128 @@ function openHideManagerPanel() {
     return _transferSelectedValue;
   }
 
-  function _setTransferSelected(fileNameWithExt) {
-    _transferSelectedValue = fileNameWithExt || "";
-    const opt = _transferAllOptions.find(
-      (o) => o.value === _transferSelectedValue,
-    );
-    const displayText = opt ? opt.label : "请选择目标聊天档…";
-    content
-      .find("#ih_mgr_transfer_display .ih-mgr-select2-text")
-      .text(displayText);
-    _closeTransferDropdown();
-    loadTransferTarget(_transferSelectedValue);
+  function _getTransferSourceValue() {
+    return sharedState.transferSourceFile || _currentTransferFile();
   }
 
-  function _renderTransferOptions(filterText) {
-    const listEl = content.find("#ih_mgr_transfer_options")[0];
+  function _currentTransferFile(info = _getTransferChar()) {
+    return info && !info.group && info.chatFile
+      ? String(info.chatFile).replace(/\.jsonl$/i, "") + ".jsonl"
+      : "";
+  }
+
+  function _sameTransferFile(a, b) {
+    return !!a && !!b &&
+      String(a).replace(/\.jsonl$/i, "").toLowerCase() ===
+      String(b).replace(/\.jsonl$/i, "").toLowerCase();
+  }
+
+  function _isCurrentTransferFile(file, info = _getTransferChar()) {
+    return !!info && !info.group &&
+      (!file || _sameTransferFile(file, info.chatFile));
+  }
+
+  function _transferChatMatches(info) {
+    const current = _getTransferChar();
+    return !!info && !!current && !current.group &&
+      current.avatar === info.avatar && current.chatFile === info.chatFile;
+  }
+
+  function _transferContextMatches(info) {
+    return !_mgrClosed && _transferChatMatches(info);
+  }
+
+  function _transferSelector(isSource, part) {
+    return content.find(`#ih_mgr_transfer_${isSource ? "source_" : ""}${part}`);
+  }
+
+  function _syncTransferControls() {
+    const info = _getTransferChar();
+    const unavailable = !info || info.group;
+    const busy = unavailable || sharedState.transferBusy || sharedState.transferListLoading;
+    content.find("#ih_mgr_transfer_copy, #ih_mgr_transfer_move").prop("disabled",
+      busy || (sharedState.searchBasket.length === 0 && (sharedState.transferSourceLoading || sharedState.transferSourceFailed)) ||
+      sharedState.transferLoading || sharedState.transferTargetFailed ||
+      !_getTransferTargetValue() || (sharedState.searchBasket.length === 0 && !_getTransferSourceValue()));
+    content.find("#ih_mgr_transfer_new_chat, #ih_mgr_transfer_source_new_chat, #ih_mgr_transfer_source_reset, #ih_mgr_transfer_clear_selected, #ih_mgr_manage_toggle")
+      .prop("disabled", busy);
+    content.find("#ih_mgr_transfer_display, #ih_mgr_transfer_source_display")
+      .attr("aria-disabled", String(busy));
+    content.find(".ih-mgr-msg-jump, .ih-mgr-msg-edit, .ih-mgr-tmsg-jump, .ih-mgr-tmsg-edit")
+      .prop("disabled", sharedState.transferBusy);
+  }
+
+  function _syncTransferSelectionDisplay(isSource) {
+    const value = isSource ? _getTransferSourceValue() : _getTransferTargetValue();
+    const opt = _transferAllOptions.find((o) => _sameTransferFile(o.value, value));
+    const label = opt ? opt.label : value
+      ? String(value).replace(/\.jsonl$/i, "")
+      : "请选择聊天档…";
+    _transferSelector(isSource, "display").find(".ih-mgr-select2-text")
+      .text(label).attr("title", label);
+  }
+
+  function _resetTransferSourceList() {
+    sharedState.selected.clear();
+    sharedState.transferSourceSelected.clear();
+    sharedState.rangeStart = null;
+    sharedState.rangeMode = false;
+    sharedState.transferUpperInsertAt = null;
+    sharedState.tokenCache.clear();
+    sharedState.jumpHighlight = null;
+    if (sharedState._jumpHlTimer) clearTimeout(sharedState._jumpHlTimer);
+    sharedState.scrollTop = 0;
+    vlistEl.scrollTop = 0;
+    content.find(".ih-mgr-shared-list-area").removeClass("ih-mgr-range-mode");
+    content.find("#ih_mgr_range_toggle").removeClass("ih-mgr-btn-active");
+  }
+
+  async function _setTransferSourceSelected(fileNameWithExt) {
+    if (sharedState.transferBusy) return;
+    const file = fileNameWithExt || _currentTransferFile();
+    if (_sameTransferFile(file, _getTransferTargetValue())) {
+      await _setTransferSelected("");
+    }
+    sharedState.transferSourceFile = file;
+    _syncTransferSelectionDisplay(true);
+    _closeTransferDropdown();
+    await loadTransferSource(file);
+  }
+
+  async function _setTransferSelected(fileNameWithExt) {
+    if (sharedState.transferBusy) return;
+    if (fileNameWithExt && sharedState.searchBasket.length === 0 &&
+        _sameTransferFile(fileNameWithExt, _getTransferSourceValue())) {
+      toastr.warning("来源与目标请选择不同的聊天档", "", { timeOut: 1500 });
+      return;
+    }
+    _transferSelectedValue = fileNameWithExt || "";
+    _syncTransferSelectionDisplay(false);
+    _closeTransferDropdown();
+    await loadTransferTarget(_transferSelectedValue);
+  }
+
+  function _renderTransferOptions(filterText, isSource = false) {
+    const listEl = _transferSelector(isSource, "options")[0];
     if (!listEl) return;
     const kw = String(filterText || "")
       .trim()
       .toLowerCase();
     const history = _getTransferHistory();
-    const matched = _transferAllOptions.filter(
-      (o) => !kw || o.label.toLowerCase().includes(kw),
-    );
+    const selected = isSource ? _getTransferSourceValue() : _getTransferTargetValue();
+    const excluded = isSource ? _getTransferTargetValue()
+      : sharedState.searchBasket.length > 0 ? "" : _getTransferSourceValue();
+    const options = _transferAllOptions.filter((o) => !_sameTransferFile(o.value, excluded));
+    const matched = options.filter((o) => !kw || o.label.toLowerCase().includes(kw));
     let html = "";
     if (!kw) {
       const historyOpts = history
-        .map((h) => _transferAllOptions.find((o) => o.value === h))
+        .map((h) => options.find((o) => _sameTransferFile(o.value, h)))
         .filter(Boolean);
       if (historyOpts.length > 0) {
         html += `<div class="ih-mgr-select2-group">最近使用</div>`;
         historyOpts.forEach((o) => {
-          html += `<div class="ih-mgr-select2-opt" data-value="${ihEscapeAttr(o.value)}"><i class="fa-solid fa-clock-rotate-left"></i> ${ihEscapeHtml(o.label)}</div>`;
+          html += `<div class="ih-mgr-select2-opt${_sameTransferFile(o.value, selected) ? " ih-mgr-select2-opt-active" : ""}" role="option" aria-selected="${_sameTransferFile(o.value, selected)}" data-value="${ihEscapeAttr(o.value)}"><i class="fa-solid fa-clock-rotate-left"></i> ${ihEscapeHtml(o.label)}</div>`;
         });
         html += `<div class="ih-mgr-select2-group">全部聊天档</div>`;
       }
@@ -12600,19 +12862,22 @@ function openHideManagerPanel() {
       html += `<div class="ih-mgr-select2-empty">没有匹配的聊天档</div>`;
     } else {
       matched.forEach((o) => {
-        html += `<div class="ih-mgr-select2-opt${o.value === _transferSelectedValue ? " ih-mgr-select2-opt-active" : ""}" data-value="${ihEscapeAttr(o.value)}">${ihEscapeHtml(o.label)}</div>`;
+        html += `<div class="ih-mgr-select2-opt${_sameTransferFile(o.value, selected) ? " ih-mgr-select2-opt-active" : ""}" role="option" aria-selected="${_sameTransferFile(o.value, selected)}" data-value="${ihEscapeAttr(o.value)}">${ihEscapeHtml(o.label)}</div>`;
       });
     }
     listEl.innerHTML = html;
   }
 
-  function _openTransferDropdown() {
-    content.find("#ih_mgr_transfer_select2").addClass("ih-mgr-select2-open");
-    content.find("#ih_mgr_transfer_search").val("");
-    content.find("#ih_mgr_transfer_search_clear").removeClass("ih-visible");
-    _renderTransferOptions("");
-    const dd = content.find("#ih_mgr_transfer_dropdown")[0];
-    const select2El = content.find("#ih_mgr_transfer_select2")[0];
+  function _openTransferDropdown(isSource = false) {
+    _closeTransferDropdown();
+    _closeSearchS2Dropdown();
+    _transferSelector(isSource, "select2").addClass("ih-mgr-select2-open");
+    _transferSelector(isSource, "display").attr("aria-expanded", "true");
+    _transferSelector(isSource, "search").val("");
+    _transferSelector(isSource, "search_clear").removeClass("ih-visible");
+    _renderTransferOptions("", isSource);
+    const dd = _transferSelector(isSource, "dropdown")[0];
+    const select2El = _transferSelector(isSource, "select2")[0];
     if (dd && select2El) {
       const panelEl = content[0];
       const panelStyle = window.getComputedStyle(panelEl);
@@ -12629,90 +12894,106 @@ function openHideManagerPanel() {
     if (dd) syncDialogTheme(dd);
     generateFaIconProtectionCSS();
     setTimeout(() => {
-      const si = content.find("#ih_mgr_transfer_search")[0];
+      const si = _transferSelector(isSource, "search")[0];
       if (si) si.focus();
     }, 30);
   }
 
   function _closeTransferDropdown() {
-    content.find("#ih_mgr_transfer_select2").removeClass("ih-mgr-select2-open");
+    content.find("#ih_mgr_transfer_select2, #ih_mgr_transfer_source_select2")
+      .removeClass("ih-mgr-select2-open");
+    content.find("#ih_mgr_transfer_display, #ih_mgr_transfer_source_display")
+      .attr("aria-expanded", "false");
+  }
+
+  async function _fetchTransferChatList(info) {
+    const resp = await fetch("/api/characters/chats", {
+      method: "POST",
+      headers: getRequestHeaders(),
+      body: JSON.stringify({ avatar_url: info.avatar, simple: true }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (!data || typeof data !== "object" || data.error) {
+      throw new Error("聊天档列表无效");
+    }
+    return Object.values(data);
   }
 
   async function loadTransferChatList() {
-    const actionBtns = content.find(
-      "#ih_mgr_transfer_copy, #ih_mgr_transfer_move",
-    );
-    const curEl = content.find("#ih_mgr_transfer_current");
-    const displayText = content.find(
-      "#ih_mgr_transfer_display .ih-mgr-select2-text",
-    );
     const info = _getTransferChar();
-    const _prevSelectedTarget = _transferSelectedValue;
-    _transferAllOptions = [];
-    _transferSelectedValue = "";
-    if (!info) {
-      displayText.text("无法获取当前角色");
-      actionBtns.prop("disabled", true);
-      curEl.text("—");
-      return;
+    const loadId = ++sharedState._transferChatListLoadId;
+    if (!info || info.group) {
+      content.find("#ih_mgr_transfer_display .ih-mgr-select2-text, #ih_mgr_transfer_source_display .ih-mgr-select2-text")
+        .text(info ? "群聊暂不支持转存" : "无法获取当前角色");
+      _syncTransferControls();
+      return false;
     }
-    if (info.group) {
-      displayText.text("群聊暂不支持转存");
-      actionBtns.prop("disabled", true);
-      curEl.text("群聊暂不支持");
-      return;
-    }
-    curEl.text(String(info.chatFile || "—"));
-    displayText.text("加载中…");
-    let chats = [];
+    const previousSource = _getTransferSourceValue();
+    const previousTarget = _getTransferTargetValue();
+    sharedState.transferListLoading = true;
+    _syncTransferControls();
     try {
-      const resp = await fetch("/api/characters/chats", {
-        method: "POST",
-        headers: getRequestHeaders(),
-        body: JSON.stringify({ avatar_url: info.avatar, simple: true }),
+      const chats = await _fetchTransferChatList(info);
+      if (loadId !== sharedState._transferChatListLoadId || !_transferContextMatches(info)) return false;
+      const options = [];
+      chats.forEach((c) => {
+        if (!c || !c.file_name) return;
+        const file = String(c.file_name).replace(/\.jsonl$/i, "") + ".jsonl";
+        if (options.some((o) => _sameTransferFile(o.value, file))) return;
+        const name = file.replace(/\.jsonl$/i, "");
+        const current = _isCurrentTransferFile(file, info);
+        const count = current ? `（${chat.length}条）`
+          : c.message_count != null ? `（${c.message_count}条）` : "";
+        options.push({
+          value: file,
+          label: name + (current ? "（当前）" : "") + count + _spNoteText(name),
+        });
       });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data && typeof data === "object" && !data.error) {
-          chats = Object.values(data);
-        }
+      const currentFile = _currentTransferFile(info);
+      if (currentFile && !options.some((o) => _sameTransferFile(o.value, currentFile))) {
+        options.unshift({ value: currentFile, label: info.chatFile + `（当前）（${chat.length}条）` });
       }
+      _transferAllOptions = options;
+      sharedState.transferListFailed = false;
+      sharedState.transferSourceFile = options.find((o) => _sameTransferFile(o.value, previousSource))?.value || currentFile;
+      if (!previousTarget || !options.some((o) => _sameTransferFile(o.value, previousTarget)) ||
+          (sharedState.searchBasket.length === 0 && _sameTransferFile(previousTarget, sharedState.transferSourceFile))) {
+        _transferSelectedValue = "";
+      }
+      _syncTransferSelectionDisplay(true);
+      _syncTransferSelectionDisplay(false);
+      if (!_sameTransferFile(previousSource, sharedState.transferSourceFile)) {
+        await loadTransferSource(sharedState.transferSourceFile);
+      } else if (_isCurrentTransferFile(sharedState.transferSourceFile, info)) {
+        sharedState.transferSourceChat = chat;
+        renderVisible();
+        updateCount();
+      } else if (!sharedState.transferSourceChat) {
+        await loadTransferSource(sharedState.transferSourceFile);
+      }
+      if (previousTarget !== _transferSelectedValue) await loadTransferTarget(_transferSelectedValue);
+      return true;
     } catch (e) {
+      if (loadId !== sharedState._transferChatListLoadId || !_transferContextMatches(info)) return false;
       console.error("快捷工具栏: 获取聊天档列表失败", e);
-    }
-    const currentChat = String(info.chatFile || "");
-    chats.forEach((c) => {
-      if (!c || !c.file_name) return;
-      const nameNoExt = String(c.file_name).replace(/\.jsonl$/i, "");
-      if (nameNoExt === currentChat) return;
-      const count = c.message_count != null ? `（${c.message_count}条）` : "";
-      _transferAllOptions.push({
-        value: c.file_name,
-        label: nameNoExt + count + _spNoteText(nameNoExt),
-      });
-    });
-    if (_transferAllOptions.length === 0) {
-      displayText.text("没有其他聊天档可选");
-      actionBtns.prop("disabled", true);
-      return;
-    }
-    actionBtns.prop("disabled", false);
-    if (_prevSelectedTarget) {
-      const _keepOpt = _transferAllOptions.find(
-        (o) => o.value === _prevSelectedTarget,
-      );
-      if (_keepOpt) {
-        _transferSelectedValue = _prevSelectedTarget;
-        displayText.text(_keepOpt.label);
-        return;
+      sharedState.transferListFailed = true;
+      if (_transferAllOptions.length === 0) {
+        content.find("#ih_mgr_transfer_display .ih-mgr-select2-text, #ih_mgr_transfer_source_display .ih-mgr-select2-text")
+          .text("读取失败，点击重试");
+      }
+      toastr.error("读取聊天档列表失败，可点击下拉框重试", "", { timeOut: 2000 });
+      return false;
+    } finally {
+      if (loadId === sharedState._transferChatListLoadId) {
+        sharedState.transferListLoading = false;
+        _syncTransferControls();
       }
     }
-    displayText.text("请选择目标聊天档…");
   }
 
-  async function _fetchTargetChat(nameNoExt) {
-    const info = _getTransferChar();
-    if (!info || info.group) return null;
+  async function _fetchTargetChat(nameNoExt, info = _getTransferChar()) {
+    if (!info || info.group) throw new Error("无法获取当前角色");
     const resp = await fetch("/api/chats/get", {
       method: "POST",
       headers: getRequestHeaders(),
@@ -12725,10 +13006,211 @@ function openHideManagerPanel() {
     });
     if (!resp.ok) throw new Error("读取失败");
     const data = await resp.json();
+    if (!Array.isArray(data)) throw new Error("聊天档数据无效");
     if (Array.isArray(data) && data.length > 0) {
       return { header: data[0], messages: data.slice(1) };
     }
     return { header: null, messages: [] };
+  }
+
+  function _transferDefaultHeader(info) {
+    return {
+      user_name: name1 || "User",
+      character_name: info.character.name,
+      create_date: new Date().toISOString(),
+      chat_metadata: {},
+    };
+  }
+
+  async function _readTransferChat(file, info = _getTransferChar()) {
+    if (!info || info.group || !_transferContextMatches(info)) throw new Error("聊天已切换");
+    if (_isCurrentTransferFile(file, info)) {
+      const ctx = SillyTavern.getContext();
+      const header = _transferDefaultHeader(info);
+      header.chat_metadata = JSON.parse(JSON.stringify(ctx.chatMetadata || ctx.chat_metadata || {}));
+      return { header, messages: JSON.parse(JSON.stringify(chat)) };
+    }
+    return _fetchTargetChat(String(file).replace(/\.jsonl$/i, ""), info);
+  }
+
+  async function _writeTransferChat(file, data, info, expectedMessages) {
+    if (!_transferContextMatches(info)) return false;
+    if (_isCurrentTransferFile(file, info)) {
+      if (expectedMessages && JSON.stringify(chat) !== JSON.stringify(expectedMessages)) {
+        console.warn("快捷工具栏: 转存期间当前聊天发生变化，取消写入");
+        return false;
+      }
+      const backup = JSON.parse(JSON.stringify(chat));
+      chatUndoManager.save();
+      chat.length = 0;
+      data.messages.forEach((msg) => chat.push(msg));
+      ihMarkChatTainted();
+      let ok = await ihSaveCurrentChat();
+      if (ok) {
+        try {
+          // 酒馆部分版本会吞掉保存错误，需要确认消息确实写入文件。
+          const saved = await _fetchTargetChat(String(file || info.chatFile).replace(/\.jsonl$/i, ""), info);
+          ok = JSON.stringify(saved.messages) === JSON.stringify(data.messages);
+        } catch (e) {
+          console.warn("快捷工具栏: 验证当前聊天保存失败", e);
+          ok = false;
+        }
+      }
+      if (!ok) {
+        if (_transferChatMatches(info) && JSON.stringify(chat) === JSON.stringify(data.messages)) {
+          chat.length = 0;
+          backup.forEach((msg) => chat.push(msg));
+        }
+        return false;
+      }
+    } else {
+      const resp = await fetch("/api/chats/save", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        cache: "no-cache",
+        body: JSON.stringify({
+          ch_name: info.character.name,
+          file_name: String(file).replace(/\.jsonl$/i, ""),
+          chat: [data.header || _transferDefaultHeader(info), ...data.messages],
+          avatar_url: info.avatar,
+          force: true,
+        }),
+      });
+      if (!resp.ok) return false;
+    }
+    if (!_transferContextMatches(info)) return true;
+    _ihSetSearchCache(file || _currentTransferFile(info), data.messages);
+    _syncTransferPreview(file, data.messages, data.header);
+    return true;
+  }
+
+  function _syncTransferPreview(file, messages, header, resetSelection = false) {
+    const actualFile = file || _currentTransferFile();
+    const previewMessages = _isCurrentTransferFile(actualFile) ? chat : messages;
+    if (_sameTransferFile(actualFile, _getTransferSourceValue())) {
+      sharedState.transferSourceChat = previewMessages;
+      sharedState.transferSourceHeader = header;
+      sharedState.transferSourceFailed = false;
+      sharedState.tokenCache.clear();
+      if (resetSelection) {
+        if (_isCurrentTransferFile(actualFile)) sharedState.selected.clear();
+        else sharedState.transferSourceSelected.clear();
+        sharedState.transferUpperInsertAt = null;
+      }
+      renderVisible();
+      updateCount();
+    }
+    if (_sameTransferFile(actualFile, _getTransferTargetValue())) {
+      sharedState.transferTargetChat = previewMessages;
+      sharedState.transferTargetHeader = header;
+      sharedState.transferTargetFailed = false;
+      if (resetSelection) sharedState.transferSelected.clear();
+      renderTransferTarget();
+      updateCount();
+    }
+  }
+
+  async function loadTransferSource(fileNameWithExt) {
+    const loadId = ++sharedState._transferSourceLoadId;
+    const info = _getTransferChar();
+    _resetTransferSourceList();
+    sharedState.transferSourceChat = null;
+    sharedState.transferSourceHeader = null;
+    sharedState.transferSourceFailed = false;
+    sharedState.transferSourceLoading = true;
+    _syncTransferControls();
+    renderVisible();
+    updateCount();
+    try {
+      const result = await _readTransferChat(fileNameWithExt, info);
+      if (loadId !== sharedState._transferSourceLoadId || !_transferContextMatches(info)) return;
+      sharedState.transferSourceHeader = result.header;
+      sharedState.transferSourceChat = _isCurrentTransferFile(fileNameWithExt, info) ? chat : result.messages;
+    } catch (e) {
+      if (loadId !== sharedState._transferSourceLoadId || !info || !_transferContextMatches(info)) return;
+      sharedState.transferSourceFailed = true;
+      console.error("快捷工具栏: 读取来源聊天档失败", e);
+      toastr.error("读取来源聊天档失败，请重新选择", "", { timeOut: 1800 });
+    } finally {
+      if (loadId === sharedState._transferSourceLoadId) {
+        sharedState.transferSourceLoading = false;
+        _syncTransferControls();
+        renderVisible();
+        updateCount();
+        if (sharedState.showToken) computeTotalTokens();
+      }
+    }
+  }
+
+  async function _createTransferChat(isSource = false) {
+    const info = _getTransferChar();
+    if (!info || info.group || sharedState.transferBusy) return;
+    let suggested = String(_transferSelector(isSource, "search").val() || "新聊天").trim() || "新聊天";
+    const base = suggested;
+    let suffix = 2;
+    while (_transferAllOptions.some((o) => _sameTransferFile(o.value, suggested))) {
+      suggested = `${base}（${suffix++}）`;
+    }
+    sharedState.transferBusy = true;
+    _closeTransferDropdown();
+    _syncTransferControls();
+    try {
+      let newName;
+      while (true) {
+        const input = await ihAskText("新建聊天档：输入名称", suggested);
+        if (input === null || !_transferContextMatches(info)) return;
+        newName = String(input).trim().replace(/\.jsonl$/i, "");
+        suggested = newName;
+        if (!newName || /[<>:"/\\|?*\x00-\x1f\x7f]/.test(newName) || /[. ]$/.test(newName) ||
+            /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(newName) ||
+            new TextEncoder().encode(newName + ".jsonl").length > 255) {
+          toastr.warning("聊天档名称无效，请换一个名称（不要包含文件路径或特殊符号）", "", { timeOut: 2500 });
+          continue;
+        }
+        const chats = await _fetchTransferChatList(info);
+        if (!_transferContextMatches(info)) return;
+        if (_sameTransferFile(newName, info.chatFile) ||
+            chats.some((c) => c?.file_name && _sameTransferFile(c.file_name, newName))) {
+          toastr.warning("已有同名聊天档，请换一个名称", "", { timeOut: 2000 });
+          continue;
+        }
+        break;
+      }
+      const header = _transferDefaultHeader(info);
+      header.chat_metadata.integrity = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+      const resp = await fetch("/api/chats/save", {
+        method: "POST",
+        headers: getRequestHeaders(),
+        cache: "no-cache",
+        body: JSON.stringify({
+          ch_name: info.character.name,
+          file_name: newName,
+          chat: [header],
+          avatar_url: info.avatar,
+          force: false,
+        }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!_transferContextMatches(info)) return;
+      const file = newName + ".jsonl";
+      _ihSetSearchCache(file, []);
+      _pushTransferHistory(file);
+      await loadTransferChatList();
+      if (!_transferContextMatches(info)) return;
+      if (!_transferAllOptions.some((o) => _sameTransferFile(o.value, file))) {
+        _transferAllOptions.push({ value: file, label: newName + "（0条）" });
+      }
+      sharedState.transferBusy = false;
+      if (isSource) await _setTransferSourceSelected(file);
+      else await _setTransferSelected(file);
+      toastr.success(`已新建聊天档「${newName}」并选为目标`, "", { timeOut: 1800 });
+    } catch (e) {
+      console.error("快捷工具栏: 新建聊天档失败", e);
+      toastr.error("新建聊天档失败，请重试", "", { timeOut: 2000 });
+    } finally {
+      sharedState.transferBusy = false;
+      _syncTransferControls();
+    }
   }
 
   function _transferBuildRow(floor, insertAt) {
@@ -12758,12 +13240,12 @@ function openHideManagerPanel() {
       <div class="${cls.join(" ")}" data-tfloor="${floor}" style="height:${ROW_HEIGHT}px;">
         <span class="ih-mgr-tmsg-check"><input type="checkbox" data-tfloor="${floor}" ${isChecked ? "checked" : ""} /></span>
         <span class="ih-mgr-msg-lead">
-          <button class="ih-mgr-tmsg-jump" data-tfloor="${floor}" title="打开目标聊天档并跳转到此消息"><i class="fa-solid fa-location-arrow"></i></button>
+          <button class="ih-mgr-tmsg-jump" data-tfloor="${floor}" title="打开此聊天档并跳转到此消息"><i class="fa-solid fa-location-arrow"></i></button>
           <span class="ih-mgr-msg-floor">#${floor}</span>
         </span>
         <span class="ih-mgr-msg-sender">${sender}</span>
         <span class="ih-mgr-msg-preview">${preview}</span>
-        <button class="ih-mgr-tmsg-edit" data-tfloor="${floor}" title="查看 / 编辑此楼层（保存后写回目标聊天档）"><i class="fa-solid fa-eye"></i></button>
+        <button class="ih-mgr-tmsg-edit" data-tfloor="${floor}" title="查看 / 编辑此楼层（保存后写回此聊天档）"><i class="fa-solid fa-eye"></i></button>
         ${ghost}
       </div>`;
   }
@@ -12790,7 +13272,9 @@ function openHideManagerPanel() {
       spacerBottom.style.height = "0px";
       rowsHost.innerHTML = "";
       tail.innerHTML =
-        '<div class="ih-mgr-transfer-empty">请在上方选择目标聊天档</div>';
+        sharedState.transferTargetFailed
+          ? '<div class="ih-mgr-transfer-empty">读取失败，请重新选择聊天档</div>'
+          : '<div class="ih-mgr-transfer-empty">请在上方选择聊天档</div>';
       return;
     }
     const total2 = arr.length;
@@ -12800,7 +13284,7 @@ function openHideManagerPanel() {
         : sharedState.transferInsertAt;
     const scrollTop = listEl.scrollTop;
     const viewH = listEl.clientHeight || 300;
-    const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER);
+    const startIdx = Math.min(total2, Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER));
     const endIdx = Math.min(
       total2,
       Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + BUFFER,
@@ -12833,6 +13317,8 @@ function openHideManagerPanel() {
   }
 
   async function loadTransferTarget(fileNameWithExt) {
+    const loadId = ++sharedState._transferTargetLoadId;
+    const info = _getTransferChar();
     sharedState.transferSelected.clear();
     sharedState.transferRangeStart = null;
     sharedState.transferRangeMode = false;
@@ -12840,70 +13326,95 @@ function openHideManagerPanel() {
     content
       .find(".ih-mgr-transfer-target-list")
       .removeClass("ih-mgr-range-mode");
+    sharedState.transferTargetChat = null;
+    sharedState.transferTargetHeader = null;
+    sharedState.transferTargetFailed = false;
+    sharedState.transferInsertAt = null;
+    sharedState.transferJumpHighlight = null;
+    if (sharedState._transferJumpHlTimer) clearTimeout(sharedState._transferJumpHlTimer);
+    const listEl = content.find("#ih_mgr_transfer_target_list")[0];
+    if (listEl) listEl.scrollTop = 0;
     updateCount();
     if (!fileNameWithExt) {
-      sharedState.transferTargetChat = null;
-      sharedState.transferTargetHeader = null;
-      sharedState.transferInsertAt = null;
+      sharedState.transferLoading = false;
+      _syncTransferControls();
       renderTransferTarget();
       return;
     }
     sharedState.transferLoading = true;
+    _syncTransferControls();
     renderTransferTarget();
-    const nameNoExt = String(fileNameWithExt).replace(/\.jsonl$/i, "");
     try {
-      const result = await _fetchTargetChat(nameNoExt);
+      const result = await _readTransferChat(fileNameWithExt, info);
+      if (loadId !== sharedState._transferTargetLoadId || !_transferContextMatches(info)) return;
       sharedState.transferTargetHeader = result.header;
-      sharedState.transferTargetChat = result.messages;
+      sharedState.transferTargetChat = _isCurrentTransferFile(fileNameWithExt, info) ? chat : result.messages;
       sharedState.transferInsertAt = null;
     } catch (e) {
+      if (loadId !== sharedState._transferTargetLoadId || !info || !_transferContextMatches(info)) return;
+      sharedState.transferTargetFailed = true;
       console.error("快捷工具栏: 读取目标聊天档失败", e);
       sharedState.transferTargetChat = null;
       sharedState.transferTargetHeader = null;
       toastr.error("读取目标聊天档失败", "", { timeOut: 1500 });
     } finally {
-      sharedState.transferLoading = false;
-      renderTransferTarget();
+      if (loadId === sharedState._transferTargetLoadId) {
+        sharedState.transferLoading = false;
+        _syncTransferControls();
+        renderTransferTarget();
+        updateCount();
+      }
     }
   }
 
-  content.on("click", "#ih_mgr_transfer_display", function (e) {
-    e.stopPropagation();
-    const isOpen = content
-      .find("#ih_mgr_transfer_select2")
-      .hasClass("ih-mgr-select2-open");
-    if (isOpen) {
-      _closeTransferDropdown();
-    } else {
-      if (_transferAllOptions.length === 0) return;
-      _openTransferDropdown();
-    }
+  [false, true].forEach((isSource) => {
+    _transferSelector(isSource, "display").on("click", async function (e) {
+      e.stopPropagation();
+      if ($(this).attr("aria-disabled") === "true") return;
+      if (_transferSelector(isSource, "select2").hasClass("ih-mgr-select2-open")) {
+        _closeTransferDropdown();
+        return;
+      }
+      if (sharedState.transferListFailed && !(await loadTransferChatList())) return;
+      _openTransferDropdown(isSource);
+    }).on("keydown", function (e) {
+      if (["Enter", " ", "ArrowDown"].includes(e.key)) {
+        e.preventDefault();
+        $(this).trigger("click");
+      } else if (e.key === "Escape") {
+        e.stopPropagation();
+        _closeTransferDropdown();
+      }
+    });
+    _transferSelector(isSource, "search").on("input", function () {
+      const v = $(this).val();
+      _transferSelector(isSource, "search_clear").toggleClass("ih-visible", !!String(v).length);
+      _renderTransferOptions(v, isSource);
+    }).on("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        _transferSelector(isSource, "options").find(".ih-mgr-select2-opt").first().trigger("click");
+      } else if (e.key === "Escape") {
+        e.stopPropagation();
+        _closeTransferDropdown();
+        _transferSelector(isSource, "display").trigger("focus");
+      }
+    });
+    _transferSelector(isSource, "search_clear").on("click", function (e) {
+      e.stopPropagation();
+      _transferSelector(isSource, "search").val("").trigger("input").trigger("focus");
+    });
+    _transferSelector(isSource, "options").on("click", ".ih-mgr-select2-opt", function () {
+      const value = $(this).attr("data-value");
+      if (!value) return;
+      if (isSource) _setTransferSourceSelected(value);
+      else _setTransferSelected(value);
+    });
+    _transferSelector(isSource, "dropdown").on("click", (e) => e.stopPropagation());
+    _transferSelector(isSource, "new_chat").on("click", () => _createTransferChat(isSource));
   });
-  content.on("input", "#ih_mgr_transfer_search", function () {
-    const v = $(this).val();
-    content
-      .find("#ih_mgr_transfer_search_clear")
-      .toggleClass("ih-visible", !!String(v).length);
-    _renderTransferOptions(v);
-  });
-  content.on("click", "#ih_mgr_transfer_search_clear", function (e) {
-    e.stopPropagation();
-    const si = content.find("#ih_mgr_transfer_search");
-    si.val("");
-    content.find("#ih_mgr_transfer_search_clear").removeClass("ih-visible");
-    _renderTransferOptions("");
-    si.focus();
-  });
-  content.on(
-    "click",
-    "#ih_mgr_transfer_options .ih-mgr-select2-opt",
-    function () {
-      const val = $(this).attr("data-value");
-      if (val) _setTransferSelected(val);
-    },
-  );
-  content.on("click", "#ih_mgr_transfer_dropdown", function (e) {
-    e.stopPropagation();
+  content.find("#ih_mgr_transfer_source_reset").on("click", () => {
+    _setTransferSourceSelected(_currentTransferFile());
   });
   content.find("#ih_mgr_transfer_clear_selected").on("click", () => {
     _setTransferSelected("");
@@ -12926,19 +13437,23 @@ function openHideManagerPanel() {
 
   function _updateTransferDirectionUI() {
     const isLower = sharedState.manageTarget === "lower";
+    content.find("#ih_mgr_transfer_source_label").text(isLower ? "目标聊天档" : "来源聊天档");
+    content.find("#ih_mgr_transfer_target_label").text(isLower ? "来源聊天档" : "目标聊天档");
+    content.find("#ih_mgr_transfer_source_new_chat").toggle(isLower);
+    content.find("#ih_mgr_transfer_new_chat").toggle(!isLower);
     if (isLower) {
       content
         .find("#ih_mgr_transfer_target_label_text")
-        .text("来源聊天档预览（勾选要转入当前聊天的消息）");
+        .text("来源聊天档预览（勾选要转入上方聊天档的消息）");
       content
         .find("#ih_mgr_transfer_target_arrow")
         .attr("class", "fa-solid fa-arrow-up-long");
       content
         .find("#ih_mgr_transfer_copy")
-        .html('<i class="fa-solid fa-copy"></i> 复制至当前');
+        .html('<i class="fa-solid fa-copy"></i> 复制至上方');
       content
         .find("#ih_mgr_transfer_move")
-        .html('<i class="fa-solid fa-scissors"></i> 移动至当前');
+        .html('<i class="fa-solid fa-scissors"></i> 移动至上方');
     } else {
       content
         .find("#ih_mgr_transfer_target_label_text")
@@ -12959,6 +13474,7 @@ function openHideManagerPanel() {
   }
 
   content.find("#ih_mgr_manage_toggle").on("click", () => {
+    if (sharedState.transferBusy) return;
     sharedState.manageTarget =
       sharedState.manageTarget === "lower" ? "upper" : "lower";
     sharedState.rangeMode = false;
@@ -12996,6 +13512,7 @@ function openHideManagerPanel() {
   }
 
   content.on("click", ".ih-mgr-tmsg-item, .ih-mgr-tmsg-end", function (e) {
+    if (sharedState.transferBusy || sharedState.transferLoading) return;
     if ($(e.target).closest(".ih-mgr-tmsg-edit").length) return;
     if ($(e.target).closest(".ih-mgr-tmsg-jump").length) return;
     const f = parseInt($(this).attr("data-tfloor"));
@@ -13039,43 +13556,16 @@ function openHideManagerPanel() {
   });
   content.on("click", ".ih-mgr-tmsg-jump", async function (e) {
     e.stopPropagation();
-    const f = parseInt($(this).attr("data-tfloor"));
-    if (isNaN(f)) return;
-    const info = _getTransferChar();
-    const targetFile = _getTransferTargetValue();
-    if (!info || info.group || !targetFile) {
-      toastr.warning("请先选择目标聊天档", "", { timeOut: 1200 });
-      return;
-    }
-    const nameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
-    _mgrFoldForJump();
-    try {
-      if (typeof openCharacterChat === "function") {
-        await openCharacterChat(nameNoExt);
-      } else {
-        info.character.chat = nameNoExt;
-        await executeSlashCommandsWithOptions("/chat-reload");
-      }
-      setTimeout(() => {
-        const chatEl = document.getElementById("chat");
-        if (!chatEl) return;
-        const mesEl = chatEl.querySelector(`.mes[mesid="${f}"]`);
-        if (mesEl) {
-          const r = mesEl.getBoundingClientRect();
-          const useCenter = r.height < chatEl.clientHeight - 40;
-          scrollChatToElement(mesEl, "smooth", useCenter);
-        } else {
-          executeSlashCommandsWithOptions(`/chat-jump ${f}`);
-        }
-      }, 600);
-    } catch (e2) {
-      console.error("快捷工具栏: 打开目标聊天档跳转失败", e2);
-      toastr.warning("打开目标聊天档失败，请手动切换", "", { timeOut: 2000 });
-    }
+    if (sharedState.transferBusy) return;
+    const floor = parseInt($(this).attr("data-tfloor"));
+    const file = _getTransferTargetValue();
+    if (isNaN(floor) || !file) return;
+    await _openTransferChatAt(file, floor);
   });
   content.on("click", ".ih-mgr-tmsg-edit", function (e) {
     e.stopPropagation();
     e.preventDefault();
+    if (sharedState.transferBusy) return;
     const f = parseInt($(this).attr("data-tfloor"));
     const arr = sharedState.transferTargetChat || [];
     if (isNaN(f) || !arr[f]) return;
@@ -13087,363 +13577,207 @@ function openHideManagerPanel() {
     _meOpen(tf, f, null);
   });
 
-  async function doTransfer(isMove) {
+  async function _openTransferChatAt(file, floor, flashCount = 0, refreshCurrent = false) {
     const info = _getTransferChar();
-    if (!info || info.group) {
-      toastr.warning("当前无法转存", "", { timeOut: 1200 });
-      return;
-    }
-    const targetFile = _getTransferTargetValue();
-    if (!targetFile) {
-      toastr.warning("请先选择目标聊天档", "", { timeOut: 1200 });
-      return;
-    }
-    if (sharedState.manageTarget === "lower") {
-      return _doTransferIntoCurrent(isMove, info, targetFile);
-    }
-    const selected = getSortedSelected();
-    if (selected.length === 0) {
-      toastr.warning("请先在上方勾选要转存的消息", "", { timeOut: 1200 });
-      return;
-    }
-    const nameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
-    let header = null;
-    let targetMsgs = [];
+    if (_mgrClosed || !info || info.group || !file) return false;
+    const name = String(file).replace(/\.jsonl$/i, "");
+    const isCurrent = _isCurrentTransferFile(file, info);
+    if (isCurrent && !refreshCurrent) _mgrFold();
+    else _mgrFoldForJump();
     try {
-      const result = await _fetchTargetChat(nameNoExt);
-      header = result.header;
-      targetMsgs = result.messages;
-    } catch (e) {
-      console.error("快捷工具栏: 转存前读取目标失败", e);
-      toastr.error("读取目标聊天档失败，转存已取消", "", { timeOut: 1800 });
-      return;
-    }
-    if (!header) {
-      header = {
-        user_name: name1 || "User",
-        character_name: info.character.name,
-        create_date: new Date().toISOString(),
-        chat_metadata: {},
-      };
-    }
-    if (getSettings().confirmDangerousActions) {
-      const modeText = isMove ? "移动" : "复制";
-      const extra = isMove ? "\n（移动后这些消息将从当前聊天中删除）" : "";
-      if (
-        !confirm(
-          `确定将选中的 ${selected.length} 条消息${modeText}至「${nameNoExt}」吗？${extra}`,
-        )
-      )
-        return;
-    }
-    let toTransfer;
-    try {
-      toTransfer = JSON.parse(JSON.stringify(selected.map((f) => chat[f])));
-    } catch (e) {
-      toastr.error("消息数据异常，转存失败", "", { timeOut: 1500 });
-      return;
-    }
-    let insertAt =
-      sharedState.transferInsertAt == null
-        ? targetMsgs.length
-        : sharedState.transferInsertAt;
-    insertAt = Math.max(0, Math.min(targetMsgs.length, insertAt));
-    targetMsgs.splice(insertAt, 0, ...toTransfer);
-    const jumpToFloor = insertAt;
-    const transferCount = toTransfer.length;
-    let saveOk = false;
-    try {
-      const saveResp = await fetch("/api/chats/save", {
-        method: "POST",
-        headers: getRequestHeaders(),
-        cache: "no-cache",
-        body: JSON.stringify({
-          ch_name: info.character.name,
-          file_name: nameNoExt,
-          chat: [header, ...targetMsgs],
-          avatar_url: info.avatar,
-          force: true,
-        }),
-      });
-      saveOk = saveResp.ok;
-    } catch (e) {
-      console.error("快捷工具栏: 写入目标聊天档失败", e);
-    }
-    if (!saveOk) {
-      toastr.error("写入目标聊天档失败，转存已取消", "", { timeOut: 1800 });
-      return;
-    }
-    _ihSetSearchCache(targetFile, targetMsgs);
-    _pushTransferHistory(targetFile);
-    let curEmptiedName = null;
-    if (isMove) {
-      const reversed = [...selected].sort((a, b) => b - a);
-      for (const f of reversed) chat.splice(f, 1);
-      const _okMoveOut = await ihSaveCurrentChat();
-      if (!_okMoveOut) {
-        console.error("快捷工具栏: 保存当前聊天失败");
-      }
-      if (chat.length === 0) curEmptiedName = String(info.chatFile || "");
-    }
-    _mgrFoldForJump();
-    toastr.success(
-      `已${isMove ? "移动" : "复制"} ${selected.length} 条消息到「${nameNoExt}」，正在打开…`,
-      "",
-      { timeOut: 1500 },
-    );
-    try {
-      if (typeof openCharacterChat === "function") {
-        await openCharacterChat(nameNoExt);
+      if (isCurrent) {
+        if (refreshCurrent) {
+          await executeSlashCommandsWithOptions("/chat-reload");
+          setTimeout(() => _mgrRefreshAfterDataChange(), 700);
+        }
+      } else if (typeof openCharacterChat === "function") {
+        await openCharacterChat(name);
       } else {
-        info.character.chat = nameNoExt;
+        info.character.chat = name;
         await executeSlashCommandsWithOptions("/chat-reload");
       }
       setTimeout(() => {
+        if (_mgrClosed) return;
+        const current = _getTransferChar();
+        if (!current || current.avatar !== info.avatar || !_sameTransferFile(file, current.chatFile)) return;
         const chatEl = document.getElementById("chat");
         if (!chatEl) return;
-        const mesEl = chatEl.querySelector(`.mes[mesid="${jumpToFloor}"]`);
+        const mesEl = chatEl.querySelector('.mes[mesid="' + floor + '"]');
         if (mesEl) {
-          const r = mesEl.getBoundingClientRect();
-          const useCenter = r.height < chatEl.clientHeight - 40;
-          scrollChatToElement(mesEl, "smooth", useCenter);
+          scrollChatToElement(mesEl, "smooth", mesEl.getBoundingClientRect().height < chatEl.clientHeight - 40);
         } else {
-          executeSlashCommandsWithOptions(`/chat-jump ${jumpToFloor}`);
+          executeSlashCommandsWithOptions("/chat-jump " + floor);
         }
-        setTimeout(() => {
-          const flashChatEl = document.getElementById("chat");
-          if (!flashChatEl) return;
-          const flashed = [];
-          for (let i = 0; i < transferCount; i++) {
-            const el = flashChatEl.querySelector(
-              `.mes[mesid="${jumpToFloor + i}"]`,
-            );
-            if (el) {
-              el.classList.add("ih-transfer-landed");
-              flashed.push(el);
-            }
-          }
+        if (flashCount > 0) {
           setTimeout(() => {
-            flashed.forEach((el) => el.classList.remove("ih-transfer-landed"));
-          }, 2200);
-        }, 400);
-      }, 600);
-    } catch (e) {
-      console.error("快捷工具栏: 打开目标聊天档失败", e);
-      toastr.warning("转存成功，但自动打开失败，请手动切换聊天", "", {
-        timeOut: 2000,
-      });
-    }
-    if (isMove) {
-      setTimeout(async () => {
-        try {
-          if (curEmptiedName) {
-            const askOk = await ihAskDeleteEmptyChat(curEmptiedName, true);
-            if (askOk) {
-              const delOk = await _ihDeleteChatFile(
-                curEmptiedName + ".jsonl",
-                info.avatar,
-              );
-              if (delOk) {
-                _ihDeleteSearchCache(curEmptiedName + ".jsonl");
-                toastr.success(`已删除空聊天档「${curEmptiedName}」`, "", {
-                  timeOut: 1500,
-                });
-              } else {
-                toastr.error("删除空聊天档失败", "", { timeOut: 1800 });
+            if (_mgrClosed || !_isCurrentTransferFile(file) || _getTransferChar()?.avatar !== info.avatar) return;
+            const landed = [];
+            for (let i = 0; i < flashCount; i++) {
+              const el = chatEl.querySelector('.mes[mesid="' + (floor + i) + '"]');
+              if (el) {
+                el.classList.add("ih-transfer-landed");
+                landed.push(el);
               }
             }
-          }
-          const dups = await ihFindDuplicateChats("");
-          if (dups.length) await ihAskDeleteDuplicates(dups);
-        } catch (err) {
-          console.warn("快捷工具栏: 转存后检测失败", err);
+            setTimeout(() => landed.forEach((el) => el.classList.remove("ih-transfer-landed")), 2200);
+          }, 400);
         }
-      }, 1500);
+      }, 600);
+      return true;
+    } catch (e) {
+      _mgrKeepOnChatChange = false;
+      console.error("快捷工具栏: 打开聊天档失败", e);
+      toastr.warning("打开聊天档失败，请手动切换", "", { timeOut: 2000 });
+      return false;
     }
   }
 
-  async function _doTransferIntoCurrent(isMove, info, targetFile) {
-    const selected = Array.from(sharedState.transferSelected).sort(
-      (a, b) => a - b,
-    );
+  async function doTransfer(isMove) {
+    const info = _getTransferChar();
+    if (!info || info.group || sharedState.transferBusy) return;
+    const upperFile = _getTransferSourceValue();
+    const lowerFile = _getTransferTargetValue();
+    if (!upperFile || !lowerFile) {
+      toastr.warning("请先选择来源与目标聊天档", "", { timeOut: 1500 });
+      return;
+    }
+    if (_sameTransferFile(upperFile, lowerFile)) {
+      toastr.warning("来源与目标请选择不同的聊天档", "", { timeOut: 1500 });
+      return;
+    }
+    if (sharedState.transferSourceLoading || sharedState.transferLoading || sharedState.transferListLoading) {
+      toastr.warning("聊天档尚未加载完成", "", { timeOut: 1200 });
+      return;
+    }
+    const isLower = sharedState.manageTarget === "lower";
+    const sourceFile = isLower ? lowerFile : upperFile;
+    const destinationFile = isLower ? upperFile : lowerFile;
+    const selection = isLower ? sharedState.transferSelected : _getUpperSelected();
+    const selected = Array.from(selection).sort((a, b) => a - b);
     if (selected.length === 0) {
-      toastr.warning("请先在下方勾选要转入当前聊天的消息", "", {
-        timeOut: 1200,
-      });
+      toastr.warning("请先勾选要转存的消息", "", { timeOut: 1200 });
       return;
     }
-    const nameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
-    let header = null;
-    let srcMsgs = [];
+    const sourcePreview = isLower ? sharedState.transferTargetChat : _getUpperMessages();
+    const destinationPreview = isLower ? _getUpperMessages() : sharedState.transferTargetChat;
+    const insertion = isLower ? sharedState.transferUpperInsertAt : sharedState.transferInsertAt;
+    const sourceName = String(sourceFile).replace(/\.jsonl$/i, "");
+    const destinationName = String(destinationFile).replace(/\.jsonl$/i, "");
+    sharedState.transferBusy = true;
+    _closeTransferDropdown();
+    _syncTransferControls();
     try {
-      const result = await _fetchTargetChat(nameNoExt);
-      header = result.header;
-      srcMsgs = result.messages;
-    } catch (e) {
-      console.error("快捷工具栏: 转存前读取来源档失败", e);
-      toastr.error("读取来源聊天档失败，转存已取消", "", { timeOut: 1800 });
-      return;
-    }
-    const maxIdx = srcMsgs.length - 1;
-    const validSelected = selected.filter((f) => f >= 0 && f <= maxIdx);
-    if (validSelected.length === 0) {
-      toastr.warning("选中的楼层在来源聊天档中已不存在", "", { timeOut: 1500 });
-      return;
-    }
-    if (getSettings().confirmDangerousActions) {
-      const modeText = isMove ? "移动" : "复制";
-      const extra = isMove ? "\n（移动后这些消息将从来源聊天档中删除）" : "";
-      if (
-        !confirm(
-          `确定将来源聊天档「${nameNoExt}」中选中的 ${validSelected.length} 条消息${modeText}至当前聊天吗？${extra}`,
-        )
-      )
-        return;
-    }
-    let toTransfer;
-    try {
-      toTransfer = JSON.parse(
-        JSON.stringify(validSelected.map((f) => srcMsgs[f])),
-      );
-    } catch (e) {
-      toastr.error("消息数据异常，转存失败", "", { timeOut: 1500 });
-      return;
-    }
-    let newSrc = null;
-    if (isMove) {
-      if (!header) {
-        header = {
-          user_name: name1 || "User",
-          character_name: info.character.name,
-          create_date: new Date().toISOString(),
-          chat_metadata: {},
-        };
-      }
-      newSrc = [...srcMsgs];
-      const reversed = [...validSelected].sort((a, b) => b - a);
-      for (const f of reversed) newSrc.splice(f, 1);
-    }
-    let insertAt =
-      sharedState.transferUpperInsertAt == null
-        ? chat.length
-        : sharedState.transferUpperInsertAt;
-    insertAt = Math.max(0, Math.min(chat.length, insertAt));
-    const jumpToFloor = insertAt;
-    const transferCount = toTransfer.length;
-    const currentChatBackup = JSON.parse(JSON.stringify(chat));
-    chatUndoManager.save();
-    chat.splice(insertAt, 0, ...toTransfer);
-
-    const _okInto = await ihSaveCurrentChat();
-    if (!_okInto) {
-      chat.length = 0;
-      currentChatBackup.forEach((msg) => chat.push(msg));
+      let source;
+      let destination;
       try {
-        await ihSaveCurrentChat();
-        await executeSlashCommandsWithOptions("/chat-reload");
-      } catch (rollbackError) {
-        console.error("快捷工具栏: 恢复当前聊天失败", rollbackError);
-      }
-      toastr.error("当前聊天保存失败，本次转存已撤销", "", {
-        timeOut: 2000,
-      });
-      return;
-    }
-
-    let sourceDeleteFailed = false;
-    if (isMove) {
-      try {
-        const resp = await fetch("/api/chats/save", {
-          method: "POST",
-          headers: getRequestHeaders(),
-          cache: "no-cache",
-          body: JSON.stringify({
-            ch_name: info.character.name,
-            file_name: nameNoExt,
-            chat: [header, ...newSrc],
-            avatar_url: info.avatar,
-            force: true,
-          }),
-        });
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
-        }
-        _ihSetSearchCache(targetFile, newSrc);
-        if (newSrc.length === 0) {
-          const askOk = await ihAskDeleteEmptyChat(nameNoExt, false);
-          if (askOk) {
-            await _ihDeleteChatFile(targetFile, info.avatar);
-            _ihDeleteSearchCache(targetFile);
-          }
-        }
+        [source, destination] = await Promise.all([
+          _readTransferChat(sourceFile, info),
+          _readTransferChat(destinationFile, info),
+        ]);
       } catch (e) {
-        sourceDeleteFailed = true;
-        console.error("快捷工具栏: 从来源档删除失败", e);
+        console.error("快捷工具栏: 转存前读取聊天档失败", e);
+        toastr.error("读取聊天档失败，转存已取消", "", { timeOut: 1800 });
+        return;
       }
-    }
-
-    _pushTransferHistory(targetFile);
-    _mgrFoldForJump();
-    try {
-      await executeSlashCommandsWithOptions("/chat-reload");
-      setTimeout(function () {
-        _mgrRefreshAfterDataChange();
-      }, 700);
-      if (sourceDeleteFailed) {
-        toastr.warning(
-          `已将 ${transferCount} 条消息保存到当前聊天，但来源聊天档删除失败；消息仍保留在原处，请核对后再手动删除`,
-          "",
-          { timeOut: 3500 },
-        );
-      } else {
-        toastr.success(
-          `已${isMove ? "移动" : "复制"} ${transferCount} 条消息到当前聊天`,
-          "",
-          { timeOut: 1500 },
-        );
+      if (!_transferContextMatches(info)) return;
+      if (selected.some((f) => !source.messages[f] || !sourcePreview?.[f] ||
+          ihBranchFingerprint(source.messages[f]) !== ihBranchFingerprint(sourcePreview[f]))) {
+        toastr.warning("来源聊天档已发生变化，请重新选择消息", "", { timeOut: 2500 });
+        if (isLower) await loadTransferTarget(sourceFile);
+        else await loadTransferSource(sourceFile);
+        return;
       }
-      setTimeout(() => {
-        const chatEl = document.getElementById("chat");
-        if (!chatEl) return;
-        const mesEl = chatEl.querySelector(`.mes[mesid="${jumpToFloor}"]`);
-        if (mesEl) {
-          const r = mesEl.getBoundingClientRect();
-          const useCenter = r.height < chatEl.clientHeight - 40;
-          scrollChatToElement(mesEl, "smooth", useCenter);
-        } else {
-          executeSlashCommandsWithOptions(`/chat-jump ${jumpToFloor}`);
-        }
-        setTimeout(() => {
-          const flashChatEl = document.getElementById("chat");
-          if (!flashChatEl) return;
-          const flashed = [];
-          for (let i = 0; i < transferCount; i++) {
-            const el = flashChatEl.querySelector(
-              `.mes[mesid="${jumpToFloor + i}"]`,
-            );
-            if (el) {
-              el.classList.add("ih-transfer-landed");
-              flashed.push(el);
-            }
-          }
-          setTimeout(() => {
-            flashed.forEach((el) => el.classList.remove("ih-transfer-landed"));
-          }, 2200);
-        }, 400);
-      }, 600);
-    } catch (e) {
-      console.error("转入当前聊天失败", e);
-      toastr.error("转存失败", "", { timeOut: 1500 });
-    }
-    if (isMove) {
-      setTimeout(async () => {
+      if (insertion != null && (!destination.messages[insertion] || !destinationPreview?.[insertion] ||
+          ihBranchFingerprint(destination.messages[insertion]) !== ihBranchFingerprint(destinationPreview[insertion]))) {
+        toastr.warning("目标聊天档的落点已发生变化，请重新选择落点", "", { timeOut: 2500 });
+        if (isLower) await loadTransferSource(destinationFile);
+        else await loadTransferTarget(destinationFile);
+        return;
+      }
+      if (getSettings().confirmDangerousActions) {
+        const mode = isMove ? "移动" : "复制";
+        const extra = isMove ? "\n（移动后这些消息将从来源聊天档中删除）" : "";
+        if (!confirm("确定将「" + sourceName + "」中选中的 " + selected.length + " 条消息" + mode + "至「" + destinationName + "」吗？" + extra)) return;
+      }
+      const sourceBefore = JSON.parse(JSON.stringify(source.messages));
+      const destinationBefore = JSON.parse(JSON.stringify(destination.messages));
+      const messages = JSON.parse(JSON.stringify(selected.map((f) => source.messages[f])));
+      const insertAt = insertion == null ? destination.messages.length
+        : Math.max(0, Math.min(destination.messages.length, insertion));
+      destination.messages.splice(insertAt, 0, ...messages);
+      let saved = false;
+      try {
+        saved = await _writeTransferChat(destinationFile, destination, info, destinationBefore);
+      } catch (e) {
+        console.error("快捷工具栏: 写入目标聊天档失败", e);
+      }
+      if (!saved) {
+        toastr.error("写入目标聊天档失败，转存已取消，来源消息已保留", "", { timeOut: 2200 });
+        return;
+      }
+      if (!_transferContextMatches(info)) {
+        if (isMove) toastr.warning("目标聊天档已保存；面板已关闭或聊天已切换，来源消息已保留", "", { timeOut: 2500 });
+        return;
+      }
+      let sourceDeleteFailed = false;
+      if (isMove) {
+        const floors = new Set(selected);
+        source.messages = source.messages.filter((_, floor) => !floors.has(floor));
         try {
-          const dups = await ihFindDuplicateChats(targetFile);
-          if (dups.length) await ihAskDeleteDuplicates(dups);
-        } catch (err) {
-          console.warn("快捷工具栏: 重复档检测失败", err);
+          sourceDeleteFailed = !(await _writeTransferChat(sourceFile, source, info, sourceBefore));
+        } catch (e) {
+          sourceDeleteFailed = true;
+          console.error("快捷工具栏: 从来源聊天档删除失败", e);
         }
-      }, 1200);
+        if (!sourceDeleteFailed) {
+          _mgrPruneBasketByFile(_isCurrentTransferFile(sourceFile, info) ? "" : sourceFile);
+        }
+      }
+      if (!_transferContextMatches(info)) {
+        if (sourceDeleteFailed) toastr.warning("目标聊天档已保存，但来源删除未完成，来源消息仍保留在原处", "", { timeOut: 3000 });
+        return;
+      }
+      selection.clear();
+      sharedState.transferUpperInsertAt = null;
+      sharedState.transferInsertAt = null;
+      _pushTransferHistory(destinationFile);
+      _updateBasketBanner();
+      refreshList();
+      renderTransferTarget();
+      if (sourceDeleteFailed) {
+        toastr.warning("已将 " + messages.length + " 条消息保存到「" + destinationName + "」，但来源聊天档删除失败；消息仍保留在原处，请核对后再手动删除", "", { timeOut: 3500 });
+      } else {
+        toastr.success("已" + (isMove ? "移动" : "复制") + " " + messages.length + " 条消息到「" + destinationName + "」，正在打开…", "", { timeOut: 1500 });
+      }
+      if (_transferContextMatches(info)) {
+        await _openTransferChatAt(destinationFile, insertAt, messages.length, true);
+      }
+      if (isMove && !sourceDeleteFailed) {
+        setTimeout(async () => {
+          if (_mgrClosed) return;
+          const current = _getTransferChar();
+          if (!current || current.group || current.avatar !== info.avatar) return;
+          try {
+            if (source.messages.length === 0) {
+              const ok = await ihAskDeleteEmptyChat(sourceName, _isCurrentTransferFile(sourceFile));
+              if (ok && (await _ihDeleteChatFile(sourceFile, info.avatar))) {
+                _ihDeleteSearchCache(sourceFile);
+                toastr.success("已删除空聊天档「" + sourceName + "」", "", { timeOut: 1500 });
+              }
+            }
+            const duplicates = await ihFindDuplicateChats("");
+            if (duplicates.length) await ihAskDeleteDuplicates(duplicates);
+          } catch (e) {
+            console.warn("快捷工具栏: 转存后检测失败", e);
+          }
+        }, 1500);
+      }
+    } catch (e) {
+      console.error("快捷工具栏: 转存失败", e);
+      toastr.error("转存失败，请核对来源与目标聊天档", "", { timeOut: 2000 });
+    } finally {
+      sharedState.transferBusy = false;
+      _syncTransferControls();
     }
   }
   content.find("#ih_mgr_transfer_copy").on("click", () => {
@@ -13457,6 +13791,11 @@ function openHideManagerPanel() {
   function _updateBasketBanner() {
     const n = sharedState.searchBasket.length;
     content.toggleClass("ih-mgr-has-basket", n > 0);
+    if (n === 0 && _sameTransferFile(_getTransferSourceValue(), _getTransferTargetValue())) {
+      _transferSelectedValue = "";
+      _syncTransferSelectionDisplay(false);
+      loadTransferTarget("");
+    }
     if (n > 0 && sharedState.manageTarget === "lower") {
       sharedState.manageTarget = "upper";
       sharedState.transferSelected.clear();
@@ -13491,6 +13830,7 @@ function openHideManagerPanel() {
     }
     _updateSearchLocateBtn();
     _basketRenderList();
+    _syncTransferControls();
   }
 
   function _clearBasket() {
@@ -13622,7 +13962,8 @@ function openHideManagerPanel() {
 
   function _basketExactIndex(file, floor) {
     return sharedState.searchBasket.findIndex(
-      (b) => b.file === file && b.floor === floor,
+      (b) => b.floor === floor && (b.file === file ||
+        _sameTransferFile(b.file || _currentTransferFile(), file || _currentTransferFile())),
     );
   }
 
@@ -13632,6 +13973,7 @@ function openHideManagerPanel() {
   }
 
   function _basketAdd(file, floor, sender, fp) {
+    if (_isCurrentTransferFile(file)) file = "";
     if (_basketExactIndex(file, floor) > -1) return "exists";
     const fi = _basketFpIndex(fp);
     if (fi > -1) {
@@ -13786,8 +14128,11 @@ function openHideManagerPanel() {
     return added;
   }
   function _meGetMsgs(file) {
-    if (!file) return chat;
-    if (sharedState.transferTargetChat && _getTransferTargetValue() === file) {
+    if (!file || _isCurrentTransferFile(file)) return chat;
+    if (sharedState.transferSourceChat && _sameTransferFile(_getTransferSourceValue(), file)) {
+      return sharedState.transferSourceChat;
+    }
+    if (sharedState.transferTargetChat && _sameTransferFile(_getTransferTargetValue(), file)) {
       return sharedState.transferTargetChat;
     }
     return _ihGetSearchCache(file);
@@ -13805,6 +14150,8 @@ function openHideManagerPanel() {
   }
 
   function _meOpen(file, floor, siblings, opts) {
+    if (sharedState.transferBusy) return;
+    if (_isCurrentTransferFile(file)) file = "";
     const msgs = _meGetMsgs(file);
     if (!msgs || !msgs[floor]) {
       toastr.warning("读不到这条消息，请重新搜索该聊天档", "", {
@@ -14058,13 +14405,7 @@ function openHideManagerPanel() {
         return;
       }
       _ihSetSearchCache(ev.file, freshMsgs);
-      if (
-        sharedState.transferTargetChat === msgs &&
-        _getTransferTargetValue() === ev.file
-      ) {
-        sharedState.transferTargetChat = freshMsgs;
-        sharedState.transferTargetHeader = header;
-      }
+      _syncTransferPreview(ev.file, freshMsgs, header);
       if (sharedState.branchPreviewMsgs === msgs) {
         sharedState.branchPreviewMsgs = freshMsgs;
       }
@@ -14261,13 +14602,7 @@ function openHideManagerPanel() {
       return;
     }
     _ihSetSearchCache(file, freshMsgs);
-    if (
-      sharedState.transferTargetChat === msgs &&
-      _getTransferTargetValue() === file
-    ) {
-      sharedState.transferTargetChat = freshMsgs;
-      sharedState.transferTargetHeader = header;
-    }
+    _syncTransferPreview(file, freshMsgs, header, true);
     if (sharedState.branchPreviewMsgs === msgs) {
       sharedState.branchPreviewMsgs = freshMsgs;
     }
@@ -14491,13 +14826,7 @@ function openHideManagerPanel() {
         return;
       }
       _ihSetSearchCache(ev.file, freshMsgs);
-      if (
-        sharedState.transferTargetChat === msgs &&
-        _getTransferTargetValue() === ev.file
-      ) {
-        sharedState.transferTargetChat = freshMsgs;
-        sharedState.transferTargetHeader = header;
-      }
+      _syncTransferPreview(ev.file, freshMsgs, header);
       if (sharedState.branchPreviewMsgs === msgs) {
         sharedState.branchPreviewMsgs = freshMsgs;
       }
@@ -15070,486 +15399,168 @@ function openHideManagerPanel() {
   });
 
   async function _doBasketCopy() {
-    const info = _getTransferChar();
-    if (!info || info.group) {
-      toastr.warning("当前无法转存", "", { timeOut: 1200 });
-      return;
-    }
-    const targetFile = _getTransferTargetValue();
-    if (!targetFile) {
-      toastr.warning("请先选择目标聊天档", "", { timeOut: 1200 });
-      return;
-    }
-    if (sharedState.searchBasket.length === 0) {
-      toastr.warning("转存篮为空", "", { timeOut: 1200 });
-      return;
-    }
-    const _gapsC = _basketGaps();
-    if (_gapsC.length > 0) {
-      const okGap = await ihConfirmDialog({
-        title: "楼层不连续",
-        icon: "fa-triangle-exclamation",
-        lines: [
-          `篮内有 <b>${_gapsC.length}</b> 处楼层跳空，中间的消息没有被选中。`,
-          `<span class="ih-cf-dim">转过去后这几处的上下文可能读不通，建议先返回点「全部补齐」。</span>`,
-        ],
-        okText: "仍然复制",
-        okIcon: "fa-copy",
-        cancelText: "返回补齐",
-      });
-      if (!okGap) return;
-    }
-    const basket = _basketSorted();
-    const bySource = {};
-    basket.forEach((b) => {
-      bySource[b.file] = null;
-    });
-    for (const file of Object.keys(bySource)) {
-      if (file === "") {
-        bySource[file] = chat;
-      } else {
-        const nameNoExt = String(file).replace(/\.jsonl$/i, "");
-        try {
-          const r = await _fetchTargetChat(nameNoExt);
-          bySource[file] = r.messages;
-        } catch (e) {
-          console.error("快捷工具栏: 读取来源聊天档失败", e);
-          toastr.error(`读取来源「${nameNoExt}」失败，转存已取消`, "", {
-            timeOut: 1800,
-          });
-          return;
-        }
-      }
-    }
-    let toTransfer = [];
-    try {
-      basket.forEach((b) => {
-        const arr = bySource[b.file];
-        if (arr && arr[b.floor]) {
-          toTransfer.push(JSON.parse(JSON.stringify(arr[b.floor])));
-        }
-      });
-    } catch (e) {
-      toastr.error("消息数据异常，转存失败", "", { timeOut: 1500 });
-      return;
-    }
-    if (toTransfer.length === 0) {
-      toastr.warning("转存篮里的消息在来源中已不存在", "", { timeOut: 1500 });
-      return;
-    }
-    const nameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
-    let header = null;
-    let targetMsgs = [];
-    try {
-      const result = await _fetchTargetChat(nameNoExt);
-      header = result.header;
-      targetMsgs = result.messages;
-    } catch (e) {
-      console.error("快捷工具栏: 转存前读取目标失败", e);
-      toastr.error("读取目标聊天档失败，转存已取消", "", { timeOut: 1800 });
-      return;
-    }
-    if (!header) {
-      header = {
-        user_name: name1 || "User",
-        character_name: info.character.name,
-        create_date: new Date().toISOString(),
-        chat_metadata: {},
-      };
-    }
-    if (getSettings().confirmDangerousActions) {
-      if (
-        !confirm(
-          `确定将转存篮中的 ${toTransfer.length} 条消息复制至「${nameNoExt}」吗？`,
-        )
-      )
-        return;
-    }
-    let insertAt =
-      sharedState.transferInsertAt == null
-        ? targetMsgs.length
-        : sharedState.transferInsertAt;
-    insertAt = Math.max(0, Math.min(targetMsgs.length, insertAt));
-    targetMsgs.splice(insertAt, 0, ...toTransfer);
-    const jumpToFloor = insertAt;
-    const transferCount = toTransfer.length;
-    let saveOk = false;
-    try {
-      const saveResp = await fetch("/api/chats/save", {
-        method: "POST",
-        headers: getRequestHeaders(),
-        cache: "no-cache",
-        body: JSON.stringify({
-          ch_name: info.character.name,
-          file_name: nameNoExt,
-          chat: [header, ...targetMsgs],
-          avatar_url: info.avatar,
-          force: true,
-        }),
-      });
-      saveOk = saveResp.ok;
-    } catch (e) {
-      console.error("快捷工具栏: 写入目标聊天档失败", e);
-    }
-    if (!saveOk) {
-      toastr.error("写入目标聊天档失败，转存已取消", "", { timeOut: 1800 });
-      return;
-    }
-    _ihSetSearchCache(targetFile, targetMsgs);
-    _pushTransferHistory(targetFile);
-    sharedState.searchBasket = [];
-    _updateBasketBanner();
-    _mgrFoldForJump();
-    toastr.success(
-      `已复制 ${transferCount} 条消息到「${nameNoExt}」，正在打开…`,
-      "",
-      { timeOut: 1500 },
-    );
-    try {
-      if (typeof openCharacterChat === "function") {
-        await openCharacterChat(nameNoExt);
-      } else {
-        info.character.chat = nameNoExt;
-        await executeSlashCommandsWithOptions("/chat-reload");
-      }
-      setTimeout(() => {
-        const chatEl = document.getElementById("chat");
-        if (!chatEl) return;
-        const mesEl = chatEl.querySelector(`.mes[mesid="${jumpToFloor}"]`);
-        if (mesEl) {
-          const r = mesEl.getBoundingClientRect();
-          const useCenter = r.height < chatEl.clientHeight - 40;
-          scrollChatToElement(mesEl, "smooth", useCenter);
-        } else {
-          executeSlashCommandsWithOptions(`/chat-jump ${jumpToFloor}`);
-        }
-        setTimeout(() => {
-          const flashChatEl = document.getElementById("chat");
-          if (!flashChatEl) return;
-          const flashed = [];
-          for (let i = 0; i < transferCount; i++) {
-            const el = flashChatEl.querySelector(
-              `.mes[mesid="${jumpToFloor + i}"]`,
-            );
-            if (el) {
-              el.classList.add("ih-transfer-landed");
-              flashed.push(el);
-            }
-          }
-          setTimeout(() => {
-            flashed.forEach((el) => el.classList.remove("ih-transfer-landed"));
-          }, 2200);
-        }, 400);
-      }, 600);
-    } catch (e) {
-      console.error("快捷工具栏: 打开目标聊天档失败", e);
-      toastr.warning("转存成功，但自动打开失败，请手动切换聊天", "", {
-        timeOut: 2000,
-      });
-    }
+    return _doBasketTransfer(false);
   }
+
   async function _doBasketMove() {
+    return _doBasketTransfer(true);
+  }
+
+  async function _doBasketTransfer(isMove) {
     const info = _getTransferChar();
-    if (!info || info.group) {
-      toastr.warning("当前无法转存", "", { timeOut: 1200 });
-      return;
-    }
     const targetFile = _getTransferTargetValue();
+    if (!info || info.group || sharedState.transferBusy) return;
     if (!targetFile) {
       toastr.warning("请先选择目标聊天档", "", { timeOut: 1200 });
       return;
     }
     if (sharedState.searchBasket.length === 0) {
-      toastr.warning("转存篮为空", "", { timeOut: 1200 });
+      toastr.info("转存篮为空", "", { timeOut: 1200 });
       return;
     }
-    const targetNameNoExt = String(targetFile).replace(/\.jsonl$/i, "");
-    const _gapsM = _basketGaps();
-    if (_gapsM.length > 0) {
-      const okGap = await ihConfirmDialog({
-        title: "楼层不连续",
-        icon: "fa-triangle-exclamation",
-        lines: [
-          `篮内有 <b>${_gapsM.length}</b> 处楼层跳空，中间的消息没有被选中。`,
-          `<span class="ih-cf-dim">转过去后这几处的上下文可能读不通，建议先返回点「全部补齐」。</span>`,
-          `<span class="ih-cf-warn">移动会把选中的消息从来源档删除，跳空的那些会留在原处。</span>`,
-        ],
-        okText: "仍然移动",
-        okIcon: "fa-scissors",
-        cancelText: "返回补齐",
-      });
-      if (!okGap) return;
-    }
-    const basket = _basketSorted();
-    const curChatName = String(info.chatFile || "");
-    const targetIsSource = basket.some((b) => {
-      if (b.file === "") return curChatName === targetNameNoExt;
-      return String(b.file).replace(/\.jsonl$/i, "") === targetNameNoExt;
-    });
-    if (targetIsSource) {
-      toastr.warning(
-        "转存篮里有来自目标聊天档自己的消息，无法移动到它自己，请改用复制或去掉这些消息",
-        "",
-        { timeOut: 3000 },
-      );
-      return;
-    }
-    const bySource = {};
-    basket.forEach((b) => {
-      bySource[b.file] = null;
-    });
-    for (const file of Object.keys(bySource)) {
-      if (file === "") {
-        bySource[file] = { header: null, messages: chat };
-      } else {
-        const nameNoExt = String(file).replace(/\.jsonl$/i, "");
-        try {
-          const r = await _fetchTargetChat(nameNoExt);
-          bySource[file] = { header: r.header, messages: r.messages };
-        } catch (e) {
-          console.error("快捷工具栏: 读取来源聊天档失败", e);
-          toastr.error(`读取来源「${nameNoExt}」失败，移动已取消`, "", {
-            timeOut: 1800,
-          });
-          return;
-        }
+    const targetName = String(targetFile).replace(/\.jsonl$/i, "");
+    sharedState.transferBusy = true;
+    _closeTransferDropdown();
+    _syncTransferControls();
+    try {
+      const gaps = _basketGaps();
+      if (gaps.length > 0) {
+        const ok = await ihConfirmDialog({
+          title: "楼层不连续",
+          icon: "fa-triangle-exclamation",
+          lines: [
+            "篮内有 <b>" + gaps.length + "</b> 处楼层跳空，中间的消息没有被选中。",
+            '<span class="ih-cf-dim">转过去后这几处的上下文可能读不通，建议先返回点「全部补齐」。</span>',
+          ],
+          okText: isMove ? "仍然移动" : "仍然复制",
+          okIcon: isMove ? "fa-scissors" : "fa-copy",
+          cancelText: "返回补齐",
+          danger: isMove,
+        });
+        if (!ok || !_transferContextMatches(info)) return;
       }
-    }
-    let toTransfer = [];
-    try {
-      basket.forEach((b) => {
-        const arr = bySource[b.file].messages;
-        if (arr && arr[b.floor]) {
-          toTransfer.push(JSON.parse(JSON.stringify(arr[b.floor])));
-        }
+      const basket = _basketSorted().map((item) => {
+        const file = _isCurrentTransferFile(item.file, info) ? _currentTransferFile(info) : item.file;
+        const preview = _meGetMsgs(item.file)?.[item.floor];
+        return { ...item, sourceFile: file, previewFingerprint: preview ? ihBranchFingerprint(preview) : item.fp };
       });
-    } catch (e) {
-      toastr.error("消息数据异常，移动失败", "", { timeOut: 1500 });
-      return;
-    }
-    if (toTransfer.length === 0) {
-      toastr.warning("转存篮里的消息在来源中已不存在", "", { timeOut: 1500 });
-      return;
-    }
-    let header = null;
-    let targetMsgs = [];
-    try {
-      const result = await _fetchTargetChat(targetNameNoExt);
-      header = result.header;
-      targetMsgs = result.messages;
-    } catch (e) {
-      console.error("快捷工具栏: 转存前读取目标失败", e);
-      toastr.error("读取目标聊天档失败，移动已取消", "", { timeOut: 1800 });
-      return;
-    }
-    if (!header) {
-      header = {
-        user_name: name1 || "User",
-        character_name: info.character.name,
-        create_date: new Date().toISOString(),
-        chat_metadata: {},
-      };
-    }
-    if (getSettings().confirmDangerousActions) {
-      if (
-        !confirm(
-          `确定将转存篮中的 ${toTransfer.length} 条消息移动至「${targetNameNoExt}」吗？\n（这些消息会从各自来源聊天档中删除，来自其他聊天档的删除无法撤回）`,
-        )
-      )
+      if (isMove && basket.some((item) => _sameTransferFile(item.sourceFile, targetFile))) {
+        toastr.warning("转存篮里有来自目标聊天档自己的消息，无法移动到它自己，请改用复制或去掉这些消息", "", { timeOut: 3000 });
         return;
-    }
-    let insertAt =
-      sharedState.transferInsertAt == null
-        ? targetMsgs.length
-        : sharedState.transferInsertAt;
-    insertAt = Math.max(0, Math.min(targetMsgs.length, insertAt));
-    targetMsgs.splice(insertAt, 0, ...toTransfer);
-    const jumpToFloor = insertAt;
-    const transferCount = toTransfer.length;
-    let saveOk = false;
-    try {
-      const saveResp = await fetch("/api/chats/save", {
-        method: "POST",
-        headers: getRequestHeaders(),
-        cache: "no-cache",
-        body: JSON.stringify({
-          ch_name: info.character.name,
-          file_name: targetNameNoExt,
-          chat: [header, ...targetMsgs],
-          avatar_url: info.avatar,
-          force: true,
-        }),
-      });
-      saveOk = saveResp.ok;
-    } catch (e) {
-      console.error("快捷工具栏: 写入目标聊天档失败", e);
-    }
-    if (!saveOk) {
-      toastr.error("写入目标聊天档失败，移动已取消", "", { timeOut: 1800 });
-      return;
-    }
-    _ihSetSearchCache(targetFile, targetMsgs);
-    const floorsBySource = {};
-    basket.forEach((b) => {
-      if (!floorsBySource[b.file]) floorsBySource[b.file] = [];
-      floorsBySource[b.file].push(b.floor);
-    });
-    if (Object.prototype.hasOwnProperty.call(floorsBySource, "")) {
-      chatUndoManager.save();
-    }
-    const sourceDeleteFailures = [];
-    const emptiedSources = [];
-    const currentChatBackup = Object.prototype.hasOwnProperty.call(
-      floorsBySource,
-      "",
-    )
-      ? JSON.parse(JSON.stringify(chat))
-      : null;
-    let currentChatChanged = false;
-
-    for (const file of Object.keys(floorsBySource)) {
-      const floors = [...new Set(floorsBySource[file])].sort((a, b) => b - a);
-
-      if (file === "") {
-        floors.forEach((f) => {
-          if (f >= 0 && f < chat.length) chat.splice(f, 1);
-        });
-        currentChatChanged = true;
-        continue;
       }
-
-      const nameNoExt = String(file).replace(/\.jsonl$/i, "");
-      const src = bySource[file];
-      const newMsgs = [...src.messages];
-
-      floors.forEach((f) => {
-        if (f >= 0 && f < newMsgs.length) newMsgs.splice(f, 1);
-      });
-
-      const srcHeader = src.header || {
-        user_name: name1 || "User",
-        character_name: info.character.name,
-        create_date: new Date().toISOString(),
-        chat_metadata: {},
-      };
-
+      const sources = new Map();
+      for (const item of basket) {
+        const key = String(item.sourceFile).toLowerCase();
+        if (!sources.has(key)) sources.set(key, { file: item.sourceFile, data: null });
+      }
+      let destination;
       try {
-        const resp = await fetch("/api/chats/save", {
-          method: "POST",
-          headers: getRequestHeaders(),
-          cache: "no-cache",
-          body: JSON.stringify({
-            ch_name: info.character.name,
-            file_name: nameNoExt,
-            chat: [srcHeader, ...newMsgs],
-            avatar_url: info.avatar,
-            force: true,
-          }),
-        });
-
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
-        }
-
-        _ihSetSearchCache(file, newMsgs);
-        if (newMsgs.length === 0) {
-          emptiedSources.push({ file: file, name: nameNoExt });
-        }
+        await Promise.all(Array.from(sources.values()).map(async (source) => {
+          source.data = await _readTransferChat(source.file, info);
+        }));
+        destination = await _readTransferChat(targetFile, info);
       } catch (e) {
-        sourceDeleteFailures.push(nameNoExt);
-        console.error("快捷工具栏: 从来源档删除失败 " + nameNoExt, e);
+        console.error("快捷工具栏: 转存前读取聊天档失败", e);
+        toastr.error("读取聊天档失败，转存已取消，篮中消息已保留", "", { timeOut: 2200 });
+        return;
       }
-    }
-
-    if (currentChatChanged) {
-      const _okSrc = await ihSaveCurrentChat();
-      if (!_okSrc) {
-        console.error("快捷工具栏: 保存当前来源聊天失败");
-
-        if (currentChatBackup) {
-          chat.length = 0;
-          currentChatBackup.forEach((msg) => chat.push(msg));
-          await ihSaveCurrentChat();
+      if (!_transferContextMatches(info)) return;
+      if (basket.some((item) => {
+        const msg = sources.get(String(item.sourceFile).toLowerCase()).data.messages[item.floor];
+        return !msg || (item.previewFingerprint && ihBranchFingerprint(msg) !== item.previewFingerprint);
+      })) {
+        toastr.warning("转存篮中的来源消息已发生变化，请重新核对并加入", "", { timeOut: 2500 });
+        return;
+      }
+      const toTransfer = JSON.parse(JSON.stringify(basket.map((item) =>
+        sources.get(String(item.sourceFile).toLowerCase()).data.messages[item.floor])));
+      const insertion = sharedState.transferInsertAt;
+      if (insertion != null && (!destination.messages[insertion] || !sharedState.transferTargetChat?.[insertion] ||
+          ihBranchFingerprint(destination.messages[insertion]) !== ihBranchFingerprint(sharedState.transferTargetChat[insertion]))) {
+        toastr.warning("目标聊天档的落点已发生变化，请重新选择落点", "", { timeOut: 2500 });
+        await loadTransferTarget(targetFile);
+        return;
+      }
+      if (getSettings().confirmDangerousActions) {
+        const mode = isMove ? "移动" : "复制";
+        const extra = isMove ? "\n（这些消息会从各自来源聊天档中删除，来自其他聊天档的删除无法撤回）" : "";
+        if (!confirm("确定将转存篮中的 " + toTransfer.length + " 条消息" + mode + "至「" + targetName + "」吗？" + extra)) return;
+      }
+      const destinationBefore = JSON.parse(JSON.stringify(destination.messages));
+      const insertAt = insertion == null ? destination.messages.length
+        : Math.max(0, Math.min(destination.messages.length, insertion));
+      destination.messages.splice(insertAt, 0, ...toTransfer);
+      let saved = false;
+      try {
+        saved = await _writeTransferChat(targetFile, destination, info, destinationBefore);
+      } catch (e) {
+        console.error("快捷工具栏: 写入目标聊天档失败", e);
+      }
+      if (!saved) {
+        toastr.error("写入目标聊天档失败，转存已取消，来源与篮中消息已保留", "", { timeOut: 2200 });
+        return;
+      }
+      if (!_transferContextMatches(info)) {
+        if (isMove) toastr.warning("目标聊天档已保存；面板已关闭或聊天已切换，来源消息已保留", "", { timeOut: 2500 });
+        return;
+      }
+      const failures = [];
+      const emptied = [];
+      if (isMove) {
+        for (const [key, source] of sources) {
+          const before = source.data.messages;
+          const floors = new Set(basket.filter((item) => String(item.sourceFile).toLowerCase() === key).map((item) => item.floor));
+          const updated = { header: source.data.header, messages: before.filter((_, floor) => !floors.has(floor)) };
+          let deleted = false;
+          try {
+            deleted = await _writeTransferChat(source.file, updated, info, before);
+          } catch (e) {
+            console.error("快捷工具栏: 从来源档删除失败", e);
+          }
+          if (!deleted) failures.push(source.file);
+          else if (updated.messages.length === 0) emptied.push(source.file);
         }
-
-        sourceDeleteFailures.push("当前聊天档");
       }
-    }
-
-    _pushTransferHistory(targetFile);
-    sharedState.searchBasket = [];
-    _updateBasketBanner();
-    for (const es of emptiedSources) {
-      const askOk = await ihAskDeleteEmptyChat(es.name, false);
-      if (askOk) {
-        await _ihDeleteChatFile(es.file, info.avatar);
-        _ihDeleteSearchCache(es.file);
+      if (!_transferContextMatches(info)) {
+        if (failures.length > 0) toastr.warning("目标聊天档已保存，部分来源删除未完成，消息仍保留在原处", "", { timeOut: 3000 });
+        return;
       }
-    }
-    _mgrFoldForJump();
-    if (sourceDeleteFailures.length > 0) {
-      toastr.warning(
-        `目标聊天档已保存 ${transferCount} 条消息，但有 ${sourceDeleteFailures.length} 个来源聊天档删除失败；消息仍保留在原处，请核对后再手动删除，正在打开目标聊天…`,
-        "",
-        { timeOut: 4500 },
-      );
-    } else {
-      toastr.success(
-        `已移动 ${transferCount} 条消息到「${targetNameNoExt}」，正在打开…`,
-        "",
-        { timeOut: 1500 },
-      );
-    }
-    try {
-      if (typeof openCharacterChat === "function") {
-        await openCharacterChat(targetNameNoExt);
+      _pushTransferHistory(targetFile);
+      sharedState.searchBasket = [];
+      sharedState.transferInsertAt = null;
+      _updateBasketBanner();
+      if (failures.length > 0) {
+        toastr.warning("目标聊天档已保存 " + toTransfer.length + " 条消息，但有 " + failures.length + " 个来源聊天档删除失败；消息仍保留在原处，请核对后再手动删除", "", { timeOut: 4500 });
       } else {
-        info.character.chat = targetNameNoExt;
-        await executeSlashCommandsWithOptions("/chat-reload");
+        toastr.success("已" + (isMove ? "移动" : "复制") + " " + toTransfer.length + " 条消息到「" + targetName + "」，正在打开…", "", { timeOut: 1500 });
       }
-      setTimeout(() => {
-        const chatEl = document.getElementById("chat");
-        if (!chatEl) return;
-        const mesEl = chatEl.querySelector(`.mes[mesid="${jumpToFloor}"]`);
-        if (mesEl) {
-          const r = mesEl.getBoundingClientRect();
-          const useCenter = r.height < chatEl.clientHeight - 40;
-          scrollChatToElement(mesEl, "smooth", useCenter);
-        } else {
-          executeSlashCommandsWithOptions(`/chat-jump ${jumpToFloor}`);
-        }
-        setTimeout(() => {
-          const flashChatEl = document.getElementById("chat");
-          if (!flashChatEl) return;
-          const flashed = [];
-          for (let i = 0; i < transferCount; i++) {
-            const el = flashChatEl.querySelector(
-              `.mes[mesid="${jumpToFloor + i}"]`,
-            );
-            if (el) {
-              el.classList.add("ih-transfer-landed");
-              flashed.push(el);
+      if (_transferContextMatches(info)) {
+        await _openTransferChatAt(targetFile, insertAt, toTransfer.length, true);
+      }
+      if (emptied.length > 0) {
+        setTimeout(async () => {
+          if (_mgrClosed) return;
+          const current = _getTransferChar();
+          if (!current || current.group || current.avatar !== info.avatar) return;
+          for (const file of emptied) {
+            const name = String(file).replace(/\.jsonl$/i, "");
+            try {
+              if (await ihAskDeleteEmptyChat(name, _isCurrentTransferFile(file))) {
+                if (await _ihDeleteChatFile(file, info.avatar)) _ihDeleteSearchCache(file);
+              }
+            } catch (e) {
+              console.warn("快捷工具栏: 删除空聊天档失败", e);
             }
           }
-          setTimeout(() => {
-            flashed.forEach((el) => el.classList.remove("ih-transfer-landed"));
-          }, 2200);
-        }, 400);
-      }, 600);
-    } catch (e) {
-      console.error("快捷工具栏: 打开目标聊天档失败", e);
-      toastr.warning("移动成功，但自动打开失败，请手动切换聊天", "", {
-        timeOut: 2000,
-      });
-    }
-    setTimeout(async () => {
-      try {
-        const dups = await ihFindDuplicateChats(targetFile);
-        if (dups.length) await ihAskDeleteDuplicates(dups);
-      } catch (err) {
-        console.warn("快捷工具栏: 重复档检测失败", err);
+        }, 1500);
       }
-    }, 1200);
+    } catch (e) {
+      console.error("快捷工具栏: 转存篮转存失败", e);
+      toastr.error("转存失败，请核对来源与目标聊天档", "", { timeOut: 2000 });
+    } finally {
+      sharedState.transferBusy = false;
+      _syncTransferControls();
+    }
   }
 
   function _searchScanMsg(rawText, kw, caseSensitive) {
@@ -16955,13 +16966,7 @@ function openHideManagerPanel() {
         doneFloors += f;
         backups.push({ name: p.name, header: header, messages: orig });
         _ihSetSearchCache(p.file, p.fresh.messages);
-        if (
-          sharedState.transferTargetChat &&
-          _getTransferTargetValue() === p.file
-        ) {
-          sharedState.transferTargetChat = p.fresh.messages;
-          sharedState.transferTargetHeader = header;
-        }
+        _syncTransferPreview(p.file, p.fresh.messages, header);
         if (sharedState.branchPreviewName === p.name) {
           sharedState.branchPreviewMsgs = p.fresh.messages;
         }
@@ -17079,13 +17084,15 @@ function openHideManagerPanel() {
 
   function _mgrPruneBasketByFile(fileWithExt) {
     const f = fileWithExt || "";
+    const matches = (file) => file === f ||
+      _sameTransferFile(file || _currentTransferFile(), f || _currentTransferFile());
     sharedState.searchBasket = sharedState.searchBasket.filter(function (b) {
-      return b.file !== f;
+      return !matches(b.file);
     });
     sharedState.searchBasket.forEach(function (b) {
       if (Array.isArray(b.dupSources)) {
         b.dupSources = b.dupSources.filter(function (s) {
-          return s.file !== f;
+          return !matches(s.file);
         });
       }
     });
@@ -17093,6 +17100,7 @@ function openHideManagerPanel() {
   }
 
   async function _mgrRefreshAfterDataChange() {
+    if (_mgrClosed) return;
     total = chat.length;
     content.find(".ih-mgr-header .ih-mgr-total-badge").text(total + " 条消息");
     content
@@ -17429,7 +17437,7 @@ function openHideManagerPanel() {
   });
   content.on("click", function (e) {
     const $t = $(e.target);
-    if (!$t.closest("#ih_mgr_transfer_select2").length) {
+    if (!$t.closest("#ih_mgr_transfer_select2, #ih_mgr_transfer_source_select2").length) {
       _closeTransferDropdown();
     }
     if (!$t.closest("#ih_mgr_search_select2").length) {
@@ -27221,6 +27229,7 @@ async function loadSettings() {
   if (typeof s.branchSort.relative !== "boolean") s.branchSort.relative = false;
   if (s.searchTreeView === undefined) s.searchTreeView = true;
   if (!IH_MGR_TAB_KEYS.includes(s.lastMgrTab)) s.lastMgrTab = "hide";
+  if (typeof s.mgrMaximized !== "boolean") s.mgrMaximized = false;
   if (s.showModelInChat === undefined) s.showModelInChat = false;
   if (s.disableSmoothScroll === undefined) s.disableSmoothScroll = false;
   if (s.enabled === undefined) s.enabled = true;

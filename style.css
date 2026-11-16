@@ -4002,7 +4002,7 @@ body.ih-cp-selecting input::-moz-selection {
   width: 260px;
   min-width: 190px;
   max-width: 96vw;
-  height: 300px;
+  height: 140px;
   min-height: 130px;
   max-height: 80vh;
   overflow: hidden;
@@ -4019,12 +4019,66 @@ body.ih-cp-selecting input::-moz-selection {
   width: 0;
   display: none;
 }
+.ih-color-picker-portal.ih-cp-has-list {
+  height: 300px;
+}
+.ih-color-picker-portal.ih-cp-picking {
+  visibility: hidden;
+}
+.ih-cp-result[hidden],
+.ih-cp-hint[hidden],
+.ih-cp-list[hidden] {
+  display: none;
+}
+.ih-cp-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin: 2px 4px;
+  padding: 7px 2px;
+}
+.ih-cp-has-list .ih-cp-result {
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+.ih-cp-result .ih-cp-result-swatch {
+  width: 24px;
+  height: 24px;
+  cursor: default;
+}
+.ih-cp-result-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--monoFontFamily, monospace);
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--SmartThemeBodyColor);
+  user-select: text;
+}
+.ih-cp-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--SmartThemeBodyColor);
+  opacity: 0.55;
+  text-align: left;
+}
 .ih-cp-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px 6px;
-  padding: 5px 6px;
+  gap: 4px 6px;
+  padding: 6px;
   border-radius: 6px;
   cursor: pointer;
 }
@@ -4075,12 +4129,48 @@ body.ih-cp-selecting input::-moz-selection {
 .ih-cp-text:hover {
   opacity: 0.75;
 }
+.ih-color-picker-portal input.ih-cp-value {
+  flex: 1 1 90px;
+  width: 0;
+  min-width: 0;
+  height: 24px;
+  margin: 0;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--SmartThemeBodyColor);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: text;
+  opacity: 1;
+  text-overflow: clip;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.ih-color-picker-portal input.ih-cp-value:hover {
+  border-color: var(--SmartThemeBorderColor);
+}
+.ih-color-picker-portal input.ih-cp-value:focus {
+  outline: none;
+  border-color: var(--SmartThemeQuoteColor, cornflowerblue);
+  background-color: color-mix(
+    in srgb,
+    var(--SmartThemeQuoteColor, cornflowerblue) 8%,
+    transparent
+  );
+}
+.ih-color-picker-portal input.ih-cp-value-invalid {
+  border-color: var(--SmartThemeEmColor, orange);
+}
 .ih-cp-controls {
   display: flex;
   align-items: center;
   gap: 5px;
-  flex: 0 0 auto;
-  margin-left: auto;
+  flex: 0 0 100%;
+  margin-left: 0;
+  padding-left: 26px;
+  box-sizing: border-box;
 }
 .ih-cp-color {
   width: 26px;
@@ -4098,8 +4188,10 @@ body.ih-cp-selecting input::-moz-selection {
   gap: 3px;
   flex-shrink: 0;
 }
-.ih-cp-alpha {
+.ih-color-picker-portal input.ih-cp-alpha {
   width: 60px;
+  min-width: 0;
+  flex: 0 0 60px;
   accent-color: var(--SmartThemeQuoteColor, cornflowerblue);
   cursor: pointer;
 }
@@ -4139,7 +4231,8 @@ body.ih-cp-selecting input::-moz-selection {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 20px;
+  min-height: 24px;
+  flex: 0 0 auto;
 }
 .ih-cp-drag {
   display: inline-flex;
@@ -4155,74 +4248,51 @@ body.ih-cp-selecting input::-moz-selection {
 .ih-cp-drag:hover {
   opacity: 0.85;
 }
-.ih-cp-pin {
-  width: 22px;
-  height: 22px;
+.ih-cp-action {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
   padding: 0;
-  border: 1px solid var(--SmartThemeBorderColor);
+  margin: 0;
+  border: 0;
   border-radius: 4px;
   background: transparent;
+  box-shadow: none;
   color: var(--SmartThemeBodyColor);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 12px;
   opacity: 0.55;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, opacity 0.15s ease;
 }
-.ih-cp-pin:hover {
-  opacity: 1;
-  background-color: color-mix(
-    in srgb,
-    var(--SmartThemeBodyColor) 10%,
-    transparent
-  );
-}
-.ih-cp-pin-active {
+.ih-cp-action:hover,
+.ih-cp-action:focus-visible {
   opacity: 1;
   color: var(--SmartThemeQuoteColor, cornflowerblue);
-  border-color: var(--SmartThemeQuoteColor, cornflowerblue);
-  background-color: color-mix(
-    in srgb,
-    var(--SmartThemeQuoteColor, cornflowerblue) 18%,
-    transparent
-  );
+}
+.ih-cp-action:focus-visible {
+  outline: 1px solid var(--SmartThemeQuoteColor, cornflowerblue);
+  outline-offset: 1px;
+}
+.ih-cp-action:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.ih-cp-action.ih-cp-pin-active,
+.ih-cp-scan[aria-pressed="true"] {
+  opacity: 1;
+  color: var(--SmartThemeQuoteColor, cornflowerblue);
 }
 .ih-cp-header-btns {
   display: flex;
   align-items: center;
-  gap: 4px;
-}
-.ih-cp-close {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid var(--SmartThemeBorderColor);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--SmartThemeBodyColor);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  opacity: 0.55;
-  transition: all 0.15s ease;
+  gap: 3px;
 }
 .ih-cp-close:hover {
   opacity: 1;
   color: var(--SmartThemeEmColor, orange);
-  border-color: color-mix(
-    in srgb,
-    var(--SmartThemeEmColor, orange) 45%,
-    transparent
-  );
-  background-color: color-mix(
-    in srgb,
-    var(--SmartThemeEmColor, orange) 18%,
-    transparent
-  );
 }
 .ih-cp-list {
   display: flex;
@@ -4230,6 +4300,7 @@ body.ih-cp-selecting input::-moz-selection {
   gap: 4px;
   flex: 1;
   min-height: 0;
+  padding: 2px;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
@@ -9198,6 +9269,10 @@ body.ih-no-anim *::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.ih-external-entry-row.ih-external-unavailable > label,
+.ih-external-entry-row.ih-external-unavailable > .button-preview {
+  opacity: 0.5;
 }
 .ih-external-scan-btn {
   width: 100%;

@@ -2245,7 +2245,7 @@ export function createFloatingEditorController({
     s.window.setValue(value);
     if (selection) s.window.textarea.setSelectionRange(selection.from, selection.to);
     const accepted = write(s, value, { userEvent: "input.replace", ...options });
-    if (accepted) s.window.textarea.focus({ preventScroll: true });
+    if (accepted && !options.preserveFocus) s.window.textarea.focus({ preventScroll: true });
     return accepted === true;
   }
 
@@ -2314,10 +2314,10 @@ export function createFloatingEditorController({
       target: s.window.textarea,
       anchor: s.window.element.querySelector('[data-action="color"]'),
       isValid: () => sessions.get(s.id) === s && s.generation === generation && colorOwnerId === s.id && canEdit(s),
-      replaceRange: (from, to, text) => {
+      replaceRange: (from, to, text, { expectedValue, preserveFocus = false } = {}) => {
         if (sessions.get(s.id) !== s || s.generation !== generation || colorOwnerId !== s.id || !canEdit(s)) return false;
         const value = s.window.textarea.value;
-        return applyEdit(s, { value: value.slice(0, from) + text + value.slice(to), selection: { from, to: from + text.length } });
+        return applyEdit(s, { value: value.slice(0, from) + text + value.slice(to), selection: { from, to: from + text.length }, expectedValue }, { preserveFocus });
       },
       onClose: () => { if (colorOwnerId === s.id) colorOwnerId = null; s.colorClose = null; },
     });

@@ -274,6 +274,21 @@ export function resolveExternalEntry(doc, entry) {
   return matches.length === 1 ? matches[0].element : null;
 }
 
+export function getAvailableExternalEntryKeys(doc, entries) {
+  const available = new Set();
+  for (const source of Object.keys(EXTERNAL_ENTRY_SOURCES)) {
+    const saved = entries.filter(entry => isExternalEntry(entry, source));
+    if (!saved.length) continue;
+    const counts = new Map();
+    for (const { descriptor } of describeCandidates(doc, source)) {
+      const identity = entryIdentity(descriptor);
+      counts.set(identity, (counts.get(identity) || 0) + 1);
+    }
+    for (const entry of saved) if (counts.get(entryIdentity(entry)) === 1) available.add(entry.key);
+  }
+  return available;
+}
+
 export function isEntryAlreadyAdded(settings, candidate) {
   return isEntryDescriptor(candidate) && getExternalEntries(settings, candidate.source).some(entry => entryIdentity(entry) === entryIdentity(candidate));
 }
@@ -414,10 +429,11 @@ export function createScriptButtonRegistry({ isAvailable = () => true, onChange 
 }
 
 // Shortcuts require a reachable replacement; hidden-only rules do not.
-export function createSourceVisibilityController({ doc = globalThis.document, getSettings, getReachableKeys, onChange = () => {}, onError = () => {} }) {
+export function createSourceVisibilityController({ doc = globalThis.document, getSettings, getReachableKeys, onChange = () => {}, onAvailabilityChange = () => {}, onError = () => {} }) {
   const win = doc.defaultView;
   let started = false, destroyed = false, syncing = false, timer = null, observer = null, style = null;
   let owned = new Set(), openedPanels = new Set();
+  let availableKeys = null;
   const report = error => { try { onError(error); } catch {} };
   const notify = () => { try { onChange(); } catch (error) { report(error); } };
   function restore() {
@@ -463,6 +479,12 @@ export function createSourceVisibilityController({ doc = globalThis.document, ge
     syncing = true;
     try {
       const settings = getSettings();
+      const entries = settings ? getExternalEntries(settings) : [];
+      const available = getAvailableExternalEntryKeys(doc, entries);
+      if (!availableKeys || available.size !== availableKeys.size || [...available].some(key => !availableKeys.has(key))) {
+        availableKeys = available;
+        onAvailabilityChange(new Set(available));
+      }
       if (!settings?.enabled) {
         const changed = restore(); removeStyle();
         if (changed) notify();
@@ -471,7 +493,6 @@ export function createSourceVisibilityController({ doc = globalThis.document, ge
       ensureStyle();
       const desired = withUnmaskedSourceVisibility(doc, () => {
         const next = new Set(), ids = new Set(), activePanels = new Set(), revealedHeaders = new Set();
-        const entries = getExternalEntries(settings);
         for (const entry of entries) {
           if (entry.source !== "panel" || !openedPanels.has(entry.key) || settings.buttons?.[entry.key] === false) continue;
           const node = resolveExternalEntry(doc, entry);

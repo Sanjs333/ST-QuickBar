@@ -3181,6 +3181,8 @@ function ihParseColorToRgba(str) {
 
   let result = null;
   const s = str.trim();
+  if (/^(?:inherit|initial|unset|revert(?:-layer)?|currentcolor)$/i.test(s) || /\b(?:var|env)\(/i.test(s))
+    return null;
   const hex = s.match(/^#([0-9a-fA-F]{3,8})$/);
   if (hex) {
     const h = hex[1];
@@ -3211,26 +3213,8 @@ function ihParseColorToRgba(str) {
   }
 
   if (!result) {
-    const rgb = s.match(/^rgba?\(([^)]+)\)$/i);
-    if (rgb) {
-      const parts = rgb[1]
-        .split(/[,\s/]+/)
-        .map((p) => p.trim())
-        .filter(Boolean);
-      if (parts.length >= 3) {
-        result = {
-          r: parseInt(parts[0]) || 0,
-          g: parseInt(parts[1]) || 0,
-          b: parseInt(parts[2]) || 0,
-          a: parts[3] !== undefined ? parseFloat(parts[3]) : 1,
-        };
-      }
-    }
-  }
-
-  if (!result) {
     const probe = document.createElement("div");
-    probe.style.color = s;
+    probe.style.setProperty("color", s, "important");
     if (probe.style.color !== "") {
       probe.style.cssText +=
         ";position:absolute;left:-9999px;top:-9999px;visibility:hidden;";
@@ -3244,9 +3228,9 @@ function ihParseColorToRgba(str) {
           .map((x) => x.trim())
           .filter(Boolean);
         result = {
-          r: parseInt(parts[0]) || 0,
-          g: parseInt(parts[1]) || 0,
-          b: parseInt(parts[2]) || 0,
+          r: Math.round(parseFloat(parts[0])),
+          g: Math.round(parseFloat(parts[1])),
+          b: Math.round(parseFloat(parts[2])),
           a: parts[3] !== undefined ? parseFloat(parts[3]) : 1,
         };
       }
@@ -3269,9 +3253,22 @@ function ihRgbToHex(r, g, b) {
   return "#" + h(r) + h(g) + h(b);
 }
 
+function getColorPickerFocusedTarget() {
+  let active = document.activeElement;
+  try {
+    while (active?.tagName === "IFRAME" && active.contentDocument)
+      active = active.contentDocument.activeElement;
+  } catch (error) {}
+  return isEditableElement(active) && !shouldIgnoreFocusedElement(active) ? active : null;
+}
+
 function openColorPicker(options = {}) {
   let closed = false;
   let outsideTimer = null;
+  let pickController = null;
+  let picking = false;
+  let pickedColor = "";
+  const stopPointerActions = [];
   const _existingCp = document.querySelector(".ih-color-picker-portal");
   if (_existingCp) {
     if (typeof _existingCp._ihClose === "function") _existingCp._ihClose();
@@ -3279,52 +3276,26 @@ function openColorPicker(options = {}) {
     if (!options.target || _existingCp._ihTarget === options.target) return;
   }
   let target = options.target || null;
-  const _cpActive = document.activeElement;
-  if (!target) {
-    if (isEditableElement(_cpActive) && !shouldIgnoreFocusedElement(_cpActive))
-      target = _cpActive;
-    else target = getInsertionTarget();
-  }
-  const validTarget = () =>
-    !closed &&
-    !!target?.isConnected &&
-    !target.readOnly &&
-    !target.disabled &&
-    (!options.isValid || options.isValid());
-  if (options.target && !validTarget()) return;
-  if (!target) {
-    toastr.warning("没有找到可编辑的输入框", "", { timeOut: 1200 });
-    return;
-  }
+  const focusedTarget = getColorPickerFocusedTarget();
+  const autoScanTarget = options.target ||
+    (options.autoScanTarget !== undefined ? options.autoScanTarget : focusedTarget);
+  if (!target) target = autoScanTarget || focusedTarget || getInsertionTarget();
   let cmView = null;
   let textareaEl = null;
-  if (target.isContentEditable) {
-    cmView = getCodeMirrorView(target);
-    if (!cmView) {
-      toastr.warning("当前编辑区暂不支持取色", "", { timeOut: 1500 });
-      return;
-    }
-  } else if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") {
-    textareaEl = target;
-  } else {
-    toastr.warning("这个编辑区暂不支持取色", "", { timeOut: 1500 });
-    return;
-  }
-  _lastEditTarget = target;
-  if (target === getMessageInput()[0]) {
-    _lastFocusedEditable = null;
-  } else {
-    _lastFocusedEditable = target;
-  }
+  let caretEl = null;
+  let sourceText = "";
+  const validTarget = () =>
+    !closed && !!target?.isConnected &&
+    (!cmView || !cmView.destroyed) &&
+    (!options.isValid || options.isValid());
 
   const COLOR_RE =
     /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|rgba?\([^)]*\)|hsla?\([^)]*\)/gi;
 
   const getText = () =>
-    cmView ? cmView.state.doc.toString() : textareaEl.value || "";
+    cmView ? cmView.state.doc.toString() : textareaEl?.value || "";
 
-  const scan = () => {
-    const text = getText();
+  const scan = (text) => {
     const arr = [];
     COLOR_RE.lastIndex = 0;
     let m;
@@ -3338,16 +3309,6 @@ function openColorPicker(options = {}) {
     return arr;
   };
 
-  const initial = scan();
-  if (initial.length === 0) {
-    toastr.info(
-      "当前编辑框中未找到颜色值，请先点击目标编辑框，确认光标位于正确位置后再试",
-      "",
-      { timeOut: 3000 },
-    );
-    return;
-  }
-
   const rgbaToStr = (rgba) => {
     if (rgba.a >= 1) return ihRgbToHex(rgba.r, rgba.g, rgba.b);
     const a = Math.round(rgba.a * 1000) / 1000;
@@ -3355,7 +3316,7 @@ function openColorPicker(options = {}) {
   };
 
   const selectRange = (start, end) => {
-    if (options.target && !validTarget()) return;
+    if (!validTarget() || getText() !== sourceText) return;
     if (cmView) {
       cmView.dispatch({
         selection: { anchor: start, head: end },
@@ -3375,6 +3336,7 @@ function openColorPicker(options = {}) {
         findReplaceController._scrollTextareaToPos(textareaEl, start);
       } catch (e) {}
       requestAnimationFrame(() => {
+        if (!validTarget() || getText() !== sourceText) return;
         try {
           if (document.activeElement !== textareaEl) {
             textareaEl.focus({ preventScroll: true });
@@ -3386,45 +3348,31 @@ function openColorPicker(options = {}) {
     }
   };
 
-  const replaceRange = (start, end, newStr) => {
-    if (options.target && !validTarget()) return false;
-    if (typeof options.replaceRange === "function")
-      return options.replaceRange(start, end, newStr);
-    if (cmView) {
-      cmView.dispatch({
-        changes: { from: start, to: end, insert: newStr },
-        selection: { anchor: start, head: start + newStr.length },
-        scrollIntoView: true,
-      });
-      cmView.focus();
-    } else {
-      const isSend = textareaEl === getMessageInput()[0];
-      if (isSend) saveStateBeforeAction();
-      else historyManager.pushState($(textareaEl));
-      const savedScroll = textareaEl.scrollTop;
-      const text = textareaEl.value;
-      textareaEl.value =
-        text.substring(0, start) + newStr + text.substring(end);
-      textareaEl.scrollTop = savedScroll;
-      textareaEl.dispatchEvent(new Event("input", { bubbles: true }));
-      textareaEl.scrollTop = savedScroll;
-      try {
-        textareaEl.focus({ preventScroll: true });
-        textareaEl.setSelectionRange(start, start + newStr.length);
-        textareaEl.scrollTop = savedScroll;
-      } catch (e) {}
-      _lastFocusedEditable = isSend ? null : textareaEl;
-      historyManager.pushState($(textareaEl));
-    }
-  };
-
   document
     .querySelectorAll(".ih-color-picker-portal")
     .forEach((el) => el.remove());
   closeAllFolderDropdowns();
 
   const portal = $(
-    `<div class="ih-color-picker-portal"><div class="ih-cp-header"><span class="ih-cp-drag" title="按住拖动面板"><i class="fa-solid fa-grip-lines"></i></span><div class="ih-cp-header-btns"><button class="ih-cp-pin" type="button" title="固定面板：启用后点击外部不会关闭，再次点击解除"><i class="fa-solid fa-thumbtack"></i></button><button class="ih-cp-close" type="button" title="关闭取色面板"><i class="fa-solid fa-xmark"></i></button></div></div><div class="ih-cp-list"></div><div class="ih-cp-resize" title="拖动调整面板大小"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></div></div>`,
+    `<div class="ih-color-picker-portal" role="dialog" aria-label="取色器">
+      <div class="ih-cp-header">
+        <span class="ih-cp-drag" title="按住拖动面板"><i class="fa-solid fa-grip-lines" aria-hidden="true"></i></span>
+        <div class="ih-cp-header-btns">
+          <button class="ih-cp-action ih-cp-pick" type="button" title="全屏取色（仅部分浏览器支持，如桌面版 Chrome）" aria-label="全屏取色"><i class="fa-solid fa-eye-dropper" aria-hidden="true"></i></button>
+          <button class="ih-cp-action ih-cp-scan" type="button" title="扫描编辑框内所有颜色值（请先点击目标编辑框）" aria-label="扫描编辑框中的颜色" aria-pressed="false"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></button>
+          <button class="ih-cp-action ih-cp-pin" type="button" title="固定面板：启用后点击外部不会关闭，再次点击解除" aria-label="固定取色面板" aria-pressed="false"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>
+          <button class="ih-cp-action ih-cp-close" type="button" title="关闭取色面板" aria-label="关闭取色面板"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>
+      </div>
+      <div class="ih-cp-result" aria-live="polite" hidden>
+        <span class="ih-cp-swatch ih-cp-result-swatch"></span>
+        <code class="ih-cp-result-value"></code>
+        <button class="ih-cp-action ih-cp-copy" type="button" title="复制色值" aria-label="复制取色结果"><i class="fa-solid fa-copy" aria-hidden="true"></i></button>
+      </div>
+      <div class="ih-cp-hint"><span>吸管：全屏取色，仅部分浏览器支持，如桌面版 Chrome。</span><span>查找：扫描编辑框内所有颜色值，请先点击目标编辑框。</span></div>
+      <div class="ih-cp-list" hidden></div>
+      <div class="ih-cp-resize" title="拖动调整面板大小"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></div>
+    </div>`,
   );
   const _cpSaved = getSettings().colorPicker || {};
   if (_cpSaved.width > 0) portal.css("width", _cpSaved.width + "px");
@@ -3451,6 +3399,7 @@ function openColorPicker(options = {}) {
     }
   };
   const onEditorCaret = () => {
+    if (!validTarget() || getText() !== sourceText) return;
     let pos;
     if (cmView) {
       const sel = cmView.state.selection.main;
@@ -3476,8 +3425,7 @@ function openColorPicker(options = {}) {
   };
 
   const render = () => {
-    const list = scan();
-    cachedList = list;
+    const list = cachedList;
     if (list.length === 0) {
       listEl.html(`<div class="ih-cp-empty">未找到颜色值</div>`);
       return;
@@ -3489,8 +3437,8 @@ function openColorPicker(options = {}) {
       const swatchBg = `rgba(${c.rgba.r},${c.rgba.g},${c.rgba.b},${c.rgba.a})`;
       html += `
         <div class="ih-cp-row${i === activeIndex ? " ih-cp-row-active" : ""}" data-index="${i}">
-          <span class="ih-cp-swatch" style="--cp-bg:${swatchBg};"></span>
-          <span class="ih-cp-text" title="点击跳转至编辑框中的此颜色">${ihEscapeHtml(c.raw)}</span>
+          <span class="ih-cp-swatch" style="--cp-bg:${swatchBg};" title="定位原编辑框中的此颜色"></span>
+          <input type="text" class="ih-cp-text ih-cp-value" value="${ihEscapeHtml(c.raw)}" title="编辑色值；Enter 确认，Esc 恢复，可选中复制" aria-label="颜色值 ${i + 1}" spellcheck="false" autocomplete="off" autocapitalize="off" />
           <span class="ih-cp-controls">
             <input type="color" class="ih-cp-color" value="${hex}" title="选择颜色" />
             <span class="ih-cp-alpha-wrap">
@@ -3503,29 +3451,107 @@ function openColorPicker(options = {}) {
     listEl.html(html);
   };
 
-  const applyRow = (rowEl) => {
+  const getRowColor = (rowEl) => {
     const idx = parseInt(rowEl.getAttribute("data-index"));
-    const list = scan();
-    if (isNaN(idx) || idx < 0 || idx >= list.length) {
-      render();
-      return;
+    return cachedList[idx] || null;
+  };
+
+  const updateRow = (rowEl, rgba, raw) => {
+    const c = getRowColor(rowEl);
+    if (!c) return;
+    c.rgba = rgba;
+    c.raw = raw;
+    const valueEl = rowEl.querySelector(".ih-cp-value");
+    valueEl.value = raw;
+    valueEl.classList.remove("ih-cp-value-invalid");
+    valueEl.removeAttribute("aria-invalid");
+    rowEl.querySelector(".ih-cp-color").value = ihRgbToHex(rgba.r, rgba.g, rgba.b);
+    rowEl.querySelector(".ih-cp-alpha").value = Math.round(rgba.a * 100);
+    rowEl.querySelector(".ih-cp-alpha-val").textContent = `${Math.round(rgba.a * 100)}%`;
+    rowEl.querySelector(".ih-cp-swatch").style.setProperty("--cp-bg", `rgba(${rgba.r},${rgba.g},${rgba.b},${rgba.a})`);
+  };
+
+  const writeRow = (rowEl, rgba, raw) => {
+    const c = getRowColor(rowEl);
+    if (!c) return false;
+    if (!validTarget() || target.readOnly || target.disabled || cmView?.state.readOnly) {
+      toastr.warning("原编辑框已关闭或暂不可编辑，请重新扫描", "", { timeOut: 2200 });
+      return false;
     }
-    const c = list[idx];
+    if (getText() !== sourceText) {
+      toastr.info("原编辑框内容已改变，请重新扫描后修改颜色", "", { timeOut: 2200 });
+      return false;
+    }
+    if (raw === c.raw) {
+      updateRow(rowEl, rgba, raw);
+      return true;
+    }
+    const from = c.start;
+    const to = c.end;
+    const nextText = sourceText.slice(0, from) + raw + sourceText.slice(to);
+    const focused = document.activeElement;
+    let accepted;
+    try {
+      if (typeof options.replaceRange === "function") {
+        accepted = options.replaceRange(from, to, raw, { expectedValue: sourceText, preserveFocus: true });
+      } else if (cmView) {
+        cmView.dispatch({ changes: { from, to, insert: raw } });
+      } else {
+        const isSend = textareaEl === getMessageInput()[0];
+        if (isSend) saveStateBeforeAction();
+        else historyManager.pushState($(textareaEl));
+        const scroll = textareaEl.scrollTop;
+        textareaEl.value = nextText;
+        try { textareaEl.setSelectionRange(from, from + raw.length); } catch (error) {}
+        textareaEl.dispatchEvent(new Event("input", { bubbles: true }));
+        textareaEl.scrollTop = scroll;
+        historyManager.pushState($(textareaEl));
+      }
+    } catch (error) {
+      accepted = false;
+    }
+    if (closed) return false;
+    if (focused?.isConnected && portal[0].contains(focused) && document.activeElement !== focused)
+      focused.focus({ preventScroll: true });
+    if (accepted === false || getText() !== nextText) {
+      toastr.warning("颜色未能写回，请重新扫描后重试", "", { timeOut: 2200 });
+      return false;
+    }
+    const delta = raw.length - (to - from);
+    for (const color of cachedList) {
+      if (color === c) color.end = from + raw.length;
+      else if (color.start >= to) {
+        color.start += delta;
+        color.end += delta;
+      }
+    }
+    sourceText = nextText;
+    updateRow(rowEl, rgba, raw);
+    return true;
+  };
+
+  const applyRow = (rowEl) => {
     const hex = rowEl.querySelector(".ih-cp-color").value;
     const alpha = parseInt(rowEl.querySelector(".ih-cp-alpha").value) / 100;
     const parsed = ihParseColorToRgba(hex) || { r: 0, g: 0, b: 0 };
     const rgba = { r: parsed.r, g: parsed.g, b: parsed.b, a: alpha };
-    const newStr = rgbaToStr(rgba);
-    if (replaceRange(c.start, c.end, newStr) === false) {
-      closePortal();
+    if (!writeRow(rowEl, rgba, rgbaToStr(rgba))) {
+      const color = getRowColor(rowEl);
+      if (color) updateRow(rowEl, color.rgba, color.raw);
       return;
     }
-    const txt = rowEl.querySelector(".ih-cp-text");
-    if (txt) txt.textContent = newStr;
-    cachedList = scan();
-    activeIndex = idx;
-    setActiveRow(idx);
-    selectRange(c.start, c.start + newStr.length);
+    setActiveRow(parseInt(rowEl.getAttribute("data-index")));
+  };
+
+  const commitValue = (input) => {
+    const raw = input.value.trim();
+    const rgba = ihParseColorToRgba(raw);
+    if (!rgba) {
+      input.classList.add("ih-cp-value-invalid");
+      input.setAttribute("aria-invalid", "true");
+      return false;
+    }
+    return writeRow(input.closest(".ih-cp-row"), rgba, raw);
   };
 
   const previewRow = (rowEl) => {
@@ -3563,6 +3589,144 @@ function openColorPicker(options = {}) {
   portal.on("click", ".ih-cp-pin", function () {
     pinned = !pinned;
     this.classList.toggle("ih-cp-pin-active", pinned);
+    this.setAttribute("aria-pressed", String(pinned));
+  });
+  portal.on("focusin", ".ih-cp-value", function () {
+    setActiveRow(parseInt(this.closest(".ih-cp-row").getAttribute("data-index")));
+  });
+  portal.on("input", ".ih-cp-value", function () {
+    const rgba = ihParseColorToRgba(this.value.trim());
+    this.classList.toggle("ih-cp-value-invalid", !rgba);
+    if (!rgba) this.setAttribute("aria-invalid", "true");
+    else {
+      this.removeAttribute("aria-invalid");
+      this.closest(".ih-cp-row").querySelector(".ih-cp-swatch").style.setProperty("--cp-bg", `rgba(${rgba.r},${rgba.g},${rgba.b},${rgba.a})`);
+    }
+  });
+  portal.on("change", ".ih-cp-value", function () { commitValue(this); });
+  portal.on("keydown", ".ih-cp-value", function (e) {
+    if (e.key !== "Enter" && e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      const raw = getRowColor(this.closest(".ih-cp-row"))?.raw;
+      const rgba = ihParseColorToRgba(raw);
+      if (rgba) updateRow(this.closest(".ih-cp-row"), rgba, raw);
+    } else commitValue(this);
+  });
+  const bindScanTarget = (candidate, notify = true) => {
+    if (!candidate?.isConnected || (options.isValid && !options.isValid())) {
+      if (notify) toastr.info("请先点击目标编辑框，再点击查找图标扫描颜色", "", { timeOut: 2200 });
+      return false;
+    }
+    const view = candidate.isContentEditable ? getCodeMirrorView(candidate) : null;
+    if (!view && candidate.tagName !== "TEXTAREA" && candidate.tagName !== "INPUT") {
+      if (notify) toastr.warning("这个编辑区暂不支持扫描颜色", "", { timeOut: 1800 });
+      return false;
+    }
+    if (caretEl) {
+      caretEl.removeEventListener("click", onEditorCaret);
+      caretEl.removeEventListener("mouseup", onEditorCaret);
+    }
+    target = candidate;
+    cmView = view;
+    textareaEl = view ? null : candidate;
+    caretEl = view ? view.contentDOM : candidate;
+    caretEl.addEventListener("click", onEditorCaret);
+    caretEl.addEventListener("mouseup", onEditorCaret);
+    portal[0]._ihTarget = target;
+    _lastEditTarget = target;
+    _lastFocusedEditable = target === getMessageInput()[0] ? null : target;
+    return true;
+  };
+  const scanEditor = (candidate, notify = true) => {
+    if (!bindScanTarget(candidate, notify)) return;
+    sourceText = getText();
+    cachedList = scan(sourceText);
+    activeIndex = -1;
+    portal.addClass("ih-cp-has-list");
+    portal.find(".ih-cp-scan").attr("aria-pressed", "true");
+    portal.find(".ih-cp-hint").prop("hidden", true);
+    listEl.prop("hidden", false);
+    document.body.classList.add("ih-cp-selecting");
+    render();
+    keepInViewport();
+  };
+  portal.on("click", ".ih-cp-scan", function () {
+    scanEditor(options.target || getInsertionTarget() || target);
+  });
+  portal.on("click", ".ih-cp-pick", async function () {
+    if (picking || closed) return;
+    if (typeof window.EyeDropper !== "function") {
+      toastr.info(
+        window.isSecureContext
+          ? "全屏取色仅支持部分浏览器，如桌面版 Chrome；仍可使用查找图标扫描颜色"
+          : "界面取色需要支持此功能的浏览器，并通过 HTTPS 或 localhost 访问",
+        "", { timeOut: 3500 },
+      );
+      return;
+    }
+    picking = true;
+    pickController = new AbortController();
+    const controller = pickController;
+    portal.addClass("ih-cp-picking");
+    this.disabled = true;
+    try {
+      // open() must retain the activation from this click; do not await before it.
+      const result = await new window.EyeDropper().open({ signal: controller.signal });
+      if (closed || controller.signal.aborted) return;
+      const rgba = ihParseColorToRgba(result.sRGBHex);
+      if (!rgba) return;
+      pickedColor = ihRgbToHex(rgba.r, rgba.g, rgba.b);
+      portal.find(".ih-cp-result-swatch")[0].style.setProperty("--cp-bg", pickedColor);
+      portal.find(".ih-cp-result-value").text(pickedColor);
+      portal.find(".ih-cp-result").prop("hidden", false);
+      portal.find(".ih-cp-hint").prop("hidden", true);
+    } catch (error) {
+      if (!closed && error?.name !== "AbortError")
+        toastr.warning("界面取色未能启动，请稍后重试", "", { timeOut: 2200 });
+    } finally {
+      picking = false;
+      if (pickController === controller) pickController = null;
+      if (!closed) {
+        portal.removeClass("ih-cp-picking");
+        this.disabled = false;
+        this.focus({ preventScroll: true });
+      }
+    }
+  });
+  portal.on("click", ".ih-cp-copy", async function () {
+    if (!pickedColor || closed) return;
+    const color = pickedColor;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(color);
+    } catch (error) {
+      if (closed) return;
+      const focused = document.activeElement;
+      const helper = document.createElement("textarea");
+      helper.className = "ih-clipboard-helper";
+      helper.tabIndex = -1;
+      helper.setAttribute("aria-hidden", "true");
+      helper.value = color;
+      helper.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0;";
+      portal[0].appendChild(helper);
+      let copied = false;
+      try {
+        helper.select();
+        copied = document.execCommand("copy");
+      } catch (copyError) {
+        copied = false;
+      } finally {
+        helper.remove();
+        if (focused?.isConnected) focused.focus({ preventScroll: true });
+      }
+      if (!copied) {
+        toastr.warning("复制失败，请选中色值手动复制", "", { timeOut: 2200 });
+        return;
+      }
+    }
+    if (!closed) toastr.success("已复制色值", "", { timeOut: 700 });
   });
   portal.on("input", ".ih-cp-color", function () {
     schedulePreview(this.closest(".ih-cp-row"));
@@ -3581,7 +3745,7 @@ function openColorPicker(options = {}) {
   });
 
   portal.on("mousedown", function (e) {
-    if (!$(e.target).closest("input, textarea, select").length) {
+    if (!$(e.target).closest("input, textarea, select, button, .ih-cp-result-value").length) {
       e.preventDefault();
     }
   });
@@ -3600,13 +3764,13 @@ function openColorPicker(options = {}) {
 
   const _cpOpenDialogs = document.querySelectorAll("dialog[open]");
   const _cpHost = options.target
-    ? target.closest("dialog[open]") || document.body
+    ? target?.closest("dialog[open]") || document.body
     : _cpOpenDialogs.length > 0
       ? _cpOpenDialogs[_cpOpenDialogs.length - 1]
       : document.body;
   $(_cpHost).append(portal);
   if (options.target) {
-    const owner = target.closest(".ih-floating-editor");
+    const owner = target?.closest(".ih-floating-editor-window, .ih-floating-editor");
     if (owner) {
       portal.addClass("ih-floating-editor-color-picker");
       portal.css(
@@ -3618,7 +3782,6 @@ function openColorPicker(options = {}) {
       );
     }
   }
-  render();
   syncDialogTheme(portal[0]);
   generateFaIconProtectionCSS();
 
@@ -3645,6 +3808,7 @@ function openColorPicker(options = {}) {
       document.removeEventListener("mouseup", _cpUp, true);
       document.removeEventListener("touchmove", _cpMove, true);
       document.removeEventListener("touchend", _cpUp, true);
+      if (closed) return;
       try {
         const _r = portal[0].getBoundingClientRect();
         const _cp = getSettings().colorPicker || {};
@@ -3654,6 +3818,7 @@ function openColorPicker(options = {}) {
         saveSettingsDebounced();
       } catch (e) {}
     };
+    stopPointerActions.push(_cpUp);
     const _cpDown = (e) => {
       if (e.target.closest && e.target.closest(".ih-cp-header-btns")) return;
       const ev = e.touches ? e.touches[0] : e;
@@ -3694,6 +3859,7 @@ function openColorPicker(options = {}) {
       document.removeEventListener("mouseup", _rUp, true);
       document.removeEventListener("touchmove", _rMove, true);
       document.removeEventListener("touchend", _rUp, true);
+      if (closed) return;
       try {
         const _r = portal[0].getBoundingClientRect();
         const _cp = getSettings().colorPicker || {};
@@ -3703,6 +3869,7 @@ function openColorPicker(options = {}) {
         saveSettingsDebounced();
       } catch (e) {}
     };
+    stopPointerActions.push(_rUp);
     const _rDown = (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -3724,14 +3891,6 @@ function openColorPicker(options = {}) {
     _cpResizeEl.addEventListener("touchstart", _rDown, { passive: false });
   }
 
-  document.body.classList.add("ih-cp-selecting");
-  const _cpCaretEl = cmView ? cmView.contentDOM : textareaEl;
-  const _cpCaretHandler = onEditorCaret;
-  if (_cpCaretEl) {
-    _cpCaretEl.addEventListener("click", _cpCaretHandler);
-    _cpCaretEl.addEventListener("mouseup", _cpCaretHandler);
-  }
-
   const btnSel =
     "#input_color_picker_btn, " +
     ".ih-folder-dropdown-portal [data-button-key='colorPicker'], " +
@@ -3742,7 +3901,15 @@ function openColorPicker(options = {}) {
       if (el.offsetParent !== null) anchorBtn = el;
     });
 
+  const keepInViewport = () => {
+    const rect = portal[0].getBoundingClientRect();
+    portal.css({
+      left: `${Math.max(4, Math.min(rect.left, window.innerWidth - rect.width - 4))}px`,
+      top: `${Math.max(4, Math.min(rect.top, window.innerHeight - rect.height - 4))}px`,
+    });
+  };
   requestAnimationFrame(() => {
+    if (closed) return;
     const ddW = portal.outerWidth();
     const ddH = portal.outerHeight();
     let left, top;
@@ -3772,6 +3939,8 @@ function openColorPicker(options = {}) {
   const closePortal = () => {
     if (closed) return;
     closed = true;
+    pickController?.abort();
+    for (const stop of stopPointerActions) stop();
     if (outsideTimer) clearTimeout(outsideTimer);
     if (_cpPreviewRaf) {
       cancelAnimationFrame(_cpPreviewRaf);
@@ -3779,9 +3948,9 @@ function openColorPicker(options = {}) {
     }
     document.removeEventListener("mousedown", outside, true);
     document.removeEventListener("touchstart", outside, true);
-    if (_cpCaretEl) {
-      _cpCaretEl.removeEventListener("click", _cpCaretHandler);
-      _cpCaretEl.removeEventListener("mouseup", _cpCaretHandler);
+    if (caretEl) {
+      caretEl.removeEventListener("click", onEditorCaret);
+      caretEl.removeEventListener("mouseup", onEditorCaret);
     }
     document.body.classList.remove("ih-cp-selecting");
     portal.remove();
@@ -3791,11 +3960,14 @@ function openColorPicker(options = {}) {
   portal[0]._ihClose = closePortal;
   portal.find(".ih-cp-close").on("click", closePortal);
   const outside = (e) => {
-    if (pinned) return;
+    if (pinned || picking) return;
     if (portal[0].contains(e.target)) return;
     if (anchorBtn && anchorBtn.contains(e.target)) return;
-    if (_cpCaretEl && _cpCaretEl.contains && _cpCaretEl.contains(e.target))
-      return;
+    if (caretEl?.contains(e.target) || target?.contains(e.target)) return;
+    if (!options.target) {
+      const editor = e.target.closest?.("textarea, input, [contenteditable='true']");
+      if (isEditableElement(editor) && !shouldIgnoreFocusedElement(editor)) return;
+    }
     closePortal();
   };
   outsideTimer = setTimeout(() => {
@@ -3803,6 +3975,7 @@ function openColorPicker(options = {}) {
     document.addEventListener("mousedown", outside, true);
     document.addEventListener("touchstart", outside, true);
   }, 60);
+  if (autoScanTarget) scanEditor(autoScanTarget, false);
   return closePortal;
 }
 
@@ -7268,7 +7441,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.3.8";
+const EXTENSION_VERSION = "3.3.9";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -8104,9 +8277,9 @@ const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
 <h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v${CHANGELOG_VERSION}</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li>转存面板的“当前聊天档”调整为“来源聊天档”，支持搜索选择同角色的其他聊天档。</li>
-  <li>目标聊天档下拉列表新增“新建聊天”选项，创建后自动选为目标。</li>
-  <li>消息管理面板支持记忆全屏状态，重新打开或刷新页面后恢复上次显示模式。</li>
+  <li><b>取色器新增全屏取色与复制</b>，支持桌面版 Chrome 等浏览器。</li>
+  <li><b>优化颜色扫描与编辑</b>：光标位于编辑框时，打开取色器自动扫描；也可点击查找图标手动扫描。列表色值支持直接编辑，修改后自动写回原文。</li>
+  <li><b>外部快捷入口随加载状态自动启停</b>：来源不可用时隐藏，恢复后按原设置显示。保留勾选记录、布局和快捷键，手动关闭的入口不会自动启用。</li>
 </ul>
 `;
 
@@ -8246,13 +8419,16 @@ function openHelpPanel() {
 <p>两个按钮默认关闭，可在<q>「按钮管理」</q>中启用，也支持绑定快捷键。</p>
 
 <p class="ih-help-sub"><i class="fa-solid fa-eye-dropper"></i> 取色器</p>
-<p>自动扫描当前输入框或编辑区域中的颜色值（支持 #十六进制、rgb / rgba、hsl / hsla 写法），并在一个可拖动的面板中列出，便于预览和修改。</p>
+<p>光标在编辑框内时，打开取色器会自动扫描该编辑框；也可独立打开面板，使用以下工具：</p>
 <ul>
-    <li>点击某一行的颜色文本，可跳转并选中编辑框中对应的颜色，便于定位</li>
-    <li>点击色块旁的取色按钮更换颜色，拖动滑块调整透明度，修改后自动写回编辑框</li>
+    <li><b>吸管</b>：全屏取色，仅部分浏览器支持，如桌面版 Chrome。点击结果旁的复制图标可复制色值</li>
+    <li><b>查找</b>：扫描编辑框内所有颜色值，请先点击目标编辑框。支持 #十六进制、rgb / rgba、hsl / hsla；CSS 悬浮窗入口始终扫描该窗口</li>
+    <li>扫描列表里的色值可直接编辑：输入时预览，Enter 或失焦后写回原编辑框，Esc 放弃尚未提交的修改。色块选择和透明度滑块也会自动写回</li>
+    <li>点击列表左侧色块可定位并选中原文中的颜色。若原编辑框内容另有变化，请重新扫描后修改，避免替换错误位置</li>
     <li>面板支持拖动位置、拖动右下角调整大小；点击图钉按钮固定后，点击面板外部不会自动关闭，适合连续修改多个颜色</li>
     <li>将光标移动到编辑框中某个颜色上，面板会自动高亮对应行</li>
 </ul>
+<p>全屏取色需通过 HTTPS 或 localhost 访问；结果为屏幕实际颜色，不包含原 CSS 的透明度。</p>
 <p>工具栏中的取色按钮默认关闭，可在<q>「按钮管理」</q>中启用，也支持绑定快捷键。自定义 CSS 悬浮窗底部另有同一取色器的入口，无需先启用工具栏按钮。</p>
 
 <p class="ih-help-sub"><i class="fa-solid fa-magnifying-glass"></i> 查找替换</p>
@@ -8470,7 +8646,8 @@ function openHelpPanel() {
     <li><b>入口行为</b>：魔法棒快捷入口转发原按钮点击；扩展面板快捷入口打开扩展抽屉、展开对应顶层面板并定位，不复制或移动原按钮、面板。</li>
     <li><b>图标与快捷键</b>：勾选框控制启用，快捷键输入框沿用现有操作。点击图标选择按钮可更换 FA 图标，选择<q>「无图标」</q>恢复原入口图标；原入口无图标时使用通用图标。</li>
     <li><b>布局与排序</b>：拖动行首手柄可在同类入口内排序；已收录入口可从文件夹、角色专属区域或悬浮面板的按钮选择器中加入。放入文件夹或角色区域后，到对应区域管理；移除快捷入口会清理其布局与快捷键，不影响原插件。</li>
-    <li><b>未找到或不可用</b>：仅识别当前页面的标准魔法棒入口和顶层扩展面板，不扫描额外顶栏、iframe / 沙盒或面板内的子操作。没有稳定标识且名称重复的入口不会列出。原入口暂未加载、被原插件隐藏或禁用时保留配置；确认来源恢复后重新点击，未收录的入口需重新扫描添加。</li>
+    <li><b>加载状态</b>：原入口暂未加载、被来源隐藏或禁用时，临时取消勾选并隐藏快捷按钮；恢复后按原来的启用选择显示，手动取消的入口不会自动勾选。排序、布局和快捷键均保留。</li>
+    <li><b>扫描范围</b>：仅识别标准魔法棒入口和顶层扩展面板，不扫描额外顶栏、iframe / 沙盒或面板内的子操作。没有稳定标识且名称重复的入口不会列出；未收录的入口需扫描添加。</li>
 </ul>
 <p class="ih-help-sub">仅隐藏原入口</p>
 <p>不需要快捷按钮时，可在扫描弹窗勾选入口并点击<q>「仅隐藏原入口」</q>。分类下会出现精简列表：原图标、名称和眼睛恢复按钮，不生成工具栏按钮，也不进入文件夹、角色区域、悬浮面板或快捷键设置。点击眼睛恢复单项，<q>「全部恢复」</q>只恢复当前分类的仅隐藏项。</p>
@@ -21056,7 +21233,7 @@ const floatingPanelController = {
     buttons.forEach((bKey) => {
       if (
         ExternalEntries.findExternalEntry(getSettings(), bKey) &&
-        getSettings().buttons?.[bKey] === false
+        !ihIsButtonEnabled(bKey)
       )
         return;
       if (bKey === "charFolder") {
@@ -21084,6 +21261,7 @@ const floatingPanelController = {
         const fi = parseInt(bKey.replace("folder_", ""));
         const folder = (getSettings().folders || [])[fi];
         if (!folder) return;
+        if (!(folder.buttons || []).some(key => ihIsButtonEnabled(key))) return;
         let iconHtml;
         if (folder.icon)
           iconHtml = `<i class="${ihEscapeAttr(folder.icon)}"></i>`;
@@ -22686,8 +22864,19 @@ function getActionForKey(key) {
 
 function bindButtonAction(btn, key) {
   const isMobile = ihIsMobileDevice();
-  const action = getActionForKey(key);
-  if (!action) return;
+  const originalAction = getActionForKey(key);
+  if (!originalAction) return;
+  let colorScanTarget;
+  const action = key === "colorPicker" ? () => {
+    const autoScanTarget = colorScanTarget;
+    colorScanTarget = undefined;
+    openColorPicker({ autoScanTarget });
+  } : originalAction;
+  if (key === "colorPicker") {
+    btn.on("pointerdown mousedown touchstart", () => {
+      colorScanTarget = getColorPickerFocusedTarget();
+    });
+  }
 
   const isBoundaryScroll = key === "scrollToLastAi" || key === "scrollToBottom";
   if (isBoundaryScroll) {
@@ -22774,7 +22963,7 @@ const IH_PLAIN_ICON_BTN_SEL =
   ".ih-bp-jump, .ih-bp-edit, .ih-bp-basket, " +
   ".ih-basket-jump, .ih-basket-view, .ih-basket-remove, .ih-basket-gap-fill, " +
   ".ih-me-swipe, .ih-mgr-seg-btn, .ih-mgr-jump-go, " +
-  ".ih-mgr-search-rtoggle, .ih-mgr-search-replace-all";
+  ".ih-mgr-search-rtoggle, .ih-mgr-search-replace-all, .ih-cp-action";
 let _cachedThemeSample = null;
 let _cachedThemeSampleTime = 0;
 const _THEME_SAMPLE_TTL = 60000;
@@ -22981,7 +23170,7 @@ function syncDialogTheme(contentEl, options) {
         "input[type='text'], input[type='number'], textarea, .ih-hm-status, .ih-beauty-prompt-box, .shortcut-input",
       )
       .forEach(function (el) {
-        if (el.classList && el.classList.contains("ih-fp-transparent-input")) {
+        if (el.classList && (el.classList.contains("ih-fp-transparent-input") || el.classList.contains("ih-cp-value"))) {
           if (s.inputColor)
             el.style.setProperty("color", s.inputColor, "important");
           el.style.setProperty("background-color", "transparent", "important");
@@ -23250,7 +23439,7 @@ function ihGetCharVisibleButtons() {
   const buttons = getSettings().buttons || {};
   const floatingButtons = floatingPanelController.getFloatingButtons();
   return ihGetCharBoundList().filter((bk) => {
-    if (buttons[bk] === false) return false;
+    if (!ihIsButtonEnabled(bk, buttons)) return false;
     if (floatingButtons.has(bk)) return false;
     return true;
   });
@@ -23518,7 +23707,7 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
     floatingButtons = floatingPanelController.getFloatingButtons();
   }
   (folder.buttons || []).forEach((bKey) => {
-    if (buttons[bKey] === false) return;
+    if (!ihIsButtonEnabled(bKey, buttons)) return;
     if (floatingButtons.has(bKey)) return;
     let displayHtml = getButtonDisplayHtml(bKey);
     const label = getButtonLabel(bKey);
@@ -23830,7 +24019,7 @@ function toolbarHasVisibleButtons() {
       if (buttons[key] === false) continue;
       if (floatingButtons.has(key)) continue;
       const visibleInFolder = (folder.buttons || []).some((bk) => {
-        if (buttons[bk] === false) return false;
+        if (!ihIsButtonEnabled(bk, buttons)) return false;
         if (floatingButtons.has(bk)) return false;
         return true;
       });
@@ -23839,7 +24028,7 @@ function toolbarHasVisibleButtons() {
     }
     if (folderedButtons.has(key)) continue;
     if (floatingButtons.has(key)) continue;
-    if (buttons[key] !== false) return true;
+    if (ihIsButtonEnabled(key, buttons)) return true;
   }
   return false;
 }
@@ -23885,7 +24074,7 @@ function buildToolbar() {
     if (floatingButtons.has(folderKey)) return;
 
     const visibleButtonsInFolder = (folder.buttons || []).filter((bKey) => {
-      if (buttons[bKey] === false) return false;
+      if (!ihIsButtonEnabled(bKey, buttons)) return false;
       if (floatingButtons.has(bKey)) return false;
       return true;
     });
@@ -23976,7 +24165,7 @@ function buildToolbar() {
       const btnId = getButtonIdFromKey(key);
       if (btnId) {
         const btn = toolbar.find(`#${btnId}`);
-        if (btn.length && buttons[key] !== false) {
+        if (btn.length && ihIsButtonEnabled(key, buttons)) {
           if (isInputButton(key)) row1.append(btn);
           else row2.append(btn);
           btn.show();
@@ -24009,7 +24198,7 @@ function buildToolbar() {
         const btn = toolbar.find(`#${btnId}`);
         if (btn.length) {
           toolbar.append(btn);
-          btn.toggle(buttons[key] !== false);
+          btn.toggle(ihIsButtonEnabled(key, buttons));
         }
       }
     });
@@ -24046,11 +24235,12 @@ function toggleFolderCollapse(fi) {
 
 function makeSettingsRow(key, opts) {
   const settings = getSettings();
-  const isChecked = settings.buttons[key] !== false ? "checked" : "";
+  const isChecked = ihIsButtonEnabled(key, settings.buttons) ? "checked" : "";
   const shortcutVal = settings.shortcuts[key] || "";
   const displayHtml = opts.displayHtml || getButtonDisplayHtml(key);
   const label = ihEscapeHtml(opts.label || getButtonLabel(key));
   const external = ExternalEntries.findExternalEntry(settings, key);
+  const unavailable = external && !ihIsExternalEntryAvailable(key);
   let extraBtns = "";
   if (opts.isCustom) {
     extraBtns = `
@@ -24075,7 +24265,7 @@ function makeSettingsRow(key, opts) {
   const row = $(`
         <div class="integrated-button-row${extraClass}" data-button-key="${key}" ${opts.isCustom ? 'data-custom="true"' : ""} ${opts.isChild ? 'data-is-child="true"' : ""}>
             <span class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></span>
-            <input id="enable_${key}_btn" type="checkbox" ${isChecked} />
+            <input id="enable_${key}_btn" type="checkbox" ${isChecked} ${unavailable ? "disabled" : ""} />
             <div class="button-preview">${displayHtml}</div>
             <label for="enable_${key}_btn">${label}</label>
             ${extraBtns}
@@ -24084,6 +24274,10 @@ function makeSettingsRow(key, opts) {
         </div>
     `);
   row.find(`#enable_${key}_btn`).on("change", function () {
+    if (external && !ihIsExternalEntryAvailable(key)) {
+      ihSyncExternalEntryCheckboxes();
+      return;
+    }
     getSettings().buttons[key] = $(this).prop("checked");
     saveSettingsDebounced();
     updateButtonVisibilityDebounced();
@@ -24094,7 +24288,7 @@ function makeSettingsRow(key, opts) {
     }
   });
   if (external) {
-    row.find("label").attr("title", external.label);
+    ihUpdateExternalEntryRow(row[0]);
     row.find(".ih-external-icon-btn").on("click", async function (e) {
       e.stopPropagation();
       const icon = await pickFaIcon();
@@ -25755,7 +25949,7 @@ function updateButtonVisibility() {
     if (btnId) $(`#${btnId}`).hide();
   });
   const allHidden =
-    Object.keys(buttons).every((k) => buttons[k] === false) &&
+    Object.keys(buttons).every((k) => !ihIsButtonEnabled(k, buttons)) &&
     !ihScriptButtons.list("toolbar").length;
   if (!settings.enabled || allHidden) {
     $("#input_helper_toolbar").addClass("input-helper-hidden");
@@ -25822,6 +26016,42 @@ function ihPublishScriptButtonApi() {
 // Source visibility is based on an actually reachable shortcut, not merely
 // membership in saved settings. Closed folders and a collapsed floating panel
 // still count when their opener is present and enabled.
+let ihAvailableExternalEntryKeys = null;
+function ihIsExternalEntryAvailable(key) {
+  const entry = ExternalEntries.findExternalEntry(getSettings(), key);
+  if (!entry) return false;
+  return ihAvailableExternalEntryKeys
+    ? ihAvailableExternalEntryKeys.has(key)
+    : !!ExternalEntries.resolveExternalEntry(document, entry);
+}
+function ihIsButtonEnabled(key, buttons = getSettings().buttons) {
+  if (buttons?.[key] === false) return false;
+  if (typeof key !== "string" || !key.startsWith("external_")) return true;
+  return ihIsExternalEntryAvailable(key);
+}
+function ihUpdateExternalEntryRow(row) {
+  const key = row.dataset.buttonKey;
+  const entry = ExternalEntries.findExternalEntry(getSettings(), key);
+  if (!entry) return;
+  const available = ihIsExternalEntryAvailable(key);
+  const checkbox = row.querySelector(`input[id="enable_${key}_btn"]`);
+  if (!checkbox) return;
+  checkbox.checked = available && getSettings().buttons?.[key] !== false;
+  checkbox.disabled = !available;
+  checkbox.title = available
+    ? "显示此快捷入口"
+    : "入口暂未加载或不可用，已保留启用设置；恢复后按原设置启用";
+  row.classList.toggle("ih-external-unavailable", !available);
+  row.querySelector("label")?.setAttribute("title", available ? entry.label : `${entry.label}：${checkbox.title}`);
+}
+function ihSyncExternalEntryCheckboxes() {
+  document.querySelectorAll(".ih-external-entry-row").forEach(ihUpdateExternalEntryRow);
+}
+function ihOnExternalEntryAvailabilityChange(availableKeys) {
+  ihAvailableExternalEntryKeys = availableKeys;
+  ihSyncExternalEntryCheckboxes();
+  ihScheduleScriptButtonRefresh();
+}
 function ihIsShortcutControlAvailable(node) {
   if (!node?.isConnected) return false;
   for (let parent = node; parent; parent = parent.parentElement) {
@@ -25854,7 +26084,7 @@ function ihIsFloatingShortcutReachable(key) {
   if (
     !settings.enabled ||
     !fp?.enabled ||
-    settings.buttons?.[key] === false ||
+    !ihIsButtonEnabled(key, settings.buttons) ||
     !(fp.buttons || []).includes(key)
   )
     return false;
@@ -25903,7 +26133,7 @@ function ihGetReachableExternalEntryKeys() {
   const floating = floatingPanelController.getFloatingButtons();
   const charVisible = new Set(ihGetCharVisibleButtons());
   for (const entry of ExternalEntries.getExternalEntries(settings)) {
-    if (settings.buttons?.[entry.key] === false) continue;
+    if (!ihIsButtonEnabled(entry.key, settings.buttons)) continue;
     if (ihIsShortcutKeyReachable(entry.key)) {
       reachable.add(entry.key);
       continue;
@@ -25933,6 +26163,7 @@ const ihSourceVisibility = ExternalEntries.createSourceVisibilityController({
   doc: document,
   getSettings,
   getReachableKeys: ihGetReachableExternalEntryKeys,
+  onAvailabilityChange: ihOnExternalEntryAvailabilityChange,
   onChange: () => window.dispatchEvent(new Event("quickbar:changed")),
   onError: (error) =>
     console.warn(
@@ -25955,11 +26186,12 @@ function ihPreserveExternalEntryOrder(rootOrder) {
 
 function ihSyncExternalToolbarButtons(toolbar) {
   const entries = ExternalEntries.getExternalEntries(getSettings());
-  const keys = new Set(entries.map((entry) => entry.key));
+  const keys = new Set(entries.filter(entry => ihIsButtonEnabled(entry.key)).map((entry) => entry.key));
   toolbar.find(".ih-external-toolbar-btn").each(function () {
     if (!keys.has(this.dataset.buttonKey)) $(this).remove();
   });
   for (const entry of entries) {
+    if (!keys.has(entry.key)) continue;
     const id = getButtonIdFromKey(entry.key);
     let button = toolbar.find(`#${id}`);
     if (!button.length) {
@@ -26048,6 +26280,7 @@ function ihOnOriginalEntryVisibilityChange() {
 
 function ihRefreshExternalEntryUi() {
   saveSettingsDebounced();
+  ihSourceVisibility.sync();
   closeAllFolderDropdowns();
   renderSettingsPanel();
   renderFolderSettings();

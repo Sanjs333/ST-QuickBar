@@ -12,7 +12,7 @@ const LAYOUT_ROOTS = "#rm_extensions_block, #input_helper_toolbar, .ih-floating-
 // Disable only our mask during synchronous discovery, preserving source-owned visibility.
 export function withUnmaskedSourceVisibility(doc, read) {
   const sheet = doc.getElementById(SOURCE_VISIBILITY_STYLE_ID)?.sheet;
-  if (!sheet) return read();
+  if (!sheet || sheet.disabled) return read();
   const disabled = sheet.disabled;
   try { sheet.disabled = true; return read(); }
   finally { sheet.disabled = disabled; }
@@ -268,10 +268,26 @@ export function scanExternalEntries(doc, source) {
   return records.filter(({ descriptor }) => counts.get(entryIdentity(descriptor)) === 1).map(({ descriptor }) => descriptor);
 }
 
+function createExternalEntryResolver(doc) {
+  // Reuse discovery only within one synchronous operation. Later operations
+  // must see source-owned visibility changes and replaced plugin DOM.
+  const sources = new Map();
+  return entry => {
+    if (!isEntryDescriptor(entry)) return null;
+    if (!sources.has(entry.source)) {
+      const matches = new Map();
+      for (const { descriptor, element } of describeCandidates(doc, entry.source)) {
+        const identity = entryIdentity(descriptor);
+        matches.set(identity, matches.has(identity) ? null : element);
+      }
+      sources.set(entry.source, matches);
+    }
+    return sources.get(entry.source).get(entryIdentity(entry)) || null;
+  };
+}
+
 export function resolveExternalEntry(doc, entry) {
-  if (!isEntryDescriptor(entry)) return null;
-  const matches = describeCandidates(doc, entry.source).filter(({ descriptor }) => entryIdentity(descriptor) === entryIdentity(entry));
-  return matches.length === 1 ? matches[0].element : null;
+  return createExternalEntryResolver(doc)(entry);
 }
 
 export function isEntryAlreadyAdded(settings, candidate) {
@@ -469,25 +485,27 @@ export function createSourceVisibilityController({ doc = globalThis.document, ge
         return;
       }
       ensureStyle();
-      const desired = withUnmaskedSourceVisibility(doc, () => {
+      const entries = getExternalEntries(settings), hiddenOnly = getHiddenOnlyEntries(settings);
+      if (!entries.length && !hiddenOnly.length) openedPanels.clear();
+      const desired = entries.length || hiddenOnly.length ? withUnmaskedSourceVisibility(doc, () => {
         const next = new Set(), ids = new Set(), activePanels = new Set(), revealedHeaders = new Set();
-        const entries = getExternalEntries(settings);
+        const resolveEntry = createExternalEntryResolver(doc);
         for (const entry of entries) {
           if (entry.source !== "panel" || !openedPanels.has(entry.key) || settings.buttons?.[entry.key] === false) continue;
-          const node = resolveExternalEntry(doc, entry);
+          const node = resolveEntry(entry);
           if (!isPanelOpen(node)) continue;
           activePanels.add(entry.key); revealedHeaders.add(node);
         }
         // Native reopening must not resume an expired QuickBar reveal session.
         openedPanels = activePanels;
         const collect = (entry, allowReveal = false) => {
-          const node = resolveExternalEntry(doc, entry);
+          const node = resolveEntry(entry);
           if (!node?.isConnected) return;
           if (!allowReveal || !revealedHeaders.has(node)) next.add(node);
           // Revealing a panel header must not reveal its alternate entries.
           if (node.id) ids.add(node.id);
         };
-        for (const entry of getHiddenOnlyEntries(settings)) collect(entry);
+        for (const entry of hiddenOnly) collect(entry);
         const shortcuts = entries
           .filter(entry => entry.hideOriginal === true && settings.buttons?.[entry.key] !== false);
         // Hidden-only use must work without a shortcut layout provider at all.
@@ -497,7 +515,7 @@ export function createSourceVisibilityController({ doc = globalThis.document, ge
           if (node.isConnected && ids.has(node.getAttribute(RELATED_ATTRIBUTE))) next.add(node);
         }
         return next;
-      });
+      }) : new Set();
       let changed = desired.size !== owned.size;
       for (const node of owned) if (!desired.has(node)) {
         changed = true;

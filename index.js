@@ -39,6 +39,7 @@ import {
   getLoadedChatTopOffset,
 } from "./chat-top-navigation.js";
 import { createPresetEntryNavigator } from "./preset-entry-navigation.js";
+import { hasDialogChanges, observeIframeDocuments } from "./dom-observers.js";
 import { Popup, POPUP_TYPE, POPUP_RESULT } from "../../../popup.js";
 
 const openCharacterChat = SillyTavernScript.openCharacterChat;
@@ -9407,17 +9408,20 @@ function ihApplyStreamingBadges() {
     if (lastIdx < 0) return;
     const msg = chat[lastIdx];
     if (!msg || msg.is_user) return;
-    const mesEl = document.querySelector(`#chat .mes[mesid="${lastIdx}"]`);
-    if (!mesEl) return;
     const api = _ihStreamingApi || (msg.extra && msg.extra.api) || "";
     const model = _ihStreamingModel || (msg.extra && msg.extra.model) || "";
+    const showModel = getSettings().showModelInChat && model;
+    const iconName = power_user && power_user.timestamp_model_icon && api === "custom" && model
+      ? ihGetIconNameForCustomModel(model) : null;
+    if (!showModel && !iconName) return;
+    const mesEl = document.querySelector(`#chat .mes[mesid="${lastIdx}"]`);
+    if (!mesEl) return;
     if (
       power_user &&
       power_user.timestamp_model_icon &&
       api === "custom" &&
       model
     ) {
-      const iconName = ihGetIconNameForCustomModel(model);
       if (iconName) {
         const wantedSrc = `/img/${iconName}.svg`;
         const currentIcon = mesEl.querySelector(".timestamp-icon");
@@ -9491,7 +9495,7 @@ function ihApplyStreamingBadges() {
         }
       }
     }
-    if (getSettings().showModelInChat && model) {
+    if (showModel) {
       const badge = mesEl.querySelector(".ih-chat-model-badge");
       if (!badge || badge.textContent !== model) {
         _ihClearModelBadge(mesEl);
@@ -22515,7 +22519,8 @@ const floatingPanelController = {
   _setupDialogDetection() {
     if (this._dialogObserver) return;
     const self = this;
-    this._dialogObserver = new MutationObserver(() => {
+    this._dialogObserver = new MutationObserver((mutations) => {
+      if (!hasDialogChanges(mutations)) return;
       if (self._dialogDebounceTimer) return;
       self._dialogDebounceTimer = setTimeout(() => {
         self._dialogDebounceTimer = null;
@@ -27973,65 +27978,14 @@ function setupGlobalFocusTracking() {
         },
         { capture: true, passive: true },
       );
-
-      doc.querySelectorAll("iframe").forEach((nestedIfr) => {
-        attachToIframe(nestedIfr);
-        nestedIfr.addEventListener("load", () => attachToIframe(nestedIfr));
-      });
-
-      try {
-        const nestedObs = new MutationObserver((muts) => {
-          muts.forEach((m) => {
-            m.addedNodes.forEach((n) => {
-              if (!n.tagName) return;
-              if (n.tagName === "IFRAME") {
-                attachToIframe(n);
-                n.addEventListener("load", () => attachToIframe(n));
-              } else if (n.querySelectorAll) {
-                n.querySelectorAll("iframe").forEach((ifr) => {
-                  attachToIframe(ifr);
-                  ifr.addEventListener("load", () => attachToIframe(ifr));
-                });
-              }
-            });
-          });
-        });
-        if (doc.body) {
-          nestedObs.observe(doc.body, { childList: true, subtree: true });
-        } else {
-          iframe.addEventListener("load", () => {
-            try {
-              if (doc.body) {
-                nestedObs.observe(doc.body, { childList: true, subtree: true });
-              }
-            } catch (e) {}
-          });
-        }
-      } catch (e) {}
     } catch (err) {}
   }
 
-  document.querySelectorAll("iframe").forEach(attachToIframe);
-  document.querySelectorAll("iframe").forEach((ifr) => {
-    ifr.addEventListener("load", () => attachToIframe(ifr));
-  });
-
   try {
-    let _iframeScanTimer = null;
-    const scanAllIframes = () => {
-      document.querySelectorAll("iframe").forEach((ifr) => {
-        attachToIframe(ifr);
-        if (!ifr.__ihLoadBound) {
-          ifr.__ihLoadBound = true;
-          ifr.addEventListener("load", () => attachToIframe(ifr));
-        }
-      });
-    };
-    const obs = new MutationObserver(() => {
-      clearTimeout(_iframeScanTimer);
-      _iframeScanTimer = setTimeout(scanAllIframes, 300);
+    observeIframeDocuments({
+      document,
+      onDocument: (_doc, iframe) => attachToIframe(iframe),
     });
-    obs.observe(document.body, { childList: true, subtree: true });
   } catch (e) {}
 }
 

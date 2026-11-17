@@ -7,6 +7,11 @@ const SOURCE_SUFFIX = 'prompt_manager_popup_entry_form_prompt';
 const FIELDS = ['name', 'role', 'content', 'injection_position', 'injection_depth',
     'injection_order', 'injection_trigger', 'forbid_overrides'];
 const snapshot = value => JSON.stringify(FIELDS.map(field => value[field]));
+const DISCOVERY_SELECTOR = '[id$="prompt_manager_popup"], [id$="prompt_manager_popup_entry_form_prompt"]';
+const setAttribute = (element, name, value) => {
+    value = String(value);
+    if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+};
 
 /** Native Prompt Manager navigation. Existing floating drafts keep their own identities. */
 export function createPresetEntryNavigator({
@@ -18,6 +23,7 @@ export function createPresetEntryNavigator({
     const win = doc.defaultView;
     let running = false, timer = null, frame = 0, observer = null;
     let hooked = null, baseline = null, group = null, busy = false, composing = false;
+    let popupRoot = null;
     const buttons = [];
 
     function context() {
@@ -118,10 +124,14 @@ export function createPresetEntryNavigator({
             }
         }
         const seen = new Set();
+        const promptsById = new Map();
+        for (const prompt of c.prompts) {
+            if (!promptsById.has(prompt.identifier)) promptsById.set(prompt.identifier, prompt);
+        }
         const ordered = ids.flatMap(identifier => {
             if (seen.has(identifier)) return [];
             seen.add(identifier);
-            const prompt = c.prompts.find(item => item.identifier === identifier);
+            const prompt = promptsById.get(identifier);
             const allowed = prompt && (typeof c.manager.isPromptEditAllowed === 'function'
                 ? c.manager.isPromptEditAllowed(prompt) : !prompt.marker);
             return allowed ? [prompt] : [];
@@ -177,7 +187,7 @@ export function createPresetEntryNavigator({
                 className: 'ih-preset-entry-navigation-action',
                 icon: index ? 'fa-chevron-down' : 'fa-chevron-up',
             });
-            button.setAttribute('aria-controls', c.source.id);
+            setAttribute(button, 'aria-controls', c.source.id);
         });
     }
 
@@ -192,6 +202,7 @@ export function createPresetEntryNavigator({
         hook(getManager());
         const c = context();
         if (!c) { group?.remove(); baseline = null; return; }
+        popupRoot = c.popup;
         ensureButtons(c);
         if (!same(c, baseline)) capture(c);
         const nearby = neighbors(c);
@@ -202,16 +213,32 @@ export function createPresetEntryNavigator({
             const title = nearby[index] ? `${label}：${nearby[index].name || nearby[index].identifier}`
                 : c.prompt ? (index ? '已经是最后一个可编辑条目' : '已经是第一个可编辑条目')
                     : '请先在原生面板保存新条目';
-            button.title = title;
-            button.setAttribute('aria-label', title);
-            button.setAttribute('aria-disabled', String(!enabled));
-            button.tabIndex = enabled ? 0 : -1;
+            setAttribute(button, 'title', title);
+            setAttribute(button, 'aria-label', title);
+            setAttribute(button, 'aria-disabled', !enabled);
+            setAttribute(button, 'tabindex', enabled ? 0 : -1);
         });
     }
 
     function scheduleRefresh() {
         if (!running || frame) return;
         frame = win.requestAnimationFrame(() => { frame = 0; refresh(); });
+    }
+
+    function onMutations(records) {
+        if (!running || !isEnabled()) return;
+        const manager = getManager();
+        const source = typeof manager?.configuration?.prefix === 'string'
+            ? doc.getElementById(manager.configuration.prefix + SOURCE_SUFFIX) : null;
+        const roots = [popupRoot, source?.closest('[id$="prompt_manager_popup"]'), manager?.listElement].filter(Boolean);
+        const introduced = node => node.nodeType === 1 &&
+            (roots.some(root => node === root || node.contains(root)) ||
+                node.matches(DISCOVERY_SELECTOR) || node.querySelector(DISCOVERY_SELECTOR));
+        if (records.some(record => {
+            if (group?.contains(record.target)) return false;
+            if (roots.some(root => root === record.target || root.contains(record.target))) return true;
+            return record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].some(introduced);
+        })) scheduleRefresh();
     }
 
     function requireCurrent(b) {
@@ -333,7 +360,7 @@ export function createPresetEntryNavigator({
     function start() {
         if (running) return;
         running = true;
-        observer = new win.MutationObserver(scheduleRefresh);
+        observer = new win.MutationObserver(onMutations);
         observer.observe(doc.body, { childList: true, subtree: true, attributes: true,
             attributeFilter: ['data-pm-prompt', 'data-for', 'data-quickbar-editor-for', 'id'] });
         for (const type of ['compositionstart', 'compositionend']) doc.addEventListener(type, onComposition, true);
@@ -351,7 +378,7 @@ export function createPresetEntryNavigator({
         for (const type of ['compositionstart', 'compositionend']) doc.removeEventListener(type, onComposition, true);
         unhook();
         group?.remove();
-        group = null; buttons.length = 0; baseline = null;
+        group = null; buttons.length = 0; baseline = null; popupRoot = null;
     }
 
     return { start, refresh, navigate, destroy };

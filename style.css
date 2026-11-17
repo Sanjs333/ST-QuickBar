@@ -9270,10 +9270,6 @@ body.ih-no-anim *::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ih-external-entry-row.ih-external-unavailable > label,
-.ih-external-entry-row.ih-external-unavailable > .button-preview {
-  opacity: 0.5;
-}
 .ih-external-scan-btn {
   width: 100%;
   justify-content: center;

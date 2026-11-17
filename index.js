@@ -8646,7 +8646,7 @@ function openHelpPanel() {
     <li><b>入口行为</b>：魔法棒快捷入口转发原按钮点击；扩展面板快捷入口打开扩展抽屉、展开对应顶层面板并定位，不复制或移动原按钮、面板。</li>
     <li><b>图标与快捷键</b>：勾选框控制启用，快捷键输入框沿用现有操作。点击图标选择按钮可更换 FA 图标，选择<q>「无图标」</q>恢复原入口图标；原入口无图标时使用通用图标。</li>
     <li><b>布局与排序</b>：拖动行首手柄可在同类入口内排序；已收录入口可从文件夹、角色专属区域或悬浮面板的按钮选择器中加入。放入文件夹或角色区域后，到对应区域管理；移除快捷入口会清理其布局与快捷键，不影响原插件。</li>
-    <li><b>加载状态</b>：原入口暂未加载、被来源隐藏或禁用时，临时取消勾选并隐藏快捷按钮；恢复后按原来的启用选择显示，手动取消的入口不会自动勾选。排序、布局和快捷键均保留。</li>
+    <li><b>启用与停用</b>：入口按勾选设置显示，不随来源加载状态自动启停。来源暂不可用时，点击会提示；勾选记录、布局和快捷键均保留。</li>
     <li><b>扫描范围</b>：仅识别标准魔法棒入口和顶层扩展面板，不扫描额外顶栏、iframe / 沙盒或面板内的子操作。没有稳定标识且名称重复的入口不会列出；未收录的入口需扫描添加。</li>
 </ul>
 <p class="ih-help-sub">仅隐藏原入口</p>
@@ -21233,7 +21233,7 @@ const floatingPanelController = {
     buttons.forEach((bKey) => {
       if (
         ExternalEntries.findExternalEntry(getSettings(), bKey) &&
-        !ihIsButtonEnabled(bKey)
+        getSettings().buttons?.[bKey] === false
       )
         return;
       if (bKey === "charFolder") {
@@ -21261,7 +21261,6 @@ const floatingPanelController = {
         const fi = parseInt(bKey.replace("folder_", ""));
         const folder = (getSettings().folders || [])[fi];
         if (!folder) return;
-        if (!(folder.buttons || []).some(key => ihIsButtonEnabled(key))) return;
         let iconHtml;
         if (folder.icon)
           iconHtml = `<i class="${ihEscapeAttr(folder.icon)}"></i>`;
@@ -23439,7 +23438,7 @@ function ihGetCharVisibleButtons() {
   const buttons = getSettings().buttons || {};
   const floatingButtons = floatingPanelController.getFloatingButtons();
   return ihGetCharBoundList().filter((bk) => {
-    if (!ihIsButtonEnabled(bk, buttons)) return false;
+    if (buttons[bk] === false) return false;
     if (floatingButtons.has(bk)) return false;
     return true;
   });
@@ -23707,7 +23706,7 @@ function openFolderDropdown(folderBtn, fi, fromFloating) {
     floatingButtons = floatingPanelController.getFloatingButtons();
   }
   (folder.buttons || []).forEach((bKey) => {
-    if (!ihIsButtonEnabled(bKey, buttons)) return;
+    if (buttons[bKey] === false) return;
     if (floatingButtons.has(bKey)) return;
     let displayHtml = getButtonDisplayHtml(bKey);
     const label = getButtonLabel(bKey);
@@ -24019,7 +24018,7 @@ function toolbarHasVisibleButtons() {
       if (buttons[key] === false) continue;
       if (floatingButtons.has(key)) continue;
       const visibleInFolder = (folder.buttons || []).some((bk) => {
-        if (!ihIsButtonEnabled(bk, buttons)) return false;
+        if (buttons[bk] === false) return false;
         if (floatingButtons.has(bk)) return false;
         return true;
       });
@@ -24028,7 +24027,7 @@ function toolbarHasVisibleButtons() {
     }
     if (folderedButtons.has(key)) continue;
     if (floatingButtons.has(key)) continue;
-    if (ihIsButtonEnabled(key, buttons)) return true;
+    if (buttons[key] !== false) return true;
   }
   return false;
 }
@@ -24074,7 +24073,7 @@ function buildToolbar() {
     if (floatingButtons.has(folderKey)) return;
 
     const visibleButtonsInFolder = (folder.buttons || []).filter((bKey) => {
-      if (!ihIsButtonEnabled(bKey, buttons)) return false;
+      if (buttons[bKey] === false) return false;
       if (floatingButtons.has(bKey)) return false;
       return true;
     });
@@ -24165,7 +24164,7 @@ function buildToolbar() {
       const btnId = getButtonIdFromKey(key);
       if (btnId) {
         const btn = toolbar.find(`#${btnId}`);
-        if (btn.length && ihIsButtonEnabled(key, buttons)) {
+        if (btn.length && buttons[key] !== false) {
           if (isInputButton(key)) row1.append(btn);
           else row2.append(btn);
           btn.show();
@@ -24198,7 +24197,7 @@ function buildToolbar() {
         const btn = toolbar.find(`#${btnId}`);
         if (btn.length) {
           toolbar.append(btn);
-          btn.toggle(ihIsButtonEnabled(key, buttons));
+          btn.toggle(buttons[key] !== false);
         }
       }
     });
@@ -24235,12 +24234,11 @@ function toggleFolderCollapse(fi) {
 
 function makeSettingsRow(key, opts) {
   const settings = getSettings();
-  const isChecked = ihIsButtonEnabled(key, settings.buttons) ? "checked" : "";
+  const isChecked = settings.buttons[key] !== false ? "checked" : "";
   const shortcutVal = settings.shortcuts[key] || "";
   const displayHtml = opts.displayHtml || getButtonDisplayHtml(key);
   const label = ihEscapeHtml(opts.label || getButtonLabel(key));
   const external = ExternalEntries.findExternalEntry(settings, key);
-  const unavailable = external && !ihIsExternalEntryAvailable(key);
   let extraBtns = "";
   if (opts.isCustom) {
     extraBtns = `
@@ -24265,7 +24263,7 @@ function makeSettingsRow(key, opts) {
   const row = $(`
         <div class="integrated-button-row${extraClass}" data-button-key="${key}" ${opts.isCustom ? 'data-custom="true"' : ""} ${opts.isChild ? 'data-is-child="true"' : ""}>
             <span class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></span>
-            <input id="enable_${key}_btn" type="checkbox" ${isChecked} ${unavailable ? "disabled" : ""} />
+            <input id="enable_${key}_btn" type="checkbox" ${isChecked} />
             <div class="button-preview">${displayHtml}</div>
             <label for="enable_${key}_btn">${label}</label>
             ${extraBtns}
@@ -24274,10 +24272,6 @@ function makeSettingsRow(key, opts) {
         </div>
     `);
   row.find(`#enable_${key}_btn`).on("change", function () {
-    if (external && !ihIsExternalEntryAvailable(key)) {
-      ihSyncExternalEntryCheckboxes();
-      return;
-    }
     getSettings().buttons[key] = $(this).prop("checked");
     saveSettingsDebounced();
     updateButtonVisibilityDebounced();
@@ -24288,7 +24282,7 @@ function makeSettingsRow(key, opts) {
     }
   });
   if (external) {
-    ihUpdateExternalEntryRow(row[0]);
+    row.find("label").attr("title", external.label);
     row.find(".ih-external-icon-btn").on("click", async function (e) {
       e.stopPropagation();
       const icon = await pickFaIcon();
@@ -25949,7 +25943,7 @@ function updateButtonVisibility() {
     if (btnId) $(`#${btnId}`).hide();
   });
   const allHidden =
-    Object.keys(buttons).every((k) => !ihIsButtonEnabled(k, buttons)) &&
+    Object.keys(buttons).every((k) => buttons[k] === false) &&
     !ihScriptButtons.list("toolbar").length;
   if (!settings.enabled || allHidden) {
     $("#input_helper_toolbar").addClass("input-helper-hidden");
@@ -26016,42 +26010,6 @@ function ihPublishScriptButtonApi() {
 // Source visibility is based on an actually reachable shortcut, not merely
 // membership in saved settings. Closed folders and a collapsed floating panel
 // still count when their opener is present and enabled.
-let ihAvailableExternalEntryKeys = null;
-function ihIsExternalEntryAvailable(key) {
-  const entry = ExternalEntries.findExternalEntry(getSettings(), key);
-  if (!entry) return false;
-  return ihAvailableExternalEntryKeys
-    ? ihAvailableExternalEntryKeys.has(key)
-    : !!ExternalEntries.resolveExternalEntry(document, entry);
-}
-function ihIsButtonEnabled(key, buttons = getSettings().buttons) {
-  if (buttons?.[key] === false) return false;
-  if (typeof key !== "string" || !key.startsWith("external_")) return true;
-  return ihIsExternalEntryAvailable(key);
-}
-function ihUpdateExternalEntryRow(row) {
-  const key = row.dataset.buttonKey;
-  const entry = ExternalEntries.findExternalEntry(getSettings(), key);
-  if (!entry) return;
-  const available = ihIsExternalEntryAvailable(key);
-  const checkbox = row.querySelector(`input[id="enable_${key}_btn"]`);
-  if (!checkbox) return;
-  checkbox.checked = available && getSettings().buttons?.[key] !== false;
-  checkbox.disabled = !available;
-  checkbox.title = available
-    ? "显示此快捷入口"
-    : "入口暂未加载或不可用，已保留启用设置；恢复后按原设置启用";
-  row.classList.toggle("ih-external-unavailable", !available);
-  row.querySelector("label")?.setAttribute("title", available ? entry.label : `${entry.label}：${checkbox.title}`);
-}
-function ihSyncExternalEntryCheckboxes() {
-  document.querySelectorAll(".ih-external-entry-row").forEach(ihUpdateExternalEntryRow);
-}
-function ihOnExternalEntryAvailabilityChange(availableKeys) {
-  ihAvailableExternalEntryKeys = availableKeys;
-  ihSyncExternalEntryCheckboxes();
-  ihScheduleScriptButtonRefresh();
-}
 function ihIsShortcutControlAvailable(node) {
   if (!node?.isConnected) return false;
   for (let parent = node; parent; parent = parent.parentElement) {
@@ -26084,7 +26042,7 @@ function ihIsFloatingShortcutReachable(key) {
   if (
     !settings.enabled ||
     !fp?.enabled ||
-    !ihIsButtonEnabled(key, settings.buttons) ||
+    settings.buttons?.[key] === false ||
     !(fp.buttons || []).includes(key)
   )
     return false;
@@ -26133,7 +26091,7 @@ function ihGetReachableExternalEntryKeys() {
   const floating = floatingPanelController.getFloatingButtons();
   const charVisible = new Set(ihGetCharVisibleButtons());
   for (const entry of ExternalEntries.getExternalEntries(settings)) {
-    if (!ihIsButtonEnabled(entry.key, settings.buttons)) continue;
+    if (settings.buttons?.[entry.key] === false) continue;
     if (ihIsShortcutKeyReachable(entry.key)) {
       reachable.add(entry.key);
       continue;
@@ -26163,7 +26121,6 @@ const ihSourceVisibility = ExternalEntries.createSourceVisibilityController({
   doc: document,
   getSettings,
   getReachableKeys: ihGetReachableExternalEntryKeys,
-  onAvailabilityChange: ihOnExternalEntryAvailabilityChange,
   onChange: () => window.dispatchEvent(new Event("quickbar:changed")),
   onError: (error) =>
     console.warn(
@@ -26186,12 +26143,11 @@ function ihPreserveExternalEntryOrder(rootOrder) {
 
 function ihSyncExternalToolbarButtons(toolbar) {
   const entries = ExternalEntries.getExternalEntries(getSettings());
-  const keys = new Set(entries.filter(entry => ihIsButtonEnabled(entry.key)).map((entry) => entry.key));
+  const keys = new Set(entries.map((entry) => entry.key));
   toolbar.find(".ih-external-toolbar-btn").each(function () {
     if (!keys.has(this.dataset.buttonKey)) $(this).remove();
   });
   for (const entry of entries) {
-    if (!keys.has(entry.key)) continue;
     const id = getButtonIdFromKey(entry.key);
     let button = toolbar.find(`#${id}`);
     if (!button.length) {
@@ -26280,7 +26236,6 @@ function ihOnOriginalEntryVisibilityChange() {
 
 function ihRefreshExternalEntryUi() {
   saveSettingsDebounced();
-  ihSourceVisibility.sync();
   closeAllFolderDropdowns();
   renderSettingsPanel();
   renderFolderSettings();

@@ -41,6 +41,12 @@ import {
 import { createPresetEntryNavigator } from "./preset-entry-navigation.js";
 import { hasDialogChanges, observeIframeDocuments } from "./dom-observers.js";
 import { Popup, POPUP_TYPE, POPUP_RESULT } from "../../../popup.js";
+import {
+  createTagCleanupManager,
+  normalizeTagCleanupSettings,
+  applyTagCleanupPlan,
+  createTagCleanupChatSaver,
+} from "./tag-cleanup.js";
 
 const openCharacterChat = SillyTavernScript.openCharacterChat;
 const executeSlashCommandsWithOptions = (...args) => {
@@ -604,6 +610,8 @@ const defaultSettings = {
   searchTreeView: true,
   lastMgrTab: "hide",
   mgrMaximized: false,
+  tagCleanupProfiles: [],
+  tagCleanupProfileId: "",
   showModelInChat: false,
   disableSmoothScroll: false,
   floatingPanel: {
@@ -7442,7 +7450,7 @@ function openBeautyPromptPanel() {
   }
 }
 
-const EXTENSION_VERSION = "3.3.9";
+const EXTENSION_VERSION = "3.4.0";
 
 const EXTENSION_FOLDER_NAME = (() => {
   try {
@@ -8278,9 +8286,9 @@ const CHANGELOG_VERSION = EXTENSION_VERSION;
 const CHANGELOG_HTML = `
 <h4 style="margin:14px 0 6px;font-size:13px;color:var(--SmartThemeQuoteColor,cornflowerblue);">v${CHANGELOG_VERSION}</h4>
 <ul style="margin:4px 0 14px;padding-left:18px;font-size:12px;line-height:1.75;">
-  <li><b>取色器新增全屏取色与复制</b>，支持桌面版 Chrome 等浏览器。</li>
-  <li><b>优化颜色扫描与编辑</b>：光标位于编辑框时，打开取色器自动扫描；也可点击查找图标手动扫描。列表色值支持直接编辑，修改后自动写回原文。</li>
-  <li><b>外部快捷入口随加载状态自动启停</b>：来源不可用时隐藏，恢复后按原设置显示。保留勾选记录、布局和快捷键，手动关闭的入口不会自动启用。</li>
+  <li><b>消息管理新增标签及内容删除</b>：支持按楼层范围或多选楼层删除指定起止标记及其中内容，可同时处理其他备选回复，清理后保留消息楼层。</li>
+  <li><b>新增标签配置与删除预览</b>：支持多规则配置及新建、编辑、保存、删除；预览可切换查看删除标记与清理后内容，并逐条浏览。</li>
+  <li><b>完善保存反馈并更新使用说明</b>：沿用删除确认设置与 5 分钟撤回；聊天或正文变化时需重新预览，保存结果未确认时可重试保存。</li>
 </ul>
 `;
 
@@ -8536,6 +8544,12 @@ function openHelpPanel() {
 
 <p class="ih-help-sub">删除</p>
 <p>可勾选任意多条消息（包括不连续楼层），或按范围批量删除。删除前将自动保存快照，5 分钟内可通过<q>「撤回删除」</q>恢复。</p>
+<p><b>标签及内容</b>：在删除页切换到<q>「标签及内容」</q>，选择配置并勾选楼层后，点击底部的删除按钮；也可填写范围后点击旁边的<q>「删除」</q>，单楼的起止填写同一数字。清理后保留消息与楼层，即使正文为空。</p>
+<p><b>标签配置</b>：加号新建配置，铅笔编辑或重命名，垃圾桶删除。每份配置可添加多条规则，填写名称和起止标记后，点击软盘按钮或按 Ctrl/⌘+S 保存，配置跨刷新保留。编辑期间收起消息区域，保存或取消后恢复；放弃未保存的修改时会提示。</p>
+<p><b>匹配规则</b>：起始和结束标记按原文精确匹配，包括大小写、空格与换行，例如 &lt;think&gt; 和 &lt;/think&gt;。每条规则删除两端标记及其中全部内容，支持嵌套与多处匹配；不完整的标记及其保护范围会保留，并显示跳过数量。</p>
+<p><b>备选回复</b>：默认处理各楼当前显示的回复。开启配置下方的<q>「处理其他备选」</q>开关后，一并处理所选楼层的其他备选；当前正文与当前备选同步更新。</p>
+<p><b>预览更改</b>：点击底部的<q>「预览更改」</q>，在<q>「删除标记 / 清理后」</q>之间切换，分页查看待处理的楼层与备选内容。待删除部分以红色背景和删除线标出；列表中的眼睛按钮也可预览已选且命中的楼层。</p>
+<p><b>保存与撤回</b>：沿用删除确认设置，执行前自动保存快照，5 分钟内可通过<q>「撤回删除」</q>还原。聊天或正文变化时需重新预览；保存结果未确认时，可点击<q>「重试保存」</q>或撤回修改。</p>
 
 <p class="ih-help-sub">移动</p>
 <p>勾选要移动的消息（可多条，包括不连续楼层），输入目标楼层号后点击移动，选中的消息将整体转移至目标位置。移动前自动保存快照，可通过<q>「撤回删除」</q>恢复。</p>
@@ -10653,6 +10667,27 @@ function openHideManagerPanel() {
   document.removeEventListener("keydown", escHandler, true);
   let _mgrEscapeHandler = null;
   let _mgrClosed = false;
+  let _tagCleanupManager = null;
+  const _tagCleanupSaver = createTagCleanupChatSaver({
+    getContext: () => SillyTavern.getContext(),
+    getRequestHeaders,
+    saveCurrentChat: () =>
+      typeof SillyTavernScript.saveChatConditional === "function"
+        ? SillyTavernScript.saveChatConditional()
+        : ihSaveCurrentChat(),
+    isChatSaving: () => !!SillyTavernScript.isChatSaving,
+    isGenerating: () =>
+      typeof SillyTavernScript.isGenerating === "function"
+        ? SillyTavernScript.isGenerating()
+        : sendStopController._isGeneratingNow(),
+  });
+  const _tagCleanupContextKey = () => _tagCleanupSaver.captureBinding()?.key || "";
+  const _tagCleanupBusy = () =>
+    _tagCleanupSaver.isBusy() ||
+    !!SillyTavernScript.isChatSaving ||
+    (typeof SillyTavernScript.isGenerating === "function"
+      ? SillyTavernScript.isGenerating()
+      : sendStopController._isGeneratingNow());
   let total = chat.length;
   let _mgrMaximized = getSettings().mgrMaximized === true;
 
@@ -10824,12 +10859,16 @@ function openHideManagerPanel() {
       </div>
 
       <div class="ih-mgr-tab-panel" data-panel="delete" style="display:none;">
+        <div class="ih-tc-modes" role="group" aria-label="删除对象">
+          <button type="button" class="ih-tc-mode ih-tc-mode-active" data-tc-mode="messages" aria-pressed="true"><i class="fa-solid fa-trash"></i><span>整条消息</span></button>
+          <button type="button" class="ih-tc-mode" data-tc-mode="tags" aria-pressed="false"><i class="fa-solid fa-tags"></i><span>标签及内容</span></button>
+        </div>
         <div class="ih-mgr-status ih-mgr-tip">
           <i class="fa-solid fa-circle-info"></i>
-          <span>勾选要删除的消息，或用范围选择批量框选</span>
+          <span id="ih_tc_delete_tip">勾选要删除的消息，或用范围选择批量框选</span>
         </div>
 
-        <div class="ih-mgr-inline-row ih-mgr-inline-row-oneline">
+        <div class="ih-mgr-inline-row ih-mgr-inline-row-oneline ih-tc-range-row">
           <label class="ih-mgr-inline-label">范围删除</label>
           <input type="number" id="ih_mgr_del_from" class="ih-mgr-input" placeholder="从" min="0" max="${total - 1}" />
           <span class="ih-mgr-arrow">→</span>
@@ -10837,6 +10876,41 @@ function openHideManagerPanel() {
           <button class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon ih-mgr-input-clear-btn" title="清除输入" data-clear-targets="ih_mgr_del_from,ih_mgr_del_to"><i class="fa-solid fa-eraser"></i></button>
           <div class="ih-mgr-inline-actions">
             <button class="ih-mgr-btn ih-mgr-btn-warn" id="ih_mgr_del_range_confirm"><i class="fa-solid fa-trash"></i> 删除</button>
+          </div>
+        </div>
+        <div class="ih-tc-panel" style="display:none;">
+          <div class="ih-tc-profile-row">
+            <label class="ih-mgr-inline-label" id="ih_tc_profile_label" for="ih_tc_profile">标签配置</label>
+            <select class="ih-mgr-input ih-tc-profile-select" id="ih_tc_profile" aria-label="标签配置"></select>
+            <input type="text" class="ih-mgr-input ih-tc-profile-select" id="ih_tc_config_name" aria-label="标签配置名称" placeholder="配置名称" autocomplete="off" required style="display:none;">
+            <div class="ih-tc-profile-actions">
+              <button type="button" class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_tc_new" title="新建配置"><i class="fa-solid fa-plus"></i></button>
+              <button type="button" class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_tc_edit" title="编辑 / 重命名配置"><i class="fa-solid fa-pen"></i></button>
+              <button type="button" class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon" id="ih_tc_delete" title="删除配置"><i class="fa-solid fa-trash"></i></button>
+              <button type="button" class="ih-mgr-btn ih-mgr-btn-mini ih-mgr-btn-icon ih-mgr-btn-ok" id="ih_tc_config_save" title="保存配置" disabled><i class="fa-solid fa-floppy-disk"></i></button>
+            </div>
+          </div>
+          <div class="ih-tc-options-row">
+            <div class="ih-tc-rules-summary" id="ih_tc_rules_summary" role="list" aria-label="标签规则预览"></div>
+            <label class="ih-tc-swipe-option" title="同时处理每个楼层的其他备选回复">
+              <span>处理其他备选</span>
+              <span class="ih-toggle">
+                <input type="checkbox" id="ih_tc_include_swipes" role="switch" aria-label="同时处理其他备选回复">
+                <span class="ih-toggle-slider" aria-hidden="true"></span>
+              </span>
+            </label>
+          </div>
+          <div class="ih-tc-config-inline" style="display:none;">
+            <div class="ih-tc-config-rules"></div>
+            <div class="ih-tc-config-actions">
+              <button type="button" class="ih-mgr-btn ih-mgr-btn-mini" id="ih_tc_add_rule"><i class="fa-solid fa-plus"></i> 添加规则</button>
+              <span class="ih-mgr-hint-inline ih-tc-dirty" role="status"></span>
+              <button type="button" class="ih-mgr-btn ih-mgr-btn-mini" id="ih_tc_config_cancel">取消</button>
+            </div>
+            <div class="ih-mgr-hint-inline ih-tc-status" id="ih_tc_config_error" role="status"></div>
+          </div>
+          <div class="ih-mgr-status ih-tc-status ih-tc-plan-status" role="status" style="display:none;">
+            <i class="fa-solid fa-circle-info"></i><span id="ih_tc_status_text"></span>
           </div>
         </div>
       </div>
@@ -11094,6 +11168,7 @@ function openHideManagerPanel() {
         <div class="ih-bp-view" id="ih_mgr_branch_preview" style="display:none;"></div>
       </div>
       <div class="ih-me-view" id="ih_mgr_edit_view" style="display:none;"></div>
+      <div class="ih-me-view" id="ih_mgr_tag_cleanup_view" style="display:none;"></div>
       <div class="ih-mgr-shared-list-area">
         <div class="ih-mgr-toolbar">
           <span class="ih-mgr-count" id="ih_mgr_count">已选 0 条</span>
@@ -11155,6 +11230,11 @@ function openHideManagerPanel() {
 
         <div class="ih-mgr-footer-actions" data-footer="delete" style="display:none;">
           <button class="ih-mgr-btn ih-mgr-btn-warn ih-mgr-btn-primary" id="ih_mgr_del_confirm"><i class="fa-solid fa-trash"></i> 删除选中</button>
+          <div class="ih-tc-footer" style="display:none;">
+            <button type="button" class="ih-mgr-btn" id="ih_tc_preview" disabled><i class="fa-solid fa-eye"></i> 预览更改</button>
+            <button type="button" class="ih-mgr-btn" id="ih_tc_retry" style="display:none;"><i class="fa-solid fa-rotate"></i> 重试保存</button>
+            <button type="button" class="ih-mgr-btn ih-mgr-btn-warn ih-mgr-btn-primary" id="ih_tc_apply" disabled><i class="fa-solid fa-trash"></i> 删除标签及内容</button>
+          </div>
         </div>
       </div>
 
@@ -11416,6 +11496,7 @@ function openHideManagerPanel() {
           </span>
           <span class="ih-mgr-msg-sender">${sender}</span>
           ${previewHtml}
+          ${_tagCleanupManager?.rowBadge(floor) || ""}
           <button class="ih-mgr-msg-edit" data-floor="${floor}" title="查看 / 编辑此楼层"><i class="fa-solid fa-eye"></i></button>
           ${ghost}
         </div>
@@ -11589,6 +11670,7 @@ function openHideManagerPanel() {
   }
 
   function updateCount() {
+    _tagCleanupManager?.refresh();
     const a = _getActiveSel();
     content.find("#ih_mgr_count").text(`已选 ${a.set.size} 条`);
     content.find("#ih_mgr_jump_floor").attr("max", Math.max(0, a.total - 1));
@@ -11641,6 +11723,7 @@ function openHideManagerPanel() {
 
   let _mgrChatSyncTimer = null;
   const _mgrSyncChatLength = () => {
+    _tagCleanupManager?.invalidate();
     clearTimeout(_mgrChatSyncTimer);
     _mgrChatSyncTimer = setTimeout(() => {
       if (
@@ -11698,6 +11781,12 @@ function openHideManagerPanel() {
     event_types.MESSAGE_RECEIVED,
     event_types.MESSAGE_SENT,
     event_types.MESSAGE_DELETED,
+    event_types.MESSAGE_EDITED,
+    event_types.MESSAGE_UPDATED,
+    event_types.MESSAGE_SWIPED,
+    event_types.GENERATION_STARTED,
+    event_types.GENERATION_ENDED,
+    event_types.GENERATION_STOPPED,
   ].filter(Boolean);
   _mgrChatEvents.forEach((ev) => eventSource.on(ev, _mgrSyncChatLength));
   let _mgrKeepOnChatChange = false;
@@ -11706,6 +11795,7 @@ function openHideManagerPanel() {
     _mgrCurChatFile = String(SillyTavern.getContext().getCurrentChatId() || "");
   } catch (e) {}
   const _mgrOnChatChanged = () => {
+    _tagCleanupManager?.invalidate();
     let _newChatFile = "";
     try {
       _newChatFile = String(SillyTavern.getContext().getCurrentChatId() || "");
@@ -11729,6 +11819,7 @@ function openHideManagerPanel() {
   const closeDialog = () => {
     if (_mgrClosed) return;
     _mgrClosed = true;
+    _tagCleanupManager?.destroy();
     sharedState._transferSourceLoadId++;
     sharedState._transferTargetLoadId++;
     sharedState._transferChatListLoadId++;
@@ -11779,7 +11870,15 @@ function openHideManagerPanel() {
     if (_mgrEscapeHandler) document.removeEventListener("keydown", _mgrEscapeHandler, true);
     overlay.remove();
   };
-  overlay[0]._ihCloseOverlay = closeDialog;
+  const requestCloseDialog = async () => {
+    if (_mgrClosed) return false;
+    if (_tagCleanupManager && !(await _tagCleanupManager.confirmClose())) return false;
+    if (_mgrClosed) return false;
+    closeDialog();
+    return true;
+  };
+  overlay[0]._ihCloseOverlay = () =>
+    getSettings().enabled === false ? closeDialog() : requestCloseDialog();
   _mgrEscapeHandler = (e) => {
     if (e.key !== "Escape" || _mgrClosed || document.querySelector("dialog[open]")) return;
     const overlays = Array.from(document.querySelectorAll(".ih-dialog-overlay"));
@@ -11791,15 +11890,17 @@ function openHideManagerPanel() {
       _closeTransferDropdown();
       _closeSearchS2Dropdown();
       openDropdown.trigger("focus");
+    } else if (_tagCleanupManager?.hasView() || _tagCleanupManager?.isEditingProfile()) {
+      _tagCleanupManager.requestBack();
     } else {
-      closeDialog();
+      requestCloseDialog();
     }
   };
   document.addEventListener("keydown", _mgrEscapeHandler, true);
   overlay.off("click").on("click", (e) => {
-    if (e.target === overlay[0]) closeDialog();
+    if (e.target === overlay[0]) requestCloseDialog();
   });
-  content.find("#ih_mgr_close").on("click", closeDialog);
+  content.find("#ih_mgr_close").on("click", requestCloseDialog);
   function _mgrExpand() {
     if (_mgrClosed) return;
     content.show();
@@ -12160,7 +12261,7 @@ function openHideManagerPanel() {
   });
   content.on("click", ".ih-mgr-tab", function () {
     const tab = $(this).data("tab");
-    if (sharedState.transferBusy) return;
+    if (sharedState.transferBusy || _tagCleanupManager?.isBusy()) return;
     const previousUpperMessages = _getUpperMessages();
     sharedState.scrollTop = vlistEl.scrollTop;
     sharedState.activeTab = tab;
@@ -12232,14 +12333,14 @@ function openHideManagerPanel() {
   content.on("click", ".ih-mgr-msg-jump", async function (e) {
     e.stopPropagation();
     e.preventDefault();
-    if (sharedState.transferBusy) return;
+    if (sharedState.transferBusy || _tagCleanupManager?.isBusy()) return;
     const floor = parseInt($(this).data("floor"));
     if (isNaN(floor)) return;
     if (_hasExternalTransferSource()) {
       await _openTransferChatAt(_getTransferSourceValue(), floor);
       return;
     }
-    closeDialog();
+    if (!(await requestCloseDialog())) return;
     const chatEl = document.getElementById("chat");
     if (!chatEl) return;
     const mesEl = chatEl.querySelector(`.mes[mesid="${floor}"]`);
@@ -12258,6 +12359,7 @@ function openHideManagerPanel() {
     if (sharedState.transferBusy) return;
     const floor = parseInt($(this).data("floor"));
     if (isNaN(floor)) return;
+    if (_tagCleanupManager?.openFloorPreview(floor)) return;
     _meOpen(_hasExternalTransferSource() ? _getTransferSourceValue() : "", floor, null);
   });
 
@@ -12540,6 +12642,108 @@ function openHideManagerPanel() {
   bindRangeSelectInput("ih_mgr_range_from", "ih_mgr_range_to");
   bindRangeSelectInput("ih_mgr_del_from", "ih_mgr_del_to");
 
+  _tagCleanupManager = createTagCleanupManager({
+    $,
+    content,
+    getSettings,
+    saveSettings: saveSettingsDebounced,
+    getMessages: () => chat,
+    getSelection: () => sharedState.selected,
+    getContextKey: _tagCleanupContextKey,
+    captureBinding: () => _tagCleanupSaver.captureBinding(),
+    isActive: () => sharedState.activeTab === "delete",
+    isBusy: _tagCleanupBusy,
+    confirmAction: ihConfirmDialog,
+    onPlanChange: scheduleRender,
+    onViewChange: () => {
+      _mgrSyncViewportSpace();
+      _scheduleMgrToolbarHeightSync();
+    },
+    protectIcons: () => {
+      syncDialogTheme(content[0]);
+      generateFaIconProtectionCSS();
+    },
+    notify: (tone, message) =>
+      toastr[tone](message, "", { timeOut: tone === "error" ? 5000 : 2500 }),
+    commit: async (plan, retry) => {
+      let applied = !!plan.appliedChanges;
+      try {
+        if (!retry) {
+          if (_tagCleanupBusy() || !_tagCleanupSaver.matchesBinding(plan.binding)) {
+            return { ok: false, applied: false, reason: "聊天正在生成、保存或已切换" };
+          }
+          const previousSnapshot = chatUndoManager._snapshots.at(-1);
+          chatUndoManager.save();
+          if (chatUndoManager._snapshots.at(-1) === previousSnapshot) {
+            return { ok: false, applied: false, reason: "无法记录撤回快照，操作已取消" };
+          }
+          const changes = applyTagCleanupPlan(plan, chat, _tagCleanupContextKey());
+          plan.appliedChanges = changes.map(({ floor, message }) => ({
+            floor,
+            message: JSON.parse(JSON.stringify(message)),
+          }));
+          applied = true;
+          ihMarkChatTainted();
+          for (const { floor } of changes) {
+            if (!_tagCleanupSaver.matchesBinding(plan.binding)) break;
+            try {
+              await eventSource.emit(event_types.MESSAGE_EDITED, floor);
+            } catch (error) {
+              console.warn("快捷工具栏: 标签清理编辑事件派发失败", error);
+            }
+          }
+          if (_tagCleanupSaver.matchesBinding(plan.binding) &&
+              chat.length === plan.length &&
+              changes.every(({ floor, message }) => chat[floor] === message)) {
+            plan.appliedChanges = changes.map(({ floor }) => ({
+              floor,
+              message: JSON.parse(JSON.stringify(chat[floor])),
+            }));
+          }
+        }
+        if (!plan.appliedChanges?.length) {
+          return { ok: false, applied, reason: "待保存的标签清理已失效" };
+        }
+        if (_tagCleanupSaver.matchesBinding(plan.binding)) {
+          const ctx = SillyTavern.getContext();
+          for (const { floor } of plan.appliedChanges) {
+            try {
+              ctx.updateMessageBlock?.(floor, chat[floor]);
+            } catch (error) {
+              console.warn("快捷工具栏: 标签清理显示更新失败", error);
+            }
+          }
+          sharedState.tokenCache.clear();
+          refreshList();
+        }
+        _ihDeleteSearchCache(plan.binding.chatId + ".jsonl");
+        const result = await _tagCleanupSaver.saveAndVerify({
+          binding: plan.binding,
+          expectedLength: plan.length,
+          changes: plan.appliedChanges,
+        });
+        if (result.ok && !result.contextChanged && !result.liveChanged) {
+          for (const { floor } of plan.appliedChanges) {
+            if (!_tagCleanupSaver.matchesBinding(plan.binding)) break;
+            try {
+              await eventSource.emit(event_types.MESSAGE_UPDATED, floor);
+            } catch (error) {
+              console.warn("快捷工具栏: 标签清理更新事件派发失败", error);
+            }
+          }
+          if (_tagCleanupSaver.matchesBinding(plan.binding)) {
+            chatUndoManager.updateStableSnapshot(true);
+            if (sharedState.showToken) computeTotalTokens();
+          }
+        }
+        return { ...result, applied };
+      } catch (error) {
+        console.error("快捷工具栏: 标签清理失败", error);
+        return { ok: false, applied, reason: error.message || "标签清理保存失败" };
+      }
+    },
+  });
+
   function getSortedSelected() {
     return Array.from(sharedState.selected).sort((a, b) => a - b);
   }
@@ -12697,6 +12901,14 @@ function openHideManagerPanel() {
     const lo = Math.min(f, t);
     const hi = Math.max(f, t);
     const count = hi - lo + 1;
+    if (_tagCleanupManager?.isTagMode()) {
+      if (_tagCleanupManager.isBusy()) return;
+      sharedState.selected.clear();
+      for (let floor = lo; floor <= hi; floor++) sharedState.selected.add(floor);
+      refreshList();
+      await _tagCleanupManager.deleteSelected();
+      return;
+    }
     if (getSettings().confirmDangerousActions) {
       if (!confirm(`确定删除楼层 ${lo} 到 ${hi} 共 ${count} 条消息吗？`))
         return;
@@ -12718,6 +12930,7 @@ function openHideManagerPanel() {
   });
 
   content.find("#ih_mgr_del_confirm").on("click", async () => {
+    if (_tagCleanupManager?.isTagMode()) return;
     const selected = getSortedSelected();
     if (selected.length === 0) {
       toastr.warning("还没选中任何消息哦", "", { timeOut: 1000 });
@@ -15069,7 +15282,7 @@ function openHideManagerPanel() {
     const host = content.find("#ih_mgr_edit_view")[0];
     if (!host) return;
     const ev = sharedState.editView;
-    content.toggleClass("ih-me-active", !!ev);
+    content.toggleClass("ih-me-active", !!ev || !!_tagCleanupManager?.hasView());
     if (!ev) {
       host.style.display = "none";
       host.innerHTML = "";
@@ -27373,6 +27586,7 @@ async function loadSettings() {
   }
   const s = getSettings();
   if (!s.buttons) s.buttons = {};
+  normalizeTagCleanupSettings(s);
   for (const [key, val] of Object.entries(defaultSettings.buttons)) {
     if (s.buttons[key] === undefined) s.buttons[key] = val;
   }
